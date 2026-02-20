@@ -1,0 +1,47 @@
+{
+  "name": "agentforge",
+  "version": "0.1.0",
+  "description": "Multi-agent orchestration platform with cost control, quota management, and intelligent model routing",
+  "main": "src/index.js",
+  "type": "module",
+  "bin": {
+    "agentforge": "./src/cli.js"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test": "node --test tests/**/*.test.js",
+    "test:watch": "node --test --watch tests/**/*.test.js",
+    "lint": "eslint src/"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "orchestration",
+    "llm",
+    "multi-agent",
+    "claude",
+    "gemini",
+    "ollama",
+    "cost-control"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@google/generative-ai": "^0.21.0",
+    "better-sqlite3": "^11.0.0",
+    "commander": "^12.0.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.21.0",
+    "js-yaml": "^4.1.0",
+    "octokit": "^4.0.0",
+    "openai": "^4.70.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "eslint": "^9.0.0"
+  }
+}

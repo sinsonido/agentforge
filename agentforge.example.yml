@@ -1,0 +1,222 @@
+# agentforge.yml — Full configuration reference
+# Copy to agentforge.yml and edit with your values
+
+project:
+  name: "My Project"
+  budget: 50.00            # Max spend in USD
+  currency: USD
+
+# ─── PROVIDERS ─────────────────────────────────────────
+# Configure each AI provider with API keys and quota limits.
+# Keys can reference environment variables with ${VAR} syntax.
+
+providers:
+  anthropic:
+    enabled: true
+    api_key: ${ANTHROPIC_API_KEY}
+    endpoint: https://api.anthropic.com  # Override for proxies
+    quota:
+      max_requests_per_minute: 100
+      max_tokens_per_minute: 400000
+      auto_pause: true       # Pause agents when quota exhausted
+      auto_resume: true      # Resume when quota window resets
+
+  google:
+    enabled: true
+    api_key: ${GOOGLE_AI_KEY}
+    endpoint: https://generativelanguage.googleapis.com
+    quota:
+      max_requests_per_minute: 60
+      auto_pause: true
+      auto_resume: true
+
+  openai:
+    enabled: false
+    api_key: ${OPENAI_API_KEY}
+    quota:
+      max_requests_per_minute: 500
+
+  deepseek:
+    enabled: true
+    api_key: ${DEEPSEEK_API_KEY}
+    endpoint: https://api.deepseek.com
+    quota:
+      max_requests_per_minute: 120
+
+  moonshot:
+    enabled: false
+    api_key: ${MOONSHOT_API_KEY}
+    endpoint: https://api.moonshot.cn
+
+  openrouter:
+    enabled: false
+    api_key: ${OPENROUTER_API_KEY}
+    endpoint: https://openrouter.ai/api
+    quota:
+      max_spend_per_day: 10.00  # Dollar limit
+
+  ollama:
+    enabled: true
+    endpoint: http://localhost:11434
+    # No API key needed. No quota — local is unlimited.
+
+# ─── MODELS ────────────────────────────────────────────
+# Model registry with tier classification and pricing.
+# Pricing is per 1M tokens (input / output).
+
+models:
+  claude-opus-4:
+    provider: anthropic
+    tier: 1
+    cost_in: 15.00
+    cost_out: 75.00
+    context: 200000
+
+  claude-sonnet-4:
+    provider: anthropic
+    tier: 2
+    cost_in: 3.00
+    cost_out: 15.00
+    context: 200000
+
+  claude-haiku-4:
+    provider: anthropic
+    tier: 3
+    cost_in: 0.25
+    cost_out: 1.25
+    context: 200000
+
+  gemini-2.5-pro:
+    provider: google
+    tier: 1
+    cost_in: 1.25
+    cost_out: 10.00
+    context: 1000000         # 1M context window
+
+  gemini-2.5-flash:
+    provider: google
+    tier: 2
+    cost_in: 0.15
+    cost_out: 0.60
+    context: 1000000
+
+  deepseek-v3:
+    provider: deepseek
+    tier: 3
+    cost_in: 0.27
+    cost_out: 1.10
+    context: 128000
+
+  deepseek-r1:
+    provider: deepseek
+    tier: 2
+    cost_in: 0.55
+    cost_out: 2.19
+    context: 128000
+
+  codestral:22b:
+    provider: ollama
+    tier: 3
+    cost_in: 0
+    cost_out: 0
+    context: 32000
+
+  deepseek-r1:32b:
+    provider: ollama
+    tier: 3
+    cost_in: 0
+    cost_out: 0
+    context: 64000
+
+# ─── ROUTING ───────────────────────────────────────────
+# Rules are evaluated in order. First match wins.
+# Available matchers: type, context_tokens_gt, budget_remaining_lt
+
+routing:
+  rules:
+    # Large context → Gemini (only 1M window model)
+    - match: { context_tokens_gt: 200000 }
+      force: gemini-2.5-pro
+
+    # Low budget → local only
+    - match: { budget_remaining_lt: 0.10 }
+      force_tier: 3
+      prefer_local: true
+
+    # Strategy tasks → Tier 1
+    - match: { type: [architecture, planning, review, security_audit] }
+      tier: 1
+      prefer: claude-opus-4
+      fallback: [gemini-2.5-pro]
+
+    # Development tasks → Tier 2
+    - match: { type: [implement, refactor, code_review, debug] }
+      tier: 2
+      prefer: claude-sonnet-4
+      fallback: [gpt-4o, deepseek-r1]
+
+    # Execution tasks → Tier 3 (prefer local)
+    - match: { type: [test, script, bulk, migration, format] }
+      tier: 3
+      prefer: codestral:22b           # Local first
+      fallback: [deepseek-v3, claude-haiku-4]
+
+  fallback_strategy: same_tier_then_downgrade
+  cost_optimization: true
+
+# ─── TEAM ──────────────────────────────────────────────
+# Agent definitions. Each agent has a model, prompt, and tools.
+
+team:
+  - name: Architect
+    role: Lead Architect
+    model: claude-opus-4
+    system_prompt_file: prompts/architect.md
+    tools: [file_read, ask_agent]
+    require_review: false
+
+  - name: Developer
+    role: Backend Developer
+    model: claude-sonnet-4
+    fallback_models: [gpt-4o, deepseek-r1]
+    system_prompt_file: prompts/developer.md
+    tools: [file_read, file_write, git_commit, run_tests, ask_agent]
+    require_review: true
+    reviewer: Architect
+    max_cost_per_task: 5.00
+
+  - name: Tester
+    role: QA Engineer
+    model: deepseek-v3
+    fallback_models: [codestral:22b]
+    system_prompt_file: prompts/tester.md
+    tools: [file_read, file_write, run_tests]
+    allow_tier_downgrade: true
+
+# ─── GIT ───────────────────────────────────────────────
+
+git:
+  enabled: true
+  remote: origin
+  base_branch: develop
+  branch_pattern: "agent/{agent_name}/{task_id}"
+  commit_format: "[T{tier}] {task_title} (#{task_id})"
+  auto_branch: true
+  auto_commit: true
+  auto_pr: true
+  require_review_before_merge: true
+  auto_merge_on_ci_pass: false
+
+# ─── ALERTS ────────────────────────────────────────────
+
+alerts:
+  budget_warning_pct: 0.80
+  budget_pause_pct: 0.95
+  # slack_webhook: ${SLACK_WEBHOOK}
+  # email: you@example.com
+
+# ─── SERVER ────────────────────────────────────────────
+
+server:
+  port: 4242
+  host: localhost
