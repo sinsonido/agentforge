@@ -1,6 +1,6 @@
 {
   "name": "agentforge",
-  "version": "0.1.0",
+  "version": "0.6.0",
   "description": "Multi-agent orchestration platform with cost control, quota management, and intelligent model routing",
   "main": "src/index.js",
   "type": "module",
