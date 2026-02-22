@@ -113,11 +113,12 @@ See [ROADMAP.md](ROADMAP.md) for detailed milestones.
 
 | Phase | What | Status |
 |-------|------|--------|
-| **v0.1** | Core engine: router + quota + single agent execution | 🔨 In progress |
-| **v0.2** | Multi-agent: lifecycle, dependencies, inter-agent comms | ⏳ Planned |
-| **v0.3** | GitHub integration: branches, PRs, auto-review | ⏳ Planned |
-| **v0.4** | Web dashboard: projects, kanban, costs | ⏳ Planned |
-| **v0.5** | CLI + YAML config + plugin system | ⏳ Planned |
+| **v0.1** | Core engine: router + quota + single agent execution | ✅ Done |
+| **v0.2** | Multi-agent: lifecycle, dependencies, inter-agent comms | ✅ Done |
+| **v0.3** | GitHub integration: branches, PRs, auto-review | ✅ Done |
+| **v0.4** | Web dashboard API: REST + WebSocket + parallel execution | ✅ Done |
+| **v0.5** | CLI + plugin system + Docker + tests (257 passing) | ✅ Done |
+| **v0.6** | Web UI: dashboard, kanban, agent/provider config | 🔨 Next |
 
 ## Contributing
 

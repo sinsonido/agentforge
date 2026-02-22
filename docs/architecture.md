@@ -291,57 +291,71 @@ CREATE TABLE cost_log (
 agentforge/
 ├── agentforge.yml              # Project config (user creates this)
 ├── agentforge.example.yml      # Reference config
+├── Dockerfile                  # Multi-stage build (node:20-alpine, non-root)
+├── docker-compose.yml          # agentforge + ollama profile
+├── docker/entrypoint.sh        # Container entrypoint
 ├── src/
-│   ├── index.js                # Entry point
+│   ├── index.js                # createAgentForge() bootstrap
+│   ├── cli.js                  # Commander.js CLI entry point
+│   ├── config/
+│   │   └── loader.js           # YAML parser + env var resolution
 │   ├── core/
-│   │   ├── orchestrator.js     # Main loop
-│   │   ├── task-queue.js       # Priority queue
-│   │   ├── quota-tracker.js    # Sliding window per provider
-│   │   ├── cost-tracker.js     # Budget management
-│   │   └── event-bus.js        # Pub/sub
+│   │   ├── orchestrator.js     # Main execution loop
+│   │   ├── task-queue.js       # Priority queue with dependencies
+│   │   ├── quota-tracker.js    # Sliding window per provider + QuotaManager
+│   │   ├── cost-tracker.js     # Budget management per project/agent
+│   │   ├── agent-lifecycle.js  # State machine (AgentLifecycle, AgentPool)
+│   │   ├── dependency-graph.js # Task DAG with topological sort
+│   │   └── event-bus.js        # EventEmitter singleton pub/sub
 │   ├── routing/
-│   │   ├── router.js           # Decision engine
-│   │   ├── rule-engine.js      # Rule evaluation
-│   │   ├── tier-resolver.js    # type → tier mapping
-│   │   ├── model-selector.js   # Pick cheapest valid model
-│   │   └── fallback-chain.js   # Fallback strategy
+│   │   └── router.js           # Full decision engine: rules, tiers, fallback
 │   ├── providers/
-│   │   ├── interface.js        # Base interface
-│   │   ├── anthropic.js        # Claude
-│   │   ├── google.js           # Gemini
-│   │   ├── deepseek.js         # DeepSeek
-│   │   ├── ollama.js           # Local models
-│   │   └── openrouter.js       # Universal proxy
-│   ├── agents/
-│   │   ├── lifecycle.js        # State machine
-│   │   ├── context-builder.js  # Prompt assembly
-│   │   └── output-collector.js # Parse results
-│   ├── tools/
-│   │   ├── file-read.js
-│   │   ├── file-write.js
-│   │   ├── git-commit.js
-│   │   ├── run-tests.js
-│   │   ├── shell-exec.js
-│   │   └── ask-agent.js
+│   │   ├── interface.js        # BaseProvider + OllamaProvider + ProviderRegistry
+│   │   ├── anthropic.js        # @anthropic-ai/sdk adapter
+│   │   ├── google.js           # @google/generative-ai adapter
+│   │   ├── deepseek.js         # OpenAI-compatible (DeepSeek endpoint)
+│   │   └── openrouter.js       # OpenAI-compatible + HTTP-Referer headers
+│   ├── execution/
+│   │   ├── context-builder.js  # Assembles prompts/messages for providers
+│   │   ├── output-collector.js # Parses provider responses
+│   │   ├── inter-agent-comm.js # ask_agent tool, subtask round-trips
+│   │   ├── parallel-execution.js # Concurrency gate, Promise.allSettled
+│   │   ├── review-workflow.js  # T1 approval gate via InterAgentComm
+│   │   ├── task-decomposition.js # T1 breaks tasks into subtasks
+│   │   └── index.js
 │   ├── git/
-│   │   └── git-manager.js      # Branch, commit, PR
+│   │   ├── git-manager.js      # child_process git wrapper
+│   │   ├── branch-strategy.js  # Branch naming per agent/task
+│   │   ├── auto-commit.js      # Auto-commit on task completion
+│   │   ├── auto-pr.js          # GitHub PR creation
+│   │   ├── review-gate.js      # Approval gate (waitForApproval/approve/reject)
+│   │   ├── github-integration.js # GitHub API via octokit
+│   │   └── index.js            # Re-exports all git modules
 │   ├── api/
-│   │   ├── server.js           # REST + WebSocket
-│   │   └── routes.js           # API endpoints
-│   └── config/
-│       ├── loader.js           # YAML parser + validation
-│       ├── schema.js           # Config schema
-│       └── defaults.js         # Default values
+│   │   ├── server.js           # Express REST API (12 routes)
+│   │   ├── ws.js               # WebSocket server (18 event types, replay)
+│   │   └── index.js
+│   ├── persistence/
+│   │   └── db.js               # SQLite via better-sqlite3 (WAL mode)
+│   └── plugins/
+│       ├── plugin-manager.js   # Dynamic import, load/unload, BasePlugin
+│       └── index.js
 ├── tests/
+│   ├── core.test.js
 │   ├── core/
-│   ├── routing/
-│   ├── providers/
-│   └── fixtures/
+│   │   ├── task-queue.test.js
+│   │   ├── event-bus.test.js
+│   │   ├── quota-tracker.test.js
+│   │   ├── cost-tracker.test.js
+│   │   ├── agent-lifecycle.test.js
+│   │   └── dependency-graph.test.js
+│   ├── execution/
+│   │   ├── context-builder.test.js
+│   │   ├── output-collector.test.js
+│   │   └── parallel-execution.test.js
+│   └── routing/
+│       └── router.test.js
 ├── docs/
-│   ├── architecture.md         # This file
-│   ├── configuration.md        # Config reference
-│   └── providers.md            # Provider setup guides
-├── prompts/                    # System prompt templates
-├── examples/                   # Example configs
+│   └── architecture.md         # This file
 └── package.json
 ```
