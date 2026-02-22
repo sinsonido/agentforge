@@ -1,8 +1,12 @@
 import eventBus from './event-bus.js';
+import { ContextBuilder } from '../execution/context-builder.js';
+import { OutputCollector } from '../execution/output-collector.js';
+import { CostTracker } from './cost-tracker.js';
 
 /**
  * The Orchestrator is the main loop of AgentForge.
  * It pulls tasks from the queue, routes them, and dispatches execution.
+ * Implements GitHub issue #2.
  */
 export class Orchestrator {
   constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config }) {
@@ -14,6 +18,19 @@ export class Orchestrator {
     this.config = config || {};
     this._running = false;
     this._loopInterval = null;
+
+    // Execution helpers
+    this.contextBuilder = new ContextBuilder({ agents, config });
+    this.outputCollector = new OutputCollector();
+    this.costTracker = new CostTracker(config);
+
+    // Init project budget
+    if (config.project) {
+      this.costTracker.initProject(
+        config.project.name || 'default',
+        config.project.budget || Infinity
+      );
+    }
 
     this._setupEventHandlers();
   }
@@ -42,7 +59,8 @@ export class Orchestrator {
     if (!task) return;
 
     // Route the task
-    const budgetPct = this._getBudgetRemainingPct(task.project_id);
+    const projectId = task.project_id || this.config.project?.name || 'default';
+    const budgetPct = this.costTracker.getBudgetRemainingPct(projectId);
     const route = this.router.resolve(task, { budget_remaining_pct: budgetPct });
 
     if (route.action === 'wait') {
@@ -58,22 +76,29 @@ export class Orchestrator {
     try {
       const result = await this._executeTask(task, route);
 
-      // Record usage
+      // Record quota usage
       this.quotaManager.recordUsage(route.provider, result.tokens_in, result.tokens_out);
 
-      // Calculate cost
+      // Calculate and record cost
       const cost = this._calculateCost(route.model, result.tokens_in, result.tokens_out);
+      this.costTracker.recordCost(projectId, task.agent_id, route.model, cost);
+
+      // Parse output
+      const output = this.outputCollector.parse(result, task);
 
       // Update task
       this.taskQueue.updateStatus(task.id, 'completed', {
-        result: result.content,
+        result: output.content,
         tokens_in: result.tokens_in,
         tokens_out: result.tokens_out,
         cost,
       });
 
-      eventBus.emit('task.completed', { task: this.taskQueue.get(task.id), cost, route });
-      console.log('[orchestrator] Task %s completed. Model: %s, Cost: $%s', task.id, route.model, cost.toFixed(4));
+      eventBus.emit('task.completed', { task: this.taskQueue.get(task.id), cost, route, output });
+      console.log(
+        '[orchestrator] Task %s completed. Model: %s, Cost: $%s, Tokens: %d/%d',
+        task.id, route.model, cost.toFixed(4), result.tokens_in, result.tokens_out
+      );
 
     } catch (error) {
       this.taskQueue.updateStatus(task.id, 'failed', { result: error.message });
@@ -83,18 +108,21 @@ export class Orchestrator {
   }
 
   async _executeTask(task, route) {
-    const agent = this.agents[task.agent_id];
-    const systemPrompt = agent?.system_prompt || 'You are a helpful assistant.';
+    const agent = this.agents[task.agent_id] || {};
 
-    const messages = [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: task.title },
-    ];
+    // Build context-aware messages
+    const { messages, system_prompt, estimated_tokens } = this.contextBuilder.buildFull(task, agent);
+
+    // Update estimated tokens on task for quota pre-check
+    if (estimated_tokens > 0) {
+      task.context_tokens_estimate = estimated_tokens;
+    }
 
     return this.providers.execute(route.provider, {
       model: route.model,
       messages,
-      max_tokens: agent?.max_tokens_per_task || 4096,
+      tools: agent.tools?.length ? this._resolveTools(agent.tools) : undefined,
+      max_tokens: agent.max_tokens_per_task || 4096,
     });
   }
 
@@ -106,15 +134,16 @@ export class Orchestrator {
          + (tokensOut * (model.cost_out || 0) / 1_000_000);
   }
 
-  _getBudgetRemainingPct(projectId) {
-    // TODO: Read from cost tracker / DB
-    return 1.0;
+  /** Resolve tool names to tool definitions (placeholder — tools registry TBD) */
+  _resolveTools(toolNames) {
+    // For now return empty — tool registry comes in a future issue
+    return [];
   }
 
   _setupEventHandlers() {
-    // When quota exhausted → re-queue waiting tasks
+    // When quota exhausted → pause waiting tasks
     eventBus.on('quota.exhausted', ({ provider }) => {
-      console.log('[orchestrator] Quota exhausted for %s. Pausing related agents.', provider);
+      console.log('[orchestrator] Quota exhausted for %s. Pausing related tasks.', provider);
       const executing = this.taskQueue.getByStatus('executing');
       for (const task of executing) {
         const model = this.router.models[task.model_used];
@@ -133,6 +162,28 @@ export class Orchestrator {
         this.taskQueue.updateStatus(task.id, 'queued');
         eventBus.emit('agent.resumed', { agent: task.agent_id });
       }
+    });
+
+    // When budget exceeded → pause all new executions
+    eventBus.on('budget.exceeded', ({ projectId, spent_pct }) => {
+      console.warn(
+        '[orchestrator] Budget exceeded for project %s (%.0f%% spent). Pausing queued tasks.',
+        projectId, spent_pct * 100
+      );
+      const queued = this.taskQueue.getByStatus('queued');
+      for (const task of queued) {
+        if (!task.project_id || task.project_id === projectId) {
+          this.taskQueue.updateStatus(task.id, 'paused_budget');
+        }
+      }
+    });
+
+    // Budget warning — just log
+    eventBus.on('budget.warning', ({ projectId, spent_pct }) => {
+      console.warn(
+        '[orchestrator] Budget warning for project %s: %.0f%% spent.',
+        projectId, spent_pct * 100
+      );
     });
   }
 }

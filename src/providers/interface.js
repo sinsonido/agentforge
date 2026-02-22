@@ -95,30 +95,6 @@ export class OllamaProvider extends BaseProvider {
 }
 
 /**
- * Anthropic provider stub — to be implemented in #12.
- */
-export class AnthropicProvider extends BaseProvider {
-  constructor(config = {}) {
-    super('anthropic', config);
-    this.endpoint = config.endpoint || 'https://api.anthropic.com';
-  }
-
-  async execute({ model, messages, tools, max_tokens = 4096, temperature = 0.7 }) {
-    // TODO #12: Implement with @anthropic-ai/sdk
-    throw new Error('AnthropicProvider not yet implemented — see issue #12');
-  }
-
-  async listModels() {
-    return ['claude-opus-4', 'claude-sonnet-4', 'claude-haiku-4'];
-  }
-
-  async healthCheck() {
-    // TODO: ping API
-    return !!this.apiKey;
-  }
-}
-
-/**
  * Provider registry — manages all configured providers.
  */
 export class ProviderRegistry {
