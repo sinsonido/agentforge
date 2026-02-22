@@ -1,0 +1,334 @@
+/**
+ * @file src/api/server.js
+ * @description Express REST API server for the AgentForge dashboard.
+ *
+ * Exposes system state (tasks, agents, quotas, costs, events) via JSON endpoints
+ * and integrates the WebSocket server for real-time event streaming.
+ *
+ * GitHub issue #33
+ */
+
+import http from 'node:http';
+import path from 'node:path';
+import fs from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import express from 'express';
+import { startWebSocketServer } from './ws.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ---------------------------------------------------------------------------
+// CORS middleware — allow any localhost origin for dev dashboard
+// ---------------------------------------------------------------------------
+
+/**
+ * Add CORS headers permitting localhost on any port.
+ * @param {import('express').Request} req
+ * @param {import('express').Response} res
+ * @param {import('express').NextFunction} next
+ */
+function corsMiddleware(req, res, next) {
+  const origin = req.headers.origin || '';
+  if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
+    res.setHeader('Access-Control-Allow-Origin', origin || '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
+  }
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+  next();
+}
+
+// ---------------------------------------------------------------------------
+// Route builder
+// ---------------------------------------------------------------------------
+
+/**
+ * Build and return an Express Router wired to the forge instance.
+ *
+ * @param {Object} forge - The object returned by createAgentForge().
+ * @param {import('../core/task-queue.js').TaskQueue} forge.taskQueue
+ * @param {import('../core/quota-tracker.js').QuotaManager} forge.quotaManager
+ * @param {import('../core/event-bus.js').default} forge.eventBus
+ * @param {Object} forge.orchestrator
+ * @param {Object} [forge.agentPool]   - May not exist yet; handled gracefully.
+ * @param {Object} [forge.costTracker] - May not exist yet; handled gracefully.
+ * @returns {import('express').Router}
+ */
+function buildRouter(forge) {
+  const router = express.Router();
+
+  // ── GET /api/status ──────────────────────────────────────────────────────
+  /**
+   * System overview: task stats, quota states, running agent count.
+   */
+  router.get('/status', (req, res) => {
+    try {
+      const taskStats = forge.taskQueue.stats();
+      const quotas = forge.quotaManager.getAllStatuses();
+      const agentStatuses = forge.agentPool?.getAllStatuses?.() ?? {};
+
+      res.json({
+        ok: true,
+        orchestrator: {
+          running: forge.orchestrator?._running ?? false,
+        },
+        tasks: taskStats,
+        quotas,
+        agents: agentStatuses,
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/tasks ───────────────────────────────────────────────────────
+  /**
+   * List tasks. Optional query param: ?status=queued|executing|completed|failed
+   */
+  router.get('/tasks', (req, res) => {
+    try {
+      const { status } = req.query;
+      const tasks = status
+        ? forge.taskQueue.getByStatus(status)
+        : forge.taskQueue.getAll();
+      res.json({ ok: true, count: tasks.length, tasks });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/tasks ──────────────────────────────────────────────────────
+  /**
+   * Add a new task.
+   * Body: { title, type, priority, agent_id }
+   */
+  router.post('/tasks', (req, res) => {
+    try {
+      const { title, type, priority, agent_id } = req.body ?? {};
+      if (!title) {
+        return res.status(400).json({ ok: false, error: '`title` is required' });
+      }
+      const task = forge.taskQueue.add({ title, type, priority, agent_id });
+      res.status(201).json({ ok: true, task });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/tasks/:id ───────────────────────────────────────────────────
+  /**
+   * Get a single task by ID.
+   */
+  router.get('/tasks/:id', (req, res) => {
+    try {
+      const task = forge.taskQueue.get(req.params.id);
+      if (!task) {
+        return res.status(404).json({ ok: false, error: `Task '${req.params.id}' not found` });
+      }
+      res.json({ ok: true, task });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/agents ──────────────────────────────────────────────────────
+  /**
+   * List all agents and their lifecycle status.
+   */
+  router.get('/agents', (req, res) => {
+    try {
+      const statuses = forge.agentPool?.getAllStatuses?.() ?? {};
+      const agents = Object.values(statuses);
+      res.json({ ok: true, count: agents.length, agents });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/quotas ──────────────────────────────────────────────────────
+  /**
+   * All provider quota statuses (usage windows, state).
+   */
+  router.get('/quotas', (req, res) => {
+    try {
+      const quotas = forge.quotaManager.getAllStatuses();
+      res.json({ ok: true, quotas });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/costs ───────────────────────────────────────────────────────
+  /**
+   * Cost stats: project budgets, spend by agent and model.
+   * Falls back gracefully if costTracker is not yet available.
+   */
+  router.get('/costs', (req, res) => {
+    try {
+      // costTracker may live on orchestrator or directly on forge
+      const costTracker = forge.costTracker ?? forge.orchestrator?.costTracker;
+      if (!costTracker) {
+        return res.json({ ok: true, available: false, costs: null });
+      }
+      const costs = costTracker.getAllStats();
+      res.json({ ok: true, available: true, costs });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/events ──────────────────────────────────────────────────────
+  /**
+   * Recent events from the event bus.
+   * Optional query param: ?limit=50  (default 50, max 1000)
+   */
+  router.get('/events', (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 1000);
+      const events = forge.eventBus.getRecentEvents(limit);
+      res.json({ ok: true, count: events.length, events });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/control/start ──────────────────────────────────────────────
+  /**
+   * Start the orchestrator.
+   */
+  router.post('/control/start', (req, res) => {
+    try {
+      if (!forge.orchestrator) {
+        return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
+      }
+      if (forge.orchestrator._running) {
+        return res.status(409).json({ ok: false, error: 'Orchestrator is already running' });
+      }
+      forge.orchestrator.start();
+      res.json({ ok: true, message: 'Orchestrator started' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/control/stop ───────────────────────────────────────────────
+  /**
+   * Stop the orchestrator.
+   */
+  router.post('/control/stop', (req, res) => {
+    try {
+      if (!forge.orchestrator) {
+        return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
+      }
+      if (!forge.orchestrator._running) {
+        return res.status(409).json({ ok: false, error: 'Orchestrator is not running' });
+      }
+      forge.orchestrator.stop();
+      res.json({ ok: true, message: 'Orchestrator stopped' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/review/:prNumber/approve ───────────────────────────────────
+  /**
+   * Approve a PR review.
+   */
+  router.post('/review/:prNumber/approve', (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.prNumber, 10);
+      if (!Number.isFinite(prNumber) || prNumber < 1) {
+        return res.status(400).json({ ok: false, error: 'Invalid PR number' });
+      }
+      forge.eventBus.emit('review.approved', { prNumber, approvedAt: Date.now() });
+      res.json({ ok: true, prNumber, action: 'approved' });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/review/:prNumber/reject ────────────────────────────────────
+  /**
+   * Reject a PR review.
+   * Body: { reason }
+   */
+  router.post('/review/:prNumber/reject', (req, res) => {
+    try {
+      const prNumber = parseInt(req.params.prNumber, 10);
+      if (!Number.isFinite(prNumber) || prNumber < 1) {
+        return res.status(400).json({ ok: false, error: 'Invalid PR number' });
+      }
+      const { reason } = req.body ?? {};
+      if (!reason) {
+        return res.status(400).json({ ok: false, error: '`reason` is required in the request body' });
+      }
+      forge.eventBus.emit('review.rejected', { prNumber, reason, rejectedAt: Date.now() });
+      res.json({ ok: true, prNumber, action: 'rejected', reason });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  return router;
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Start the AgentForge HTTP (REST + WebSocket) server.
+ *
+ * Creates an Express application, mounts the API routes under `/api`,
+ * serves the static UI from `src/ui/` if it exists, attaches the
+ * WebSocket server to the same HTTP server, then starts listening.
+ *
+ * @param {Object} forge  - The forge instance returned by createAgentForge().
+ * @param {number} [port=3000] - Port to listen on.
+ * @returns {http.Server} The underlying Node.js HTTP server.
+ *
+ * @example
+ * import { createAgentForge } from '../index.js';
+ * import { startServer } from './api/server.js';
+ *
+ * const forge = await createAgentForge();
+ * const server = startServer(forge, 3000);
+ */
+export function startServer(forge, port = 3000) {
+  const app = express();
+
+  // Body parsing
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
+
+  // CORS — must be before routes
+  app.use(corsMiddleware);
+
+  // API routes
+  app.use('/api', buildRouter(forge));
+
+  // Static UI — serve if the directory exists; silently skip if not
+  const uiDir = path.resolve(__dirname, '../ui');
+  const uiExists = fs.existsSync(uiDir);
+  if (uiExists) {
+    app.use(express.static(uiDir));
+    // SPA fallback: serve index.html for any non-API route
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(uiDir, 'index.html'));
+    });
+  }
+
+  // Create the HTTP server and attach the WebSocket server
+  const httpServer = http.createServer(app);
+  startWebSocketServer(httpServer, forge.eventBus);
+
+  httpServer.listen(port, () => {
+    console.log('[agentforge:api] REST API listening on http://localhost:%d', port);
+    console.log('[agentforge:api] WebSocket endpoint: ws://localhost:%d/ws', port);
+  });
+
+  return httpServer;
+}
