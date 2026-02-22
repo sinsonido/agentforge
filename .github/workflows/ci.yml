@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false     # Run all Node versions even if one fails
       matrix:
         node-version: [20, 22, 24]
 

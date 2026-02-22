@@ -10,8 +10,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
-    "test": "node --test 'tests/*.test.js' 'tests/**/*.test.js'",
-    "test:watch": "node --test --watch 'tests/*.test.js' 'tests/**/*.test.js'",
+    "test": "node --test $(find tests -name '*.test.js' | LC_ALL=C sort)",
+    "test:watch": "node --test --watch $(find tests -name '*.test.js' | LC_ALL=C sort)",
     "lint": "eslint src/",
     "docker:build": "docker build -t agentforge .",
     "docker:run": "docker-compose up",
