@@ -6,15 +6,16 @@ on:
   schedule:
     - cron: '0 6 * * 1'  # Weekly on Monday at 06:00 UTC
 
-permissions:
-  contents: read
-  security-events: write
-  id-token: write
+permissions: read-all
 
 jobs:
   scorecard:
     name: Scorecard analysis
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
