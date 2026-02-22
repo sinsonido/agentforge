@@ -134,6 +134,30 @@ function buildRouter(forge) {
     }
   });
 
+  // ── POST /api/tasks/:id/status ───────────────────────────────────────────
+  /**
+   * Update the status of a task (used by the Kanban board drag-and-drop).
+   * Body: { status }
+   */
+  router.post('/tasks/:id/status', (req, res) => {
+    try {
+      const { status } = req.body ?? {};
+      const validStatuses = ['queued', 'executing', 'completed', 'failed'];
+      if (!status || !validStatuses.includes(status)) {
+        return res.status(400).json({ ok: false, error: `status must be one of: ${validStatuses.join(', ')}` });
+      }
+      const task = forge.taskQueue.get(req.params.id);
+      if (!task) {
+        return res.status(404).json({ ok: false, error: `Task '${req.params.id}' not found` });
+      }
+      forge.taskQueue.updateStatus(req.params.id, status);
+      forge.eventBus.emit('task.status_changed', { taskId: req.params.id, status, changedAt: Date.now() });
+      res.json({ ok: true, taskId: req.params.id, status });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── GET /api/agents ──────────────────────────────────────────────────────
   /**
    * List all agents and their lifecycle status.
@@ -145,6 +169,59 @@ function buildRouter(forge) {
       res.json({ ok: true, count: agents.length, agents });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/agents/:id ─────────────────────────────────────────────────
+  /**
+   * Update an agent's runtime config (model, systemPrompt).
+   * Body: { model?, systemPrompt? }
+   */
+  router.post('/agents/:id', (req, res) => {
+    try {
+      const agentId = req.params.id;
+      const { model, systemPrompt } = req.body ?? {};
+      const pool = forge.agentPool;
+      if (!pool) {
+        return res.status(503).json({ ok: false, error: 'Agent pool not available' });
+      }
+      const updated = pool.updateAgentConfig?.(agentId, { model, systemPrompt });
+      if (updated === false) {
+        return res.status(404).json({ ok: false, error: `Agent '${agentId}' not found` });
+      }
+      forge.eventBus.emit('agent.config_updated', { agentId, model, updatedAt: Date.now() });
+      res.json({ ok: true, agentId, model, systemPrompt });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/providers/test ──────────────────────────────────────────────
+  /**
+   * Test connectivity for a named provider.
+   * Body: { provider }
+   */
+  router.post('/providers/test', async (req, res) => {
+    try {
+      const { provider } = req.body ?? {};
+      if (!provider) {
+        return res.status(400).json({ ok: false, error: '`provider` is required' });
+      }
+      const registry = forge.providerRegistry;
+      if (!registry) {
+        return res.status(503).json({ ok: false, error: 'Provider registry not available' });
+      }
+      const p = registry.get?.(provider);
+      if (!p) {
+        return res.status(404).json({ ok: false, error: `Provider '${provider}' not registered` });
+      }
+      // Run a minimal test call if the provider supports it
+      if (typeof p.test === 'function') {
+        await p.test();
+      }
+      res.json({ ok: true, provider, status: 'reachable' });
+    } catch (err) {
+      res.status(200).json({ ok: false, error: err.message });
     }
   });
 

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentForge Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<!-- ── Sidebar ───────────────────────────────────────────────────────────── -->
+<aside id="sidebar">
+  <a class="sidebar-logo" href="#" onclick="navigate('dashboard');return false;">
+    <div class="logo-icon">⚡</div>
+    <span>AgentForge</span>
+  </a>
+
+  <nav class="sidebar-nav">
+    <div class="nav-section">Overview</div>
+    <a class="nav-item active" id="nav-dashboard" onclick="navigate('dashboard');return false;" href="#">
+      <span class="icon">◈</span> Dashboard
+    </a>
+
+    <div class="nav-section">Work</div>
+    <a class="nav-item" id="nav-kanban" onclick="navigate('kanban');return false;" href="#">
+      <span class="icon">▦</span> Kanban Board
+    </a>
+
+    <div class="nav-section">Config</div>
+    <a class="nav-item" id="nav-agents" onclick="navigate('agents');return false;" href="#">
+      <span class="icon">◉</span> Agents
+    </a>
+    <a class="nav-item" id="nav-providers" onclick="navigate('providers');return false;" href="#">
+      <span class="icon">◎</span> Providers
+    </a>
+
+    <div class="nav-section">Finance</div>
+    <a class="nav-item" id="nav-costs" onclick="navigate('costs');return false;" href="#">
+      <span class="icon">◈</span> Costs
+    </a>
+  </nav>
+
+  <div class="sidebar-bottom">
+    <div id="ws-status">
+      <div class="dot"></div>
+      <span id="ws-status-text">Connecting…</span>
+    </div>
+  </div>
+</aside>
+
+<!-- ── Main ───────────────────────────────────────────────────────────────── -->
+<div id="main">
+  <div id="topbar">
+    <span class="topbar-title" id="topbar-title">Dashboard</span>
+    <div class="topbar-actions" id="topbar-actions"></div>
+  </div>
+  <div id="view">
+    <div class="empty-state">
+      <div class="spinner"></div>
+      <span>Loading…</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ───────────────────────────────────────────────────── -->
+<div id="toast-container"></div>
+
+<script src="app.js" type="module"></script>
+</body>
+</html>
