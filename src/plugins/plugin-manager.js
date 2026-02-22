@@ -38,7 +38,7 @@ export class PluginManager {
       const mod = await import(pluginPath);
       factory = mod.default;
     } catch (err) {
-      throw new Error(`[PluginManager] Cannot import plugin "${pluginPath}": ${err.message}`);
+      throw new Error(`[PluginManager] Cannot import plugin "${pluginPath}": ${err.message}`, { cause: err });
     }
 
     if (typeof factory !== 'function') {
