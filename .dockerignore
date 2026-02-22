@@ -1,0 +1,7 @@
+node_modules
+.agentforge
+.git
+*.test.js
+tests/
+docs/
+.env
