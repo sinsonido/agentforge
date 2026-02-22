@@ -332,15 +332,20 @@ agentforge/
 │   │   ├── github-integration.js # GitHub API via octokit
 │   │   └── index.js            # Re-exports all git modules
 │   ├── api/
-│   │   ├── server.js           # Express REST API (12 routes)
-│   │   ├── ws.js               # WebSocket server (18 event types, replay)
+│   │   ├── server.js           # Express REST API (15 routes)
+│   │   ├── ws.js               # WebSocket server (18+ event types, replay)
 │   │   └── index.js
+│   ├── ui/
+│   │   ├── index.html          # SPA shell + sidebar nav
+│   │   ├── style.css           # Dark theme, Kanban, cards, toasts
+│   │   └── app.js              # Router + all 5 views (pure ES modules)
 │   ├── persistence/
 │   │   └── db.js               # SQLite via better-sqlite3 (WAL mode)
 │   └── plugins/
 │       ├── plugin-manager.js   # Dynamic import, load/unload, BasePlugin
 │       └── index.js
 ├── tests/
+│   ├── api.test.js             # Integration tests for new REST endpoints
 │   ├── core.test.js
 │   ├── core/
 │   │   ├── task-queue.test.js
@@ -356,6 +361,13 @@ agentforge/
 │   └── routing/
 │       └── router.test.js
 ├── docs/
+│   ├── index.md                # Documentation hub
+│   ├── getting-started.md      # Installation and quickstart
+│   ├── configuration.md        # Full agentforge.yml reference
+│   ├── providers.md            # Provider setup guides
+│   ├── api-reference.md        # REST API + WebSocket event catalogue
+│   ├── plugins.md              # Plugin system
+│   ├── deployment.md           # Docker, production, security
 │   └── architecture.md         # This file
 └── package.json
 ```

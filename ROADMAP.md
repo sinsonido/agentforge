@@ -95,23 +95,23 @@ Strategy: **vertical slices**. Each milestone delivers something runnable end-to
 - [x] `#41` **Plugin system** — Custom providers, custom tools, custom routing rules. Load from npm packages or local files.
 - [x] `#42` **OpenRouter provider** — Single provider that proxies to any model. Useful as universal fallback.
 - [x] `#43` **Persistence** — SQLite for task history, cost logs, agent metrics (WAL mode).
-- [ ] `#44` **Documentation** — Full docs site. Getting started, configuration reference, provider guides, architecture deep-dive.
+- [x] `#44` **Documentation** — Full docs site. Getting started, configuration reference, provider guides, architecture deep-dive.
 - [x] `#45` **Docker** — Multi-stage Dockerfile + docker-compose with Ollama profile. One-command setup.
 - [x] `#46` **Tests** — 257 tests across 78 suites. Unit: core, routing, execution. All passing.
 
 ---
 
-## v0.6 — "Dashboard Works" 🔨
+## v0.6 — "Dashboard Works" ✅
 
 **Goal:** Web UI for managing everything. Real-time updates via WebSocket (server already built in v0.4).
 
 ### Issues
 
-- [ ] `#35` **Dashboard UI** — KPIs, project overview, quota status, activity feed.
-- [ ] `#36` **Kanban Board** — Drag-and-drop task management per project. Columns: backlog → todo → in_progress → review → done.
-- [ ] `#37` **Agent Config UI** — Edit system prompts, assign models, configure tools. Visual team view.
-- [ ] `#38` **Provider Config UI** — API keys, endpoints, quota settings. Connection testing. Real-time quota bars.
-- [ ] `#39` **Cost Dashboard** — Budget tracking by project, model, tier. Transaction log. Alerts config.
+- [x] `#35` **Dashboard UI** — KPIs, project overview, quota status, live activity feed (WebSocket), orchestrator control.
+- [x] `#36` **Kanban Board** — HTML5 drag-and-drop across queued/executing/completed/failed columns. Add-task modal.
+- [x] `#37` **Agent Config UI** — Agent cards with status, model, token stats, system-prompt preview, edit modal.
+- [x] `#38` **Provider Config UI** — Per-provider quota bars with colour-coded thresholds. Connection test button.
+- [x] `#39` **Cost Dashboard** — Budget bars by project, spend-by-agent/model tables, scrollable transaction log.
 
 ---
 
