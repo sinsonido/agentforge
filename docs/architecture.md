@@ -10,46 +10,34 @@
 
 ## System Overview
 
-```
-                    ┌─────────────────┐
-                    │   CLI / API /   │
-                    │    Web UI       │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  Config Loader  │ ← agentforge.yml
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  ORCHESTRATOR   │ ← Main loop
-                    │                 │
-                    │  ┌───────────┐  │
-                    │  │ TaskQueue │  │ ← Priority queue
-                    │  └─────┬─────┘  │
-                    │        │        │
-                    │  ┌─────▼─────┐  │
-                    │  │  Router   │  │ ← Rule evaluation
-                    │  └─────┬─────┘  │
-                    │        │        │
-                    │  ┌─────▼─────┐  │
-                    │  │ Executor  │  │ ← Context + call + collect
-                    │  └───────────┘  │
-                    └────────┬────────┘
-                             │
-              ┌──────────────┼──────────────┐
-              │              │              │
-     ┌────────▼──────┐ ┌────▼────┐ ┌───────▼──────┐
-     │ QuotaTracker  │ │ CostDB  │ │  Git Manager │
-     │ (per-provider)│ │ (SQLite)│ │  (branches,  │
-     │               │ │         │ │   PRs)       │
-     └───────────────┘ └─────────┘ └──────────────┘
-              │
-     ┌────────▼────────────────────────────┐
-     │         Provider Adapters           │
-     │  ┌──────┐ ┌──────┐ ┌──────┐ ┌────┐ │
-     │  │Anthr.│ │Google│ │DeepSk│ │Olla│ │
-     │  └──────┘ └──────┘ └──────┘ └────┘ │
-     └─────────────────────────────────────┘
+```mermaid
+flowchart TD
+    UI["CLI / API / Web UI"]
+    CF["Config Loader\nagentforge.yml"]
+    UI --> CF
+
+    subgraph ORC["Orchestrator — main loop"]
+        TQ["TaskQueue\npriority queue"]
+        RT["Router\nrule evaluation"]
+        EX["Executor\ncontext · call · collect"]
+        TQ --> RT --> EX
+    end
+
+    CF --> ORC
+
+    EX --> QT["QuotaTracker\nper-provider"]
+    EX --> DB["CostDB\nSQLite"]
+    EX --> GM["Git Manager\nbranches · PRs"]
+
+    subgraph P["Provider Adapters"]
+        direction LR
+        AN["Anthropic"]
+        GO["Google"]
+        DS["DeepSeek"]
+        OL["Ollama"]
+    end
+
+    QT --> P
 ```
 
 ## Component Details
@@ -58,27 +46,20 @@
 
 The main loop. Runs continuously, pulling tasks and dispatching them.
 
-```
-loop:
-  task = taskQueue.next()          // Get highest priority ready task
-  if (!task) → sleep(100ms)
-
-  route = router.resolve(task)     // Determine model + provider
-  if (route.action === "wait")     // No model available
-    task.status = "waiting_quota"
-    continue
-
-  result = executor.run(task, route)
-  costTracker.record(result)
-  quotaTracker.record(route.provider, result.usage)
-
-  if (task.require_review)
-    taskQueue.add(createReviewTask(task, result))
-  else
-    task.status = "completed"
-    gitManager.commitIfNeeded(task, result)
-
-  eventBus.emit("task.completed", task)
+```mermaid
+flowchart TD
+    Start(["loop"]) --> Next["task = taskQueue.next()"]
+    Next --> HasTask{task?}
+    HasTask -- no --> Sleep["sleep 100ms"] --> Start
+    HasTask -- yes --> Route["route = router.resolve(task)"]
+    Route --> CanExec{"action == execute?"}
+    CanExec -- no --> Wait["status = waiting_quota"] --> Start
+    CanExec -- yes --> Run["executor.run(task, route)"]
+    Run --> Record["costTracker.record()\nquotaTracker.record()"]
+    Record --> Review{"require_review?"}
+    Review -- yes --> AddReview["taskQueue.add(reviewTask)"] --> Emit
+    Review -- no --> Complete["status = completed\ngitManager.commit()"] --> Emit
+    Emit["eventBus.emit('task.completed')"] --> Start
 ```
 
 ### Router (`src/routing/router.js`)
@@ -89,13 +70,31 @@ Deterministic decision engine. No randomness, no AI.
 **Output:** { model, provider, tier, fallback_chain }
 
 **Evaluation order:**
-1. User override (task.force_model or agent.model)
-2. Context rules (>200K → Gemini)
-3. Budget rules (<10% → local only)
-4. Tier rules (type → tier → model pool)
-5. Cost optimization (cheapest in pool)
-6. Quota check (is provider available?)
-7. Fallback chain (if not → next option)
+
+```mermaid
+flowchart TD
+    T(["task"]) --> F1{"force_model?"}
+    F1 -- yes --> TM["use forced model"] --> X(["execute"])
+    F1 -- no --> F2{"agent.model?"}
+    F2 -- yes --> AM["try agent model"]
+    AM --> AV1{"available?"}
+    AV1 -- yes --> X
+    AV1 -- no --> FB["try agent.fallback_models"]
+    FB --> AV2{"available?"}
+    AV2 -- yes --> X
+    AV2 -- no --> Rules
+    F2 -- no --> Rules["evaluate routing rules\nordered · first match wins"]
+    Rules --> AV3{"match available?"}
+    AV3 -- yes --> X
+    AV3 -- no --> Tier["resolve tier by task.type\nT1 strategy · T2 dev · T3 exec"]
+    Tier --> Cheap["cheapest model in tier\nlocal-first"]
+    Cheap --> AV4{"available?"}
+    AV4 -- yes --> X
+    AV4 -- no --> Chain["fallback chain\ntry lower tiers"]
+    Chain --> AV5{"any available?"}
+    AV5 -- yes --> X
+    AV5 -- no --> W(["wait: all_providers_exhausted"])
+```
 
 ### QuotaTracker (`src/core/quota-tracker.js`)
 
@@ -125,13 +124,33 @@ SlidingWindow {
 ```
 
 **Auto-pause flow:**
-1. `recordUsage()` updates window
-2. If `usage_pct > 0.95` → state = EXHAUSTED
-3. Emit `quota.exhausted` event
-4. Orchestrator catches event → pauses all agents on that provider
-5. QuotaWatcher prunes window every 1s
-6. When usage drops below threshold → state = AVAILABLE
-7. Emit `quota.reset` → orchestrator resumes agents
+
+```mermaid
+sequenceDiagram
+    participant E as Executor
+    participant QT as QuotaTracker
+    participant EB as EventBus
+    participant ORC as Orchestrator
+
+    E->>QT: recordUsage(provider, tokens)
+    QT->>QT: prune old window entries
+    QT->>QT: recalculate usage_pct
+
+    alt usage_pct > 95%
+        QT->>EB: emit quota.exhausted
+        EB->>ORC: quota.exhausted { provider }
+        ORC->>ORC: pause agents on provider
+    end
+
+    loop every 1s
+        QT->>QT: prune window
+        alt usage_pct < threshold
+            QT->>EB: emit quota.reset
+            EB->>ORC: quota.reset { provider }
+            ORC->>ORC: resume agents
+        end
+    end
+```
 
 ### Provider Adapters (`src/providers/`)
 
@@ -188,6 +207,22 @@ interface AgentConfig {
 }
 ```
 
+**Agent lifecycle:**
+
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> executing : task assigned
+    executing --> idle : task completed
+    executing --> paused : quota.exhausted
+    paused --> idle : quota.reset
+    executing --> failed : error
+    failed --> idle : retry / requeue
+    idle --> terminated : shutdown
+    paused --> terminated : shutdown
+    terminated --> [*]
+```
+
 ### Tools (`src/tools/`)
 
 Actions agents can perform. Each tool follows a standard interface.
@@ -233,6 +268,57 @@ Events:
 ```
 
 ## Data Model
+
+```mermaid
+erDiagram
+    tasks {
+        TEXT id PK
+        TEXT title
+        TEXT type
+        TEXT status
+        TEXT agent_id
+        TEXT project_id
+        TEXT model_used
+        INTEGER tokens_in
+        INTEGER tokens_out
+        REAL cost
+        TEXT output
+        DATETIME created_at
+        DATETIME completed_at
+        TEXT depends_on
+    }
+    projects {
+        TEXT id PK
+        TEXT name
+        TEXT config_path
+        REAL budget
+        REAL spent
+        TEXT status
+    }
+    cost_log {
+        INTEGER id PK
+        TEXT project_id FK
+        TEXT task_id FK
+        TEXT model
+        TEXT provider
+        INTEGER tokens_in
+        INTEGER tokens_out
+        REAL cost
+        DATETIME timestamp
+    }
+    quota_usage {
+        INTEGER id PK
+        TEXT provider
+        DATETIME timestamp
+        INTEGER requests
+        INTEGER tokens_in
+        INTEGER tokens_out
+    }
+
+    projects ||--o{ tasks : "project_id"
+    tasks ||--o{ cost_log : "task_id"
+    projects ||--o{ cost_log : "project_id"
+```
 
 ```sql
 -- Core tables (SQLite)

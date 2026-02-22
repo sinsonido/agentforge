@@ -11,12 +11,17 @@ Plugins are Node.js ES modules that export a class extending `BasePlugin`.
 They are loaded at startup from paths or npm package names listed in
 `agentforge.yml` (or via the CLI).
 
-```
-startup
-  └── PluginManager.load(path)
-        └── import(path)
-              └── new Plugin(forge)
-                    └── plugin.register()   ← your code runs here
+```mermaid
+flowchart TD
+    ST["startup"] --> PM["PluginManager.load(path)"]
+    PM --> IM["import(path)"]
+    IM --> NP["new Plugin(forge)"]
+    NP --> IN["plugin.init()  ← your code runs here"]
+    IN --> RP["registerProvider()\noptional"]
+    IN --> OE["on(event, handler)\noptional"]
+    IN --> EM["emit(event, data)\noptional"]
+    RP --> PR["ProviderRegistry"]
+    OE --> EB["EventBus"]
 ```
 
 The `forge` object passed to the constructor gives the plugin access to all

@@ -4,16 +4,13 @@
 
 AgentForge lets you run multiple AI agents across different projects, automatically routing tasks to the right model (Opus for architecture, Sonnet for coding, DeepSeek/local for bulk work) while keeping costs under control and respecting API rate limits.
 
-```
-┌─────────────────────────────────────────────────────┐
-│  YOU define: projects, teams, budgets, rules        │
-│                      ↓                              │
-│  ORCHESTRATOR decides: which model, when, how much  │
-│                      ↓                              │
-│  AGENTS execute: code, review, test, commit         │
-│                      ↓                              │
-│  SYSTEM manages: quotas, costs, git, auto-resume    │
-└─────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    U["You define\nprojects · teams · budgets · rules"]
+    O["Orchestrator decides\nwhich model · when · how much"]
+    A["Agents execute\ncode · review · test · commit"]
+    S["System manages\nquotas · costs · git · auto-resume"]
+    U --> O --> A --> S
 ```
 
 ## Why AgentForge?
@@ -44,21 +41,29 @@ agentforge start
 
 ## Architecture
 
-```
-agentforge.yml          ← Project config (teams, rules, budgets)
-     │
-     ▼
-┌─────────────┐    ┌──────────────┐    ┌─────────────────┐
-│  Task Queue  │───▶│    Router    │───▶│ Execution Layer  │
-│  (priority)  │    │  (rules +   │    │ (context build + │
-│              │    │   fallback)  │    │  model call)     │
-└─────────────┘    └──────┬───────┘    └────────┬────────┘
-                          │                      │
-                   ┌──────▼───────┐    ┌────────▼────────┐
-                   │ QuotaTracker │    │  Provider Layer  │
-                   │ (per-provider│    │  Anthropic │ Google
-                   │  sliding win)│    │  DeepSeek  │ Ollama
-                   └──────────────┘    └─────────────────┘
+```mermaid
+flowchart LR
+    Y["agentforge.yml"]
+
+    subgraph Core["Core"]
+        TQ["Task Queue\npriority"]
+        RT["Router\nrules + fallback"]
+        EX["Execution Layer\ncontext + model call"]
+        TQ --> RT --> EX
+    end
+
+    Y --> TQ
+    RT --> QT["QuotaTracker\nper-provider\nsliding window"]
+
+    subgraph P["Providers"]
+        AN["Anthropic"]
+        GO["Google"]
+        DS["DeepSeek"]
+        OL["Ollama"]
+    end
+
+    EX --> P
+    QT -. quota check .-> P
 ```
 
 See [docs/architecture.md](docs/architecture.md) for the full design.
