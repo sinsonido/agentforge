@@ -1,5 +1,5 @@
 # ─── Stage 1: Install production dependencies ──────────────────────────────
-FROM node:20-alpine AS deps
+FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS deps
 
 WORKDIR /app
 
@@ -10,7 +10,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # ─── Stage 2: Final application image ──────────────────────────────────────
-FROM node:20-alpine AS app
+FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS app
 
 WORKDIR /app
 
