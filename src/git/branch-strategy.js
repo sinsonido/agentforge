@@ -27,7 +27,7 @@ export class BranchStrategy {
       .replace('{task_id}', task.id)
       .replace('{task_type}', task.type || 'task')
       .toLowerCase()
-      .replace(/[^a-z0-9\-\/]/g, '-')
+      .replace(/[^a-z0-9\-/]/g, '-')
       .replace(/-+/g, '-')
       .replace(/\/$/, '');
   }

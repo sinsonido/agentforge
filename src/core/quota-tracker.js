@@ -78,7 +78,7 @@ export class ProviderQuotaTracker {
    * Record actual usage after a successful execution.
    * Updates state and emits events if state changed.
    */
-  recordUsage(tokensIn, tokensOut = 0) {
+  recordUsage(tokensIn, _tokensOut = 0) {
     this.requests.add(1);
     this.tokensIn.add(tokensIn);
     this._updateState();

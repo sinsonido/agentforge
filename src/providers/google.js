@@ -28,7 +28,7 @@ export class GoogleProvider extends BaseProvider {
    * @param {number} [params.temperature]
    * @returns {Promise<{ content, tokens_in, tokens_out, tool_calls, finish_reason }>}
    */
-  async execute({ model, messages, tools, max_tokens = 4096, temperature = 0.7 }) {
+  async execute({ model, messages, _tools, max_tokens = 4096, temperature = 0.7 }) {
     const client = this._getClient();
 
     // Extract system instruction

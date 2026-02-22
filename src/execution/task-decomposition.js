@@ -27,7 +27,7 @@ export class TaskDecomposition {
    * @param {string} [options.decomposerAgent] - Agent ID to use for decomposition
    * @returns {Promise<Object[]>} Created subtasks
    */
-  async decompose(task, options = {}) {
+  async decompose(task, _options = {}) {
     // Build decomposition prompt
     const prompt = this._buildPrompt(task);
 
@@ -91,7 +91,7 @@ export class TaskDecomposition {
    * @param {Object} parentTask - Parent task (unused, kept for future enrichment)
    * @returns {Object[]}
    */
-  _parseSubtasks(content, parentTask) {
+  _parseSubtasks(content, _parentTask) {
     try {
       // Extract JSON from content (may be wrapped in markdown)
       const match = content.match(/\[[\s\S]*\]/);

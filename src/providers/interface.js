@@ -19,7 +19,7 @@ export class BaseProvider {
    * @param {number} [params.temperature] - Sampling temperature
    * @returns {Promise<{ content, tokens_in, tokens_out, tool_calls, finish_reason }>}
    */
-  async execute(params) {
+  async execute(_params) {
     throw new Error(`${this.id}: execute() not implemented`);
   }
 

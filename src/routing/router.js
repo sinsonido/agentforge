@@ -1,4 +1,3 @@
-import eventBus from '../core/event-bus.js';
 
 /**
  * The Router is the brain of AgentForge.

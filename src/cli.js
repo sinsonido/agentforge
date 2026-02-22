@@ -202,7 +202,7 @@ program
       }
 
       console.log('\n── Providers ───────────────────────────');
-      for (const [id, provider] of forge.providerRegistry.providers) {
+      for (const [id] of forge.providerRegistry.providers) {
         console.log('  %-14s configured', id);
       }
       console.log();

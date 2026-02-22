@@ -111,7 +111,7 @@ export class Orchestrator {
     const agent = this.agents[task.agent_id] || {};
 
     // Build context-aware messages
-    const { messages, system_prompt, estimated_tokens } = this.contextBuilder.buildFull(task, agent);
+    const { messages, estimated_tokens } = this.contextBuilder.buildFull(task, agent);
 
     // Update estimated tokens on task for quota pre-check
     if (estimated_tokens > 0) {
@@ -135,7 +135,7 @@ export class Orchestrator {
   }
 
   /** Resolve tool names to tool definitions (placeholder — tools registry TBD) */
-  _resolveTools(toolNames) {
+  _resolveTools(_toolNames) {
     // For now return empty — tool registry comes in a future issue
     return [];
   }
