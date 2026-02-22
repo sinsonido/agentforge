@@ -97,7 +97,7 @@ Strategy: **vertical slices**. Each milestone delivers something runnable end-to
 - [x] `#43` **Persistence** — SQLite for task history, cost logs, agent metrics (WAL mode).
 - [x] `#44` **Documentation** — Full docs site. Getting started, configuration reference, provider guides, architecture deep-dive.
 - [x] `#45` **Docker** — Multi-stage Dockerfile + docker-compose with Ollama profile. One-command setup.
-- [x] `#46` **Tests** — 257 tests across 78 suites. Unit: core, routing, execution. All passing.
+- [x] `#46` **Tests** — 280 tests across 84 suites. Unit: core, routing, execution. Integration: API endpoints. All passing.
 
 ---
 
