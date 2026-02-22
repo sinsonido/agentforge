@@ -18,6 +18,30 @@ No authentication is required in the default configuration. When binding to
 `0.0.0.0` for production, place the server behind a reverse proxy with
 authentication (nginx, Caddy, etc.).
 
+### Security headers
+
+The server uses [Helmet](https://helmetjs.github.io/) for automatic HTTP
+security headers on every response:
+
+| Header | Value |
+|---|---|
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `X-Content-Type-Options` | `nosniff` |
+| `Strict-Transport-Security` | `max-age=15552000` |
+| `Content-Security-Policy` | restrictive default |
+| `Cross-Origin-*` | safe defaults |
+
+### Rate limiting
+
+All responses include `RateLimit-*` headers (RFC-compliant, no legacy headers).
+
+| Scope | Limit |
+|---|---|
+| All routes | 200 requests / minute per IP |
+| `POST /api/*` | 30 requests / minute per IP |
+
+Exceeding the limit returns `429 Too Many Requests`.
+
 ---
 
 ### System

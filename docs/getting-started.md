@@ -80,7 +80,9 @@ agentforge start
 # WebSocket at   ws://localhost:4242/ws
 ```
 
-Port is controlled by `server.port` in `agentforge.yml` (default `4242`).
+Port and bind address are controlled by `server.port` / `server.host` in
+`agentforge.yml` (defaults: port `4242`, host `127.0.0.1`). Override on the
+command line with `--port` / `--host`.
 
 ---
 

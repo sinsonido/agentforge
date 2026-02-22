@@ -25,6 +25,7 @@ program
   .command('start')
   .description('Start the orchestrator and dashboard')
   .option('-p, --port <port>', 'Dashboard port', '4242')
+  .option('--host <host>', 'Dashboard bind address', '127.0.0.1')
   .option('--no-dashboard', 'Start without the web dashboard')
   .action(async (opts) => {
     console.log(BANNER);
@@ -40,12 +41,13 @@ program
 
       // Start dashboard server if enabled
       const port = parseInt(opts.port) || config.server?.port || 4242;
+      const host = opts.host || config.server?.host || '127.0.0.1';
       if (opts.dashboard !== false) {
         try {
           const { startServer } = await import('./api/server.js').catch(() => null) || {};
           if (startServer) {
-            await startServer(forge, port);
-            console.log(`[✓] Dashboard: http://localhost:${port}`);
+            await startServer(forge, port, host);
+            console.log(`[✓] Dashboard: http://${host}:${port}`);
           }
         } catch {
           // Dashboard not yet implemented — skip silently

@@ -195,11 +195,43 @@ cp agentforge.db agentforge-backup.db
 
 ### API exposure
 
-By default the server binds to `localhost` only. When exposing to a network:
+By default the server binds to `127.0.0.1` only. Override with `--host`:
+
+```bash
+# Default — localhost only (recommended)
+agentforge start
+
+# Behind a reverse proxy — listen on all interfaces
+agentforge start --host 0.0.0.0
+
+# Or via agentforge.yml
+# server:
+#   host: 0.0.0.0
+#   port: 4242
+```
+
+When exposing to a network:
 
 1. Bind to `0.0.0.0` only behind a reverse proxy.
 2. Add HTTP basic auth or an API token header in nginx.
 3. Restrict `/api/control/start` and `/api/control/stop` to trusted origins.
+
+### HTTP security headers
+
+[Helmet](https://helmetjs.github.io/) is applied automatically to every
+response, adding `X-Frame-Options`, `X-Content-Type-Options`,
+`Strict-Transport-Security`, `Content-Security-Policy`, and other safe
+defaults.
+
+### Rate limiting
+
+The API enforces per-IP rate limits out of the box:
+
+- **200 req / min** on all routes (read operations)
+- **30 req / min** on `POST /api/*` (mutations)
+
+Clients receive standard `RateLimit-*` headers and `429 Too Many Requests`
+when the limit is exceeded.
 
 ### API keys
 

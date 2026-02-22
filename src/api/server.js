@@ -13,6 +13,8 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -353,6 +355,26 @@ function buildRouter(forge) {
 }
 
 // ---------------------------------------------------------------------------
+// Rate limiters
+// ---------------------------------------------------------------------------
+
+/** General read limiter: 200 req / 1 min per IP */
+const generalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+/** Strict mutation limiter: 30 req / 1 min per IP on POST /api/* */
+const mutationLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
@@ -365,6 +387,7 @@ function buildRouter(forge) {
  *
  * @param {Object} forge  - The forge instance returned by createAgentForge().
  * @param {number} [port=3000] - Port to listen on.
+ * @param {string} [host='127.0.0.1'] - Address to bind to.
  * @returns {http.Server} The underlying Node.js HTTP server.
  *
  * @example
@@ -374,8 +397,11 @@ function buildRouter(forge) {
  * const forge = await createAgentForge();
  * const server = startServer(forge, 3000);
  */
-export function startServer(forge, port = 3000) {
+export function startServer(forge, port = 3000, host = '127.0.0.1') {
   const app = express();
+
+  // Security headers
+  app.use(helmet());
 
   // Body parsing
   app.use(express.json());
@@ -383,6 +409,10 @@ export function startServer(forge, port = 3000) {
 
   // CORS — must be before routes
   app.use(corsMiddleware);
+
+  // Rate limiting
+  app.use(generalLimiter);
+  app.post('/api/*splat', mutationLimiter);
 
   // API routes
   app.use('/api', buildRouter(forge));
@@ -402,9 +432,9 @@ export function startServer(forge, port = 3000) {
   const httpServer = http.createServer(app);
   startWebSocketServer(httpServer, forge.eventBus);
 
-  httpServer.listen(port, () => {
-    console.log('[agentforge:api] REST API listening on http://localhost:%d', port);
-    console.log('[agentforge:api] WebSocket endpoint: ws://localhost:%d/ws', port);
+  httpServer.listen(port, host, () => {
+    console.log('[agentforge:api] REST API listening on http://%s:%d', host, port);
+    console.log('[agentforge:api] WebSocket endpoint: ws://%s:%d/ws', host, port);
   });
 
   return httpServer;
