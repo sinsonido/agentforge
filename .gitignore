@@ -5,3 +5,4 @@ agentforge.yml
 *.sqlite
 dist/
 .DS_Store
+*.cache/

@@ -37,6 +37,18 @@ cp agentforge.example.yml agentforge.yml
 # Run
 agentforge start
 # Opens dashboard at http://localhost:4242
+
+# Or use the start script (supports Cloudflare tunnel)
+bash scripts/start.sh                    # Normal start
+bash scripts/start.sh --tunnel           # Expose via Cloudflare tunnel (prints URL only)
+bash scripts/start.sh --tunnel --verbose # Full logs + tunnel URL highlighted
+bash scripts/start.sh --help             # All options
+
+# npm shortcuts
+npm start                   # Normal start
+npm run start:tunnel        # Start + Cloudflare tunnel
+npm run start:verbose       # Start with verbose output
+npm run start:tunnel:verbose
 ```
 
 ## Architecture

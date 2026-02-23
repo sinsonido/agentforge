@@ -8,7 +8,10 @@
     "agentforge": "./src/cli.js"
   },
   "scripts": {
-    "start": "node src/index.js",
+    "start": "bash scripts/start.sh",
+    "start:tunnel": "bash scripts/start.sh --tunnel",
+    "start:verbose": "bash scripts/start.sh --verbose",
+    "start:tunnel:verbose": "bash scripts/start.sh --tunnel --verbose",
     "dev": "node --watch src/index.js",
     "test": "node --test $(find tests -name '*.test.js' | LC_ALL=C sort)",
     "test:watch": "node --test --watch $(find tests -name '*.test.js' | LC_ALL=C sort)",
