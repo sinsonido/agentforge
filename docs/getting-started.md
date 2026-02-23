@@ -74,6 +74,7 @@ Config supports `${ENV_VAR}` substitution throughout. See [Configuration Referen
 ```bash
 agentforge start
 # or: node src/cli.js start
+# or: npm start
 
 # Dashboard opens at http://localhost:4242
 # API at         http://localhost:4242/api
@@ -83,6 +84,34 @@ agentforge start
 Port and bind address are controlled by `server.port` / `server.host` in
 `agentforge.yml` (defaults: port `4242`, host `127.0.0.1`). Override on the
 command line with `--port` / `--host`.
+
+### Start script (`scripts/start.sh`)
+
+The repo ships a self-contained start script with extra options:
+
+```bash
+bash scripts/start.sh                    # Same as agentforge start
+bash scripts/start.sh --tunnel           # Expose publicly via Cloudflare tunnel
+bash scripts/start.sh --tunnel --verbose # Full logs + tunnel URL highlighted
+bash scripts/start.sh --port 8080        # Custom port
+bash scripts/start.sh --help
+```
+
+The `--tunnel` mode automatically downloads `cloudflared` to `.cache/` on
+first run — no system-level install required. It prints **only the public URL**
+to stdout, making it easy to pipe into other tools:
+
+```bash
+URL=$(bash scripts/start.sh --tunnel)
+echo "Share this: $URL"
+```
+
+npm shortcuts:
+
+```bash
+npm run start:tunnel
+npm run start:tunnel:verbose
+```
 
 ---
 
@@ -144,6 +173,32 @@ team:
 ```
 
 Restart (`agentforge start`) and the orchestrator will assign tasks to agents based on task type and routing rules.
+
+---
+
+## 6. Develop against the dashboard
+
+When iterating on the UI or building integrations you need data in the system
+without running real LLM tasks. The seed script populates realistic test data
+via the REST API:
+
+```bash
+# One-shot: creates 14 tasks across all statuses + PR review events
+bash scripts/seed.sh
+
+# Continuous: keeps emitting task lifecycle events every few seconds
+# (great for watching the live activity feed)
+bash scripts/seed.sh --watch
+
+# Reset + re-seed in one go
+bash scripts/seed.sh --reset
+
+# Custom port
+bash scripts/seed.sh --port 8080
+```
+
+The seed targets **localhost only** — use it with `agentforge start`, not with
+the tunnel. It respects the server's 30 POST/min rate limit automatically.
 
 ---
 

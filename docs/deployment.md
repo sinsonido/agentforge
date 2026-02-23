@@ -191,6 +191,46 @@ cp agentforge.db agentforge-backup.db
 
 ---
 
+## Cloudflare Tunnel (quick public access)
+
+For temporary public exposure — demos, webhook testing, mobile access — without
+configuring a reverse proxy or opening firewall ports:
+
+```bash
+bash scripts/start.sh --tunnel
+# Prints a public URL, e.g.:
+# https://random-words.trycloudflare.com
+```
+
+**How it works:**
+
+1. The start script downloads `cloudflared` to `.cache/` on first run (no system install).
+2. Starts AgentForge bound to `0.0.0.0` in the background.
+3. Waits until `/api/status` responds, then opens a quick tunnel on
+   [trycloudflare.com](https://trycloudflare.com).
+4. Prints only the public URL to stdout; all other output is suppressed.
+5. On `Ctrl+C` both the server and tunnel are cleanly terminated.
+
+**Verbose mode** shows full server logs and cloudflared output, highlighting the URL when it appears:
+
+```bash
+bash scripts/start.sh --tunnel --verbose
+```
+
+**Capture the URL** for use in scripts or CI:
+
+```bash
+TUNNEL_URL=$(bash scripts/start.sh --tunnel)
+# Pass to e2e tests, notify a webhook, etc.
+```
+
+> **Note:** Quick tunnels are ephemeral (new URL each run) and not suitable for
+> production. For stable public URLs use a
+> [named Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/)
+> or the nginx reverse proxy setup above.
+
+---
+
 ## Security considerations
 
 ### API exposure
