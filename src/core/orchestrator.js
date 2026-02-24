@@ -82,6 +82,14 @@ export class Orchestrator {
       // Calculate and record cost
       const cost = this._calculateCost(route.model, result.tokens_in, result.tokens_out);
       this.costTracker.recordCost(projectId, task.agent_id, route.model, cost);
+      eventBus.emit('cost.recorded', {
+        projectId,
+        agentId: task.agent_id,
+        model: route.model,
+        tokensIn: result.tokens_in,
+        tokensOut: result.tokens_out,
+        cost,
+      });
 
       // Parse output
       const output = this.outputCollector.parse(result, task);

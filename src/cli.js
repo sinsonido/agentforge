@@ -71,6 +71,7 @@ program
         console.log('\n[agentforge] Shutting down...');
         clearInterval(statusInterval);
         orchestrator.stop();
+        forge.db?.close();
         process.exit(0);
       });
 

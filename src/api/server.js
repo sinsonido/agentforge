@@ -88,15 +88,28 @@ function buildRouter(forge) {
 
   // ── GET /api/tasks ───────────────────────────────────────────────────────
   /**
-   * List tasks. Optional query param: ?status=queued|executing|completed|failed
+   * List tasks. Merges live queue with DB history.
+   * Optional query param: ?status=queued|executing|completed|failed
    */
   router.get('/tasks', (req, res) => {
     try {
       const { status } = req.query;
-      const tasks = status
+      const liveTasks = status
         ? forge.taskQueue.getByStatus(status)
         : forge.taskQueue.getAll();
-      res.json({ ok: true, count: tasks.length, tasks });
+
+      // Merge DB history (completed/failed not in live queue)
+      if (forge.db) {
+        const liveIds = new Set(liveTasks.map(t => t.id));
+        const dbHistory = status
+          ? forge.db.getTasksByStatus(status)
+          : forge.db.getTaskHistory(500);
+        const dbOnly = dbHistory.filter(t => !liveIds.has(t.id));
+        const merged = [...liveTasks, ...dbOnly];
+        return res.json({ ok: true, count: merged.length, tasks: merged });
+      }
+
+      res.json({ ok: true, count: liveTasks.length, tasks: liveTasks });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -242,17 +255,52 @@ function buildRouter(forge) {
 
   // ── GET /api/costs ───────────────────────────────────────────────────────
   /**
-   * Cost stats: project budgets, spend by agent and model.
-   * Falls back gracefully if costTracker is not yet available.
+   * Cost stats with normalized shape for UI consumption.
+   * Returns: { totalCostUSD, byAgent, byModel, transactions, budgets }
    */
   router.get('/costs', (req, res) => {
     try {
-      // costTracker may live on orchestrator or directly on forge
       const costTracker = forge.costTracker ?? forge.orchestrator?.costTracker;
-      if (!costTracker) {
+      const db = forge.db;
+
+      if (!costTracker && !db) {
         return res.json({ ok: true, available: false, costs: null });
       }
-      const costs = costTracker.getAllStats();
+
+      // Base shape from in-memory cost tracker
+      const rawStats = costTracker?.getAllStats?.() ?? {};
+
+      // Enrich with DB data when available
+      let byAgent = {};
+      let transactions = [];
+      if (db) {
+        const projectId = forge.config?.project?.name || 'default';
+        const agentRows = db.getCostByAgent(projectId);
+        for (const row of agentRows) {
+          byAgent[row.agent_id] = row.total;
+        }
+        transactions = db.getRecentEvents(200)
+          .filter(e => e.event === 'cost.recorded')
+          .map(e => e.data);
+      }
+
+      // Aggregate from rawStats if DB not available
+      if (!db && rawStats.byAgent) {
+        byAgent = rawStats.byAgent;
+      }
+
+      const totalCostUSD = Object.values(byAgent).reduce((s, v) => s + v, 0)
+        || rawStats.totalCost
+        || 0;
+
+      const costs = {
+        totalCostUSD,
+        byAgent,
+        byModel: rawStats.byModel ?? {},
+        transactions,
+        budgets: rawStats.budgets ?? rawStats.projects ?? {},
+      };
+
       res.json({ ok: true, available: true, costs });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -261,12 +309,16 @@ function buildRouter(forge) {
 
   // ── GET /api/events ──────────────────────────────────────────────────────
   /**
-   * Recent events from the event bus.
+   * Recent events. Prefers DB when available.
    * Optional query param: ?limit=50  (default 50, max 1000)
    */
   router.get('/events', (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 1000);
+      if (forge.db) {
+        const events = forge.db.getRecentEvents(limit);
+        return res.json({ ok: true, count: events.length, events });
+      }
       const events = forge.eventBus.getRecentEvents(limit);
       res.json({ ok: true, count: events.length, events });
     } catch (err) {
@@ -400,8 +452,22 @@ const mutationLimiter = rateLimit({
 export function startServer(forge, port = 3000, host = '127.0.0.1') {
   const app = express();
 
-  // Security headers
-  app.use(helmet());
+  // Security headers — allow inline styles/scripts needed by React/Vite build
+  const isReactBuild = fs.existsSync(path.resolve(__dirname, '../../ui/dist'));
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", ...(isReactBuild ? [] : ["'unsafe-inline'"])],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", 'data:'],
+        connectSrc: ["'self'", 'ws:', 'wss:'],
+        fontSrc: ["'self'"],
+        objectSrc: ["'none'"],
+        upgradeInsecureRequests: [],
+      },
+    },
+  }));
 
   // Body parsing
   app.use(express.json());
@@ -417,10 +483,11 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // API routes
   app.use('/api', buildRouter(forge));
 
-  // Static UI — serve if the directory exists; silently skip if not
-  const uiDir = path.resolve(__dirname, '../ui');
-  const uiExists = fs.existsSync(uiDir);
-  if (uiExists) {
+  // Static UI — prefer React build (ui/dist/) over vanilla (src/ui/)
+  const reactBuildDir = path.resolve(__dirname, '../../ui/dist');
+  const vanillaUIDir  = path.resolve(__dirname, '../ui');
+  const uiDir = fs.existsSync(reactBuildDir) ? reactBuildDir : vanillaUIDir;
+  if (fs.existsSync(uiDir)) {
     app.use(express.static(uiDir));
     // SPA fallback: serve index.html for any non-API route
     app.get('/{*splat}', (req, res) => {
