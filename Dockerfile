@@ -1,4 +1,15 @@
-# ─── Stage 1: Install production dependencies ──────────────────────────────
+# ─── Stage 1: Build React UI ───────────────────────────────────────────────
+FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS ui-builder
+
+WORKDIR /ui
+
+COPY ui/package.json ui/package-lock.json* ./
+RUN npm ci
+
+COPY ui/ ./
+RUN npm run build
+
+# ─── Stage 2: Install production dependencies ──────────────────────────────
 FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS deps
 
 WORKDIR /app
@@ -9,7 +20,7 @@ COPY package.json package-lock.json* ./
 # Install production dependencies only
 RUN npm ci --omit=dev
 
-# ─── Stage 2: Final application image ──────────────────────────────────────
+# ─── Stage 3: Final application image ──────────────────────────────────────
 FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS app
 
 WORKDIR /app
@@ -25,6 +36,9 @@ COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 
 # Copy application source
 COPY --chown=node:node src/ ./src/
+
+# Copy React build output — server.js detects ui/dist/ and serves it
+COPY --from=ui-builder --chown=node:node /ui/dist ./ui/dist/
 
 # Seed a default config; operators mount their real agentforge.yml at runtime
 COPY --chown=node:node agentforge.example.yml ./agentforge.yml
