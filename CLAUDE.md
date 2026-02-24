@@ -86,10 +86,18 @@ idle → assigned → executing → reviewing → completed → idle
 
 Always use `gh` (GitHub CLI) for repository operations. Never use raw `curl` against the GitHub API or construct URLs manually.
 
+**Before creating any issue, check for duplicates:**
+```bash
+gh issue list --state all --search "keyword"   # search by keyword
+gh issue list --state open                     # scan all open issues
+```
+If a matching issue exists (open or closed), comment on it or reopen it instead of creating a new one. Wave-style planning often produces overlapping issues (e.g. "Dashboard UI" and "React Dashboard view" describe the same feature).
+
 ```bash
 # Issues
 gh issue create --title "..." --body "..." --label feat
 gh issue list --state open
+gh issue list --state all --search "keyword"
 gh issue view 42
 gh issue close 42
 

@@ -15,6 +15,8 @@ this repository. Read `CLAUDE.md` first for architecture, conventions, and dev c
 6. **No force-push to master.** Use PRs for large changes; direct push only for small, green-tested patches.
 7. **Node 24 only.** Do not target, test against, or add compatibility code for Node 20 or 22.
 8. **Use `gh` for GitHub.** All issue/PR/release/CI operations go through `gh` CLI. Never construct raw GitHub API calls with `curl` or `fetch`.
+9. **No duplicate issues.** Before creating an issue, run `gh issue list --state all --search "<keyword>"`. If a matching issue exists, reuse it. Wave-style planning regularly produces overlapping issues for the same feature — prefer one issue per feature, not one per planning wave.
+10. **Close issues when work lands.** Every commit that completes a feature must close the corresponding issue. Use `Closes #N` in the commit message (auto-closes on push to master) or `gh issue close N` manually.
 
 ---
 
