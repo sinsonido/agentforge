@@ -166,6 +166,13 @@ export class AgentPool {
   has(id) {
     return this.agents.has(id);
   }
+
+  updateAgentConfig(id, patch) {
+    const agent = this.agents.get(id);
+    if (!agent) return false;
+    Object.assign(agent.config, patch);
+    return true;
+  }
 }
 
 export default AgentPool;
