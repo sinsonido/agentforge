@@ -18,7 +18,10 @@
     "lint": "eslint src/",
     "docker:build": "docker build -t agentforge .",
     "docker:run": "docker-compose up",
-    "docker:dev": "docker-compose up --build"
+    "docker:dev": "docker-compose up --build",
+    "ui:install": "cd ui && npm install",
+    "ui:dev": "cd ui && npm run dev",
+    "ui:build": "cd ui && npm run build"
   },
   "keywords": [
     "ai",
