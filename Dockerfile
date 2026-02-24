@@ -1,5 +1,5 @@
 # ─── Stage 1: Build React UI ───────────────────────────────────────────────
-FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS ui-builder
+FROM node:24-alpine@sha256:d88d203cab4ee6fa4897d8286f3caea2e9cf48db77176042fca2f4ac4a4414ce AS ui-builder
 
 WORKDIR /ui
 
@@ -10,7 +10,7 @@ COPY ui/ ./
 RUN npm run build
 
 # ─── Stage 2: Install production dependencies ──────────────────────────────
-FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS deps
+FROM node:24-alpine@sha256:d88d203cab4ee6fa4897d8286f3caea2e9cf48db77176042fca2f4ac4a4414ce AS deps
 
 WORKDIR /app
 
@@ -21,7 +21,7 @@ COPY package.json package-lock.json* ./
 RUN npm ci --omit=dev
 
 # ─── Stage 3: Final application image ──────────────────────────────────────
-FROM node:20-alpine@sha256:c3324aa3efea082c8d294a93b97ba82adc5498a202bd48802f5a8af152e7dd9e AS app
+FROM node:24-alpine@sha256:d88d203cab4ee6fa4897d8286f3caea2e9cf48db77176042fca2f4ac4a4414ce AS app
 
 WORKDIR /app
 

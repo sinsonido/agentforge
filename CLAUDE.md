@@ -1,7 +1,10 @@
 # AgentForge — Claude Code Instructions
 
 Multi-agent orchestration platform: routes tasks to AI models with cost control, quota
-management, and SQLite persistence. Node.js ES modules only (no transpilation, Node 20+).
+management, and SQLite persistence. Node.js ES modules only (no transpilation, **Node 24**).
+
+> **Runtime:** Node 24 is the only supported version. Do not use 20 or 22.
+> **GitHub:** Use `gh` CLI for all repository operations (PRs, issues, releases). Never raw `curl` the GitHub API.
 
 ---
 
@@ -79,10 +82,37 @@ idle → assigned → executing → reviewing → completed → idle
 
 ---
 
+## GitHub tooling
+
+Always use `gh` (GitHub CLI) for repository operations. Never use raw `curl` against the GitHub API or construct URLs manually.
+
+```bash
+# Issues
+gh issue create --title "..." --body "..." --label feat
+gh issue list --state open
+gh issue view 42
+gh issue close 42
+
+# Pull Requests
+gh pr create --title "..." --body "..."   # from current branch
+gh pr list
+gh pr view 17
+gh pr merge 17 --squash
+
+# Releases
+gh release create v1.2.0 --generate-notes
+
+# CI / Actions
+gh run list
+gh run view <id> --log
+```
+
+---
+
 ## Dev commands
 
 ```bash
-# Tests
+# Tests (Node 24 required)
 npm test                                  # all tests (Node built-in runner)
 node --test tests/persistence/db.test.js  # single file
 node --test --test-reporter=spec          # verbose output
@@ -128,6 +158,8 @@ docker run -p 4242:4242 -v $(pwd)/agentforge.yml:/app/agentforge.yml agentforge
 - Do not commit `agentforge.yml` (contains secrets) — only `agentforge.example.yml`.
 - Do not use `git add -A` or `git add .` — stage specific files to avoid committing `.agentforge/` data.
 - Do not push to `master` without tests passing (`npm test`).
+- **Do not use Node 20 or Node 22.** The project targets Node 24 exclusively. Do not write code that only runs on older versions or add compat shims.
+- **Do not use raw `curl` / `fetch` against the GitHub API.** Use `gh` CLI instead — it handles auth, pagination, and error formatting automatically.
 
 ---
 

@@ -37,7 +37,7 @@ ollama pull deepseek-r1:32b  # Reasoning model
 
 - **One PR per issue.** Keep changes focused.
 - **Tests included.** Use Node.js built-in test runner (`node --test`).
-- **No transpilation.** Native ES modules, Node 20+.
+- **No transpilation.** Native ES modules, Node 24 (only supported version).
 - **Error messages over comments.** Code should explain itself; errors should help the user.
 
 ## Issue Labels

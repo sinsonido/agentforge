@@ -13,6 +13,8 @@ this repository. Read `CLAUDE.md` first for architecture, conventions, and dev c
 4. **Run tests before committing.** `npm test` must pass with 0 failures.
 5. **Stage specific files.** Never `git add -A`; avoid committing `.agentforge/` or `agentforge.yml`.
 6. **No force-push to master.** Use PRs for large changes; direct push only for small, green-tested patches.
+7. **Node 24 only.** Do not target, test against, or add compatibility code for Node 20 or 22.
+8. **Use `gh` for GitHub.** All issue/PR/release/CI operations go through `gh` CLI. Never construct raw GitHub API calls with `curl` or `fetch`.
 
 ---
 
