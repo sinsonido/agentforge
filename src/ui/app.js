@@ -101,7 +101,7 @@ function priorityDot(p = 'medium') {
 // WebSocket — real-time event feed
 // ─────────────────────────────────────────────────────────────────────────────
 
-const WS_URL = `ws://${location.host}/ws`;
+const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`;
 let ws = null;
 let wsReconnectTimer = null;
 const eventLog = [];        // in-memory log for dashboard feed
