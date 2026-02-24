@@ -365,4 +365,26 @@ describe('AgentPool', () => {
       assert.equal(statuses.a2.state, 'idle');
     });
   });
+
+  describe('updateAgentConfig()', () => {
+    it('returns true and applies patch to existing agent', () => {
+      pool.register({ id: 'cfg1', name: 'Cfg' });
+      const result = pool.updateAgentConfig('cfg1', { model: 'claude-haiku-4-5-20251001' });
+      assert.equal(result, true);
+      assert.equal(pool.get('cfg1').config.model, 'claude-haiku-4-5-20251001');
+    });
+
+    it('merges patch without overwriting unrelated config keys', () => {
+      pool.register({ id: 'cfg2', name: 'Cfg2' });
+      pool.updateAgentConfig('cfg2', { model: 'claude-opus-4-6', maxTokens: 1000 });
+      pool.updateAgentConfig('cfg2', { maxTokens: 2000 });
+      assert.equal(pool.get('cfg2').config.model, 'claude-opus-4-6');
+      assert.equal(pool.get('cfg2').config.maxTokens, 2000);
+    });
+
+    it('returns false for an unknown agent id', () => {
+      const result = pool.updateAgentConfig('ghost', { model: 'x' });
+      assert.equal(result, false);
+    });
+  });
 });
