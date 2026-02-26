@@ -1,0 +1,28 @@
+# PR-Agent configuration for AgentForge
+# https://qodo-merge-docs.qodo.ai/usage-guide/additional_configurations/
+
+[config]
+model = "anthropic/claude-sonnet-4-6"
+fallback_models = ["anthropic/claude-haiku-4-5-20251001"]
+
+[pr_reviewer]
+# Focus review on areas relevant to the AgentForge architecture
+extra_instructions = """
+Focus on:
+- ES module correctness (no require/CommonJS)
+- EventBus usage patterns (events over direct calls)
+- Provider interface compliance ({ content, tokens_in, tokens_out, tool_calls, finish_reason })
+- SQLite access through AgentForgeDB only (never query directly)
+- Security vulnerabilities (injection, XSS, insecure dependencies)
+- Node 24 compatibility (no Node 20/22 workarounds or shims)
+"""
+require_security_review = true
+num_code_suggestions = 6
+
+[pr_description]
+publish_labels = true
+generate_ai_title = true
+
+[pr_code_suggestions]
+num_code_suggestions = 5
+suggestions_score_threshold = 6
