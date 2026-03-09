@@ -53,6 +53,6 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
-    "eslint": "^10.0.1"
+    "eslint": "^10.0.3"
   }
 }
