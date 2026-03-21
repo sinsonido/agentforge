@@ -13,7 +13,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  status: () => request<{ ok: boolean; orchestrator: { running: boolean }; tasks: Record<string, number>; quotas: Record<string, import('../types/api').QuotaStatus>; agents: Record<string, unknown> }>('/status'),
+  status: () => request<import('../types/api').SystemStatus>('/status'),
   tasks: (status?: string) => request<{ ok: boolean; tasks: import('../types/api').Task[] }>(`/tasks${status ? `?status=${status}` : ''}`),
   createTask: (body: { title: string; type?: string; priority?: string; agent_id?: string }) =>
     request<{ ok: boolean; task: import('../types/api').Task }>('/tasks', { method: 'POST', body: JSON.stringify(body) }),
