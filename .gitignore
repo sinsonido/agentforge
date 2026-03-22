@@ -6,3 +6,4 @@ agentforge.yml
 dist/
 .DS_Store
 *.cache/
+\n# E2E\ne2e/report/\ntest-results/
