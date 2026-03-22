@@ -1,0 +1,80 @@
+project:
+  name: "AgentForge E2E Test"
+  budget: 999.00
+  currency: USD
+
+providers:
+  anthropic:
+    enabled: false
+    api_key: test-key
+    quota:
+      max_requests_per_minute: 100
+      auto_pause: false
+      auto_resume: false
+
+  google:
+    enabled: false
+    api_key: test-key
+    quota:
+      max_requests_per_minute: 60
+      auto_pause: false
+      auto_resume: false
+
+  deepseek:
+    enabled: false
+    api_key: test-key
+    quota:
+      max_requests_per_minute: 100
+      auto_pause: false
+      auto_resume: false
+
+  openrouter:
+    enabled: false
+    api_key: test-key
+
+  ollama:
+    enabled: false
+    endpoint: http://localhost:11434
+
+models:
+  claude-sonnet-4:
+    provider: anthropic
+    tier: 2
+    cost_in: 3.00
+    cost_out: 15.00
+    context: 200000
+
+  gemini-2.5-flash:
+    provider: google
+    tier: 2
+    cost_in: 0.15
+    cost_out: 0.60
+    context: 1000000
+
+routing:
+  rules: []
+  fallback_strategy: same_tier_then_downgrade
+  cost_optimization: false
+
+team:
+  - name: Architect
+    role: Lead Architect
+    model: claude-sonnet-4
+
+  - name: Developer
+    role: Backend Developer
+    model: claude-sonnet-4
+
+  - name: Tester
+    role: QA Engineer
+    model: gemini-2.5-flash
+
+git:
+  enabled: false
+
+server:
+  port: 4243
+  host: 127.0.0.1
+
+database:
+  path: /tmp/agentforge-e2e-test.db

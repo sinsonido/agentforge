@@ -87,7 +87,7 @@ export async function createAgentForge(configPath) {
   }
 
   // Database — persist events, tasks, costs
-  const db = new AgentForgeDB();
+  const db = new AgentForgeDB(config.database?.path);
 
   const TASK_EVENTS = ['task.queued', 'task.executing', 'task.completed', 'task.failed'];
   for (const evt of TASK_EVENTS) {
