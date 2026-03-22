@@ -13,6 +13,7 @@ test.describe('Tasks — create and verify in Kanban', () => {
 
   test('can create a task and it appears in Queued column', async ({ page }) => {
     const taskTitle = `E2E test task ${Date.now()}`
+    const queuedColumn = page.locator('div').filter({ hasText: /^Queued/ }).first()
 
     await page.getByRole('button', { name: 'Add Task' }).click()
     await page.getByPlaceholder('Task description').fill(taskTitle)
@@ -21,20 +22,21 @@ test.describe('Tasks — create and verify in Kanban', () => {
     // Dialog closes after creation
     await expect(page.getByRole('dialog')).not.toBeVisible()
 
-    // Task appears in Queued column
-    await expect(page.getByText(taskTitle)).toBeVisible()
+    // Task appears scoped to the Queued column
+    await expect(queuedColumn.getByText(taskTitle)).toBeVisible()
   })
 
   test('can set priority when creating a task', async ({ page }) => {
     const taskTitle = `E2E priority task ${Date.now()}`
+    const queuedColumn = page.locator('div').filter({ hasText: /^Queued/ }).first()
 
     await page.getByRole('button', { name: 'Add Task' }).click()
     await page.getByPlaceholder('Task description').fill(taskTitle)
-    await page.getByRole('combobox').selectOption('high')
+    await page.getByRole('dialog').getByRole('combobox').selectOption('high')
     await page.getByRole('button', { name: 'Create' }).click()
 
     await expect(page.getByRole('dialog')).not.toBeVisible()
-    await expect(page.getByText(taskTitle)).toBeVisible()
+    await expect(queuedColumn.getByText(taskTitle)).toBeVisible()
   })
 
   test('Cancel closes dialog without creating task', async ({ page }) => {
@@ -61,6 +63,7 @@ test.describe('Tasks — create and verify in Kanban', () => {
       `E2E task A ${Date.now()}`,
       `E2E task B ${Date.now()}`,
     ]
+    const queuedColumn = page.locator('div').filter({ hasText: /^Queued/ }).first()
 
     for (const title of titles) {
       await page.getByRole('button', { name: 'Add Task' }).click()
@@ -70,7 +73,7 @@ test.describe('Tasks — create and verify in Kanban', () => {
     }
 
     for (const title of titles) {
-      await expect(page.getByText(title)).toBeVisible()
+      await expect(queuedColumn.getByText(title)).toBeVisible()
     }
   })
 })
