@@ -476,8 +476,8 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // CORS — must be before routes
   app.use(corsMiddleware);
 
-  // Rate limiting
-  app.use(generalLimiter);
+  // Rate limiting — scoped to API routes only (not static files)
+  app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
 
   // API routes
