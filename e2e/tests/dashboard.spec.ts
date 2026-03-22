@@ -60,4 +60,9 @@ test.describe('Dashboard — KPIs and orchestrator', () => {
   test('recent tasks shows empty state with no tasks', async ({ page }) => {
     await expect(page.getByText('No tasks yet.')).toBeVisible()
   })
+
+  test('Provider Quotas section shows no-providers message', async ({ page }) => {
+    // All providers disabled in test config so QuotaList renders the empty state
+    await expect(page.getByText('No providers configured.')).toBeVisible()
+  })
 })

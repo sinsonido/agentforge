@@ -20,6 +20,18 @@ test.describe('Kanban — board structure', () => {
   test('Add Task button is visible', async ({ page }) => {
     await expect(page.getByRole('button', { name: 'Add Task' })).toBeVisible()
   })
+
+  test('task count header updates after creating a task', async ({ page, request }) => {
+    await request.post('http://127.0.0.1:4243/api/control/stop')
+
+    await page.getByRole('button', { name: 'Add Task' }).click()
+    await page.getByPlaceholder('Task description').fill(`Counter test ${Date.now()}`)
+    await page.getByRole('button', { name: 'Create' }).click()
+    await expect(page.getByRole('dialog')).not.toBeVisible()
+
+    // The header should reflect the new total (at least 1 task)
+    await expect(page.getByText(/[1-9]\d* tasks total/)).toBeVisible()
+  })
 })
 
 test.describe('Tasks — create and verify in Kanban', () => {
