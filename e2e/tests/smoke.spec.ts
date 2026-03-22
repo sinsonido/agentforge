@@ -33,7 +33,10 @@ test.describe('Smoke — app loads and all views are accessible', () => {
 
   test('Costs view renders', async ({ page }) => {
     await page.goto('/costs')
-    await expect(page.getByRole('link', { name: 'Costs' })).toBeVisible()
+    await page.waitForLoadState('networkidle')
+    // Costs view shows spend or empty state — either is valid
+    const content = page.getByText('Total Spend').or(page.getByText('Cost tracking not available.'))
+    await expect(content.first()).toBeVisible()
     await expect(page.locator('body')).not.toContainText('Something went wrong')
   })
 })

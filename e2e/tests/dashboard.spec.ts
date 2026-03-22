@@ -27,17 +27,15 @@ test.describe('Dashboard — KPIs and orchestrator', () => {
     const startBtn = page.getByRole('button', { name: 'Start' })
     const stopBtn = page.getByRole('button', { name: 'Stop' })
 
+    // Start if stopped
     if (await startBtn.isVisible()) {
       await startBtn.click()
       await expect(stopBtn).toBeVisible()
-      await stopBtn.click()
-      await expect(startBtn).toBeVisible()
-    } else {
-      await stopBtn.click()
-      await expect(startBtn).toBeVisible()
-      await startBtn.click()
-      await expect(stopBtn).toBeVisible()
     }
+
+    // Always end in Stopped state to avoid affecting subsequent tests
+    await stopBtn.click()
+    await expect(startBtn).toBeVisible()
   })
 
   test('recent tasks table is present', async ({ page }) => {

@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
+  workers: 1,
   retries: 1,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'e2e/report' }]],
 
