@@ -30,4 +30,49 @@ test.describe('Costs — spend tracking', () => {
     await expect(page.getByText('Budget Usage')).toBeVisible()
     await expect(page.getByText('Transaction Log')).toBeVisible()
   })
+
+  test('shows Cumulative Spend and Breakdown sections', async ({ page }) => {
+    await page.waitForLoadState('networkidle')
+    const notAvailable = page.getByText('Cost tracking not available.')
+    if (await notAvailable.isVisible()) return
+
+    await expect(page.getByText('Cumulative Spend')).toBeVisible()
+    await expect(page.getByText('Breakdown')).toBeVisible()
+  })
+
+  test('budget bar shows project name from config', async ({ page }) => {
+    await page.waitForLoadState('networkidle')
+    const notAvailable = page.getByText('Cost tracking not available.')
+    if (await notAvailable.isVisible()) return
+
+    await expect(page.getByText('AgentForge E2E Test')).toBeVisible()
+  })
+
+  test('transaction log shows no transactions with fresh DB', async ({ page }) => {
+    await page.waitForLoadState('networkidle')
+    const notAvailable = page.getByText('Cost tracking not available.')
+    if (await notAvailable.isVisible()) return
+
+    await expect(page.getByText('No transactions recorded.')).toBeVisible()
+  })
+
+  test('breakdown section shows By Agent and By Model sub-sections', async ({ page }) => {
+    await page.waitForLoadState('networkidle')
+    const notAvailable = page.getByText('Cost tracking not available.')
+    if (await notAvailable.isVisible()) return
+
+    await expect(page.getByText('By Agent')).toBeVisible()
+    await expect(page.getByText('By Model')).toBeVisible()
+  })
+
+  test('breakdown sub-sections show empty state with no transactions', async ({ page }) => {
+    await page.waitForLoadState('networkidle')
+    const notAvailable = page.getByText('Cost tracking not available.')
+    if (await notAvailable.isVisible()) return
+
+    // Both By Agent and By Model show "No data." with a fresh DB
+    const noData = page.getByText('No data.')
+    await expect(noData.first()).toBeVisible()
+    await expect(noData).toHaveCount(2)
+  })
 })
