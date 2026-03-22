@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test'
 
 test.describe('Tasks — create and verify in Kanban', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page, request }) => {
+    // Stop orchestrator so created tasks stay in Queued state (not picked up for execution)
+    await request.post('http://127.0.0.1:4243/api/control/stop')
     await page.goto('/kanban')
+    await page.waitForLoadState('networkidle')
   })
 
   test('Add Task button opens dialog', async ({ page }) => {
