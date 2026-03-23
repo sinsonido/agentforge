@@ -22,7 +22,7 @@ test.describe('Kanban — board structure', () => {
   })
 
   test('task count header updates after creating a task', async ({ page, request }) => {
-    await request.post('http://127.0.0.1:4243/api/control/stop')
+    await request.post('/api/control/stop')
 
     await page.getByRole('button', { name: 'Add Task' }).click()
     await page.getByPlaceholder('Task description').fill(`Counter test ${Date.now()}`)
@@ -37,7 +37,7 @@ test.describe('Kanban — board structure', () => {
 test.describe('Tasks — create and verify in Kanban', () => {
   test.beforeEach(async ({ page, request }) => {
     // Stop orchestrator so created tasks stay in Queued state (not picked up for execution)
-    await request.post('http://127.0.0.1:4243/api/control/stop')
+    await request.post('/api/control/stop')
     await page.goto('/kanban')
     await page.waitForLoadState('networkidle')
   })

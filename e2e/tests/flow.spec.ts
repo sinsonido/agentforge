@@ -3,7 +3,7 @@ import { test, expect } from '@playwright/test'
 test.describe('Cross-view flows', () => {
   test('task created in Kanban appears in Dashboard Recent Tasks', async ({ page, request }) => {
     // Stop orchestrator so the task stays queued and doesn't get picked up
-    await request.post('http://127.0.0.1:4243/api/control/stop')
+    await request.post('/api/control/stop')
 
     const taskTitle = `Flow test task ${Date.now()}`
 
@@ -22,7 +22,7 @@ test.describe('Cross-view flows', () => {
   })
 
   test('task created in Kanban increments Dashboard Queued KPI', async ({ page, request }) => {
-    await request.post('http://127.0.0.1:4243/api/control/stop')
+    await request.post('/api/control/stop')
 
     // Read current Queued count from Dashboard
     await page.goto('/dashboard')
