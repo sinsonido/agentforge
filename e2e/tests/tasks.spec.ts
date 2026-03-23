@@ -1,9 +1,43 @@
 import { test, expect } from '@playwright/test'
 
+test.describe('Kanban — board structure', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/kanban')
+    await page.waitForLoadState('networkidle')
+  })
+
+  test('shows all four columns', async ({ page }) => {
+    for (const col of ['Queued', 'Executing', 'Completed', 'Failed']) {
+      await expect(page.getByText(col, { exact: true }).first()).toBeVisible()
+    }
+  })
+
+  test('shows task count header', async ({ page }) => {
+    // Header shows "N tasks total" even when 0
+    await expect(page.getByText(/\d+ tasks total/)).toBeVisible()
+  })
+
+  test('Add Task button is visible', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Add Task' })).toBeVisible()
+  })
+
+  test('task count header updates after creating a task', async ({ page, request }) => {
+    await request.post('/api/control/stop')
+
+    await page.getByRole('button', { name: 'Add Task' }).click()
+    await page.getByPlaceholder('Task description').fill(`Counter test ${Date.now()}`)
+    await page.getByRole('button', { name: 'Create' }).click()
+    await expect(page.getByRole('dialog')).not.toBeVisible()
+
+    // The header should reflect the new total (at least 1 task)
+    await expect(page.getByText(/[1-9]\d* tasks total/)).toBeVisible()
+  })
+})
+
 test.describe('Tasks — create and verify in Kanban', () => {
   test.beforeEach(async ({ page, request }) => {
     // Stop orchestrator so created tasks stay in Queued state (not picked up for execution)
-    await request.post('http://127.0.0.1:4243/api/control/stop')
+    await request.post('/api/control/stop')
     await page.goto('/kanban')
     await page.waitForLoadState('networkidle')
   })
@@ -59,6 +93,21 @@ test.describe('Tasks — create and verify in Kanban', () => {
 
     // Dialog should remain open (HTML5 required validation)
     await expect(page.getByRole('dialog')).toBeVisible()
+  })
+
+  test('created task persists after page reload', async ({ page }) => {
+    const taskTitle = `E2E persist task ${Date.now()}`
+    const queuedColumn = page.locator('div').filter({ hasText: /^Queued/ }).first()
+
+    await page.getByRole('button', { name: 'Add Task' }).click()
+    await page.getByPlaceholder('Task description').fill(taskTitle)
+    await page.getByRole('button', { name: 'Create' }).click()
+    await expect(page.getByRole('dialog')).not.toBeVisible()
+
+    // Reload and verify the task is still in the Queued column
+    await page.reload()
+    await page.waitForLoadState('networkidle')
+    await expect(queuedColumn.getByText(taskTitle)).toBeVisible()
   })
 
   test('multiple tasks appear in Queued column', async ({ page }) => {

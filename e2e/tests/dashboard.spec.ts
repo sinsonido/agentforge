@@ -42,4 +42,27 @@ test.describe('Dashboard — KPIs and orchestrator', () => {
     // Table renders even with no tasks (empty state or headers visible)
     await expect(page.locator('body')).not.toContainText('Something went wrong')
   })
+
+  test('shows Provider Quotas, Live Activity and Recent Tasks sections', async ({ page }) => {
+    await expect(page.getByText('Provider Quotas')).toBeVisible()
+    await expect(page.getByText('Live Activity')).toBeVisible()
+    await expect(page.getByText('Recent Tasks')).toBeVisible()
+  })
+
+  test('KPI values are 0 with fresh test DB', async ({ page }) => {
+    // Each KPI card: label p → parent CardContent → sibling .tabular-nums holds the numeric value
+    for (const label of ['Queued', 'Executing', 'Completed', 'Failed']) {
+      const valueEl = page.getByText(label, { exact: true }).locator('..').locator('.tabular-nums')
+      await expect(valueEl).toHaveText('0')
+    }
+  })
+
+  test('recent tasks shows empty state with no tasks', async ({ page }) => {
+    await expect(page.getByText('No tasks yet.')).toBeVisible()
+  })
+
+  test('Provider Quotas section shows no-providers message', async ({ page }) => {
+    // All providers disabled in test config so QuotaList renders the empty state
+    await expect(page.getByText('No providers configured.')).toBeVisible()
+  })
 })

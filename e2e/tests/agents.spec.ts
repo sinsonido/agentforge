@@ -46,4 +46,18 @@ test.describe('Agents — list and edit', () => {
     // Dialog closes on success
     await expect(page.getByRole('dialog')).not.toBeVisible()
   })
+
+  test('each agent card shows its ID in mono below the name', async ({ page }) => {
+    // AgentCard renders agent.id in a mono <p> below the name
+    for (const id of ['architect', 'developer', 'tester']) {
+      await expect(page.getByText(id, { exact: true })).toBeVisible()
+    }
+  })
+
+  test('each agent card shows state transitions count', async ({ page }) => {
+    // Fresh agents start with 0 state transitions
+    const transitionText = page.getByText('0 state transitions')
+    await expect(transitionText.first()).toBeVisible()
+    await expect(transitionText).toHaveCount(TEST_AGENTS.length)
+  })
 })
