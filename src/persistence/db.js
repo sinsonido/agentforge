@@ -196,11 +196,6 @@ export class AgentForgeDB {
     this.db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;');
   }
 
-  /** Wipe all runtime data. Only for use in test environments. */
-  resetForTest() {
-    this.db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;');
-  }
-
   close() {
     this.db.close();
   }
