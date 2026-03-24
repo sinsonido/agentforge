@@ -34,6 +34,40 @@ test.describe('Kanban — board structure', () => {
   })
 })
 
+test.describe('Kanban — board structure', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/kanban')
+    await page.waitForLoadState('networkidle')
+  })
+
+  test('shows all four columns', async ({ page }) => {
+    for (const col of ['Queued', 'Executing', 'Completed', 'Failed']) {
+      await expect(page.getByText(col, { exact: true }).first()).toBeVisible()
+    }
+  })
+
+  test('shows task count header', async ({ page }) => {
+    // Header shows "N tasks total" even when 0
+    await expect(page.getByText(/\d+ tasks total/)).toBeVisible()
+  })
+
+  test('Add Task button is visible', async ({ page }) => {
+    await expect(page.getByRole('button', { name: 'Add Task' })).toBeVisible()
+  })
+
+  test('task count header updates after creating a task', async ({ page, request }) => {
+    await request.post('/api/control/stop')
+
+    await page.getByRole('button', { name: 'Add Task' }).click()
+    await page.getByPlaceholder('Task description').fill(`Counter test ${Date.now()}`)
+    await page.getByRole('button', { name: 'Create' }).click()
+    await expect(page.getByRole('dialog')).not.toBeVisible()
+
+    // The header should reflect the new total (at least 1 task)
+    await expect(page.getByText(/[1-9]\d* tasks total/)).toBeVisible()
+  })
+})
+
 test.describe('Tasks — create and verify in Kanban', () => {
   test.beforeEach(async ({ page, request }) => {
     // Stop orchestrator so created tasks stay in Queued state (not picked up for execution)
