@@ -16,9 +16,15 @@ export const test = base.extend({
       let db: InstanceType<typeof Database> | undefined
       try {
         db = new Database(dbPath)
+        // Wait up to 5 s if the server holds a write lock rather than
+        // failing immediately with SQLITE_BUSY.
+        db.pragma('busy_timeout = 5000')
         db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;')
-      } catch {
-        // DB may not exist yet on the first run — server creates it on startup
+      } catch (err: unknown) {
+        // Tolerate ENOENT — the DB file doesn't exist yet on the very
+        // first run; the server creates it on startup.
+        const code = (err as NodeJS.ErrnoException)?.code
+        if (code !== 'ENOENT') throw err
       } finally {
         db?.close()
       }
