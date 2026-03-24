@@ -68,7 +68,9 @@ export class GitManager {
     if (!this.hasUncommittedChanges()) return null;
     // Stage everything before commit
     this._run('add -A');
-    const escaped = message.replace(/"/g, '\\"');
+    const escaped = message
+      .replace(/\\/g, '\\\\')  // escape backslashes before double quotes
+      .replace(/"/g, '\\"');
     this._run(`commit -m "${escaped}"`);
     const sha = this._run('rev-parse --short HEAD');
     eventBus.emit('git.committed', { message, sha, branch: this.getCurrentBranch() });
