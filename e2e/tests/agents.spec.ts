@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 // Agents defined in e2e/fixtures/agentforge.test.yml
 const TEST_AGENTS = ['Architect', 'Developer', 'Tester']

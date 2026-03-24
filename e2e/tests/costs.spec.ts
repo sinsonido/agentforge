@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 test.describe('Costs — spend tracking', () => {
   test.beforeEach(async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe('Costs — spend tracking', () => {
     const notAvailable = page.getByText('Cost tracking not available.')
 
     if (await notAvailable.isVisible()) {
-      // Acceptable state for test environment
+      test.skip()
       return
     }
 
@@ -34,7 +34,7 @@ test.describe('Costs — spend tracking', () => {
   test('shows Cumulative Spend and Breakdown sections', async ({ page }) => {
     await page.waitForLoadState('networkidle')
     const notAvailable = page.getByText('Cost tracking not available.')
-    if (await notAvailable.isVisible()) return
+    if (await notAvailable.isVisible()) { test.skip(); return }
 
     await expect(page.getByText('Cumulative Spend')).toBeVisible()
     await expect(page.getByText('Breakdown')).toBeVisible()
@@ -43,7 +43,7 @@ test.describe('Costs — spend tracking', () => {
   test('budget bar shows project name from config', async ({ page }) => {
     await page.waitForLoadState('networkidle')
     const notAvailable = page.getByText('Cost tracking not available.')
-    if (await notAvailable.isVisible()) return
+    if (await notAvailable.isVisible()) { test.skip(); return }
 
     await expect(page.getByText('AgentForge E2E Test')).toBeVisible()
   })
@@ -51,7 +51,7 @@ test.describe('Costs — spend tracking', () => {
   test('transaction log shows no transactions with fresh DB', async ({ page }) => {
     await page.waitForLoadState('networkidle')
     const notAvailable = page.getByText('Cost tracking not available.')
-    if (await notAvailable.isVisible()) return
+    if (await notAvailable.isVisible()) { test.skip(); return }
 
     await expect(page.getByText('No transactions recorded.')).toBeVisible()
   })
@@ -59,7 +59,7 @@ test.describe('Costs — spend tracking', () => {
   test('breakdown section shows By Agent and By Model sub-sections', async ({ page }) => {
     await page.waitForLoadState('networkidle')
     const notAvailable = page.getByText('Cost tracking not available.')
-    if (await notAvailable.isVisible()) return
+    if (await notAvailable.isVisible()) { test.skip(); return }
 
     await expect(page.getByText('By Agent')).toBeVisible()
     await expect(page.getByText('By Model')).toBeVisible()
@@ -68,7 +68,7 @@ test.describe('Costs — spend tracking', () => {
   test('breakdown sub-sections show empty state with no transactions', async ({ page }) => {
     await page.waitForLoadState('networkidle')
     const notAvailable = page.getByText('Cost tracking not available.')
-    if (await notAvailable.isVisible()) return
+    if (await notAvailable.isVisible()) { test.skip(); return }
 
     // Both By Agent and By Model show "No data." with a fresh DB
     const noData = page.getByText('No data.')

@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 test.describe('Smoke — app loads and all views are accessible', () => {
   test('redirects / to /dashboard', async ({ page }) => {

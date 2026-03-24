@@ -364,6 +364,18 @@ function buildRouter(forge) {
     }
   });
 
+  // ── DELETE /api/test/reset ───────────────────────────────────────────────
+  if (process.env.NODE_ENV === 'test') {
+    router.delete('/test/reset', (req, res) => {
+      try {
+        forge.db.resetForTest();
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+  }
+
   // ── POST /api/review/:prNumber/approve ───────────────────────────────────
   /**
    * Approve a PR review.

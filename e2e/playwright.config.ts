@@ -1,6 +1,12 @@
 import { defineConfig, devices } from '@playwright/test'
 import { fileURLToPath } from 'node:url'
 
+// Single source of truth for the test DB path.
+// Propagated to the server process via webServer.env and to the test
+// process via process.env so fixtures can read it without hardcoding.
+const E2E_DB_PATH = process.env.E2E_DB_PATH ?? '/tmp/agentforge-e2e-test.db'
+process.env.E2E_DB_PATH = E2E_DB_PATH
+
 export default defineConfig({
   testDir: './tests',
   fullyParallel: false,
@@ -29,6 +35,7 @@ export default defineConfig({
     timeout: 15000,
     env: {
       NODE_ENV: 'test',
+      E2E_DB_PATH,
     },
   },
 })

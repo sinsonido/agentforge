@@ -77,4 +77,4 @@ server:
   host: 127.0.0.1
 
 database:
-  path: /tmp/agentforge-e2e-test.db
+  path: ${E2E_DB_PATH}
