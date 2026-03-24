@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from './fixtures'
 
 test.describe('Cross-view flows', () => {
   test('task created in Kanban appears in Dashboard Recent Tasks', async ({ page, request }) => {
