@@ -1,36 +1,46 @@
 import { test as base, expect } from '@playwright/test'
 import Database from 'better-sqlite3'
 
+const SERVER_URL = 'http://127.0.0.1:4243'
+
 /**
- * Extended test fixture that resets the test DB before every test by
- * connecting directly to the SQLite file — no server endpoint needed.
+ * Reset all test state before every test:
+ * 1. Clear the SQLite DB tables (tasks, cost_records, events, agent_activity).
+ * 2. Call POST /api/test/reset to drain the in-memory task queue and stop the orchestrator.
  *
- * The DB path is read from E2E_DB_PATH (set in playwright.config.ts),
- * which is also forwarded to the server via webServer.env so the YAML
- * config and this fixture always reference the same file.
+ * auto: true — runs for every test regardless of which fixtures the test uses,
+ * so API-only tests (using only `request`) also get a clean slate.
  */
-export const test = base.extend({
-  page: async ({ page }, use) => {
-    const dbPath = process.env.E2E_DB_PATH
-    if (dbPath) {
-      let db: InstanceType<typeof Database> | undefined
-      try {
-        db = new Database(dbPath)
-        // Wait up to 5 s if the server holds a write lock rather than
-        // failing immediately with SQLITE_BUSY.
-        db.pragma('busy_timeout = 5000')
-        db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;')
-      } catch (err: unknown) {
-        // Tolerate ENOENT — the DB file doesn't exist yet on the very
-        // first run; the server creates it on startup.
-        const code = (err as NodeJS.ErrnoException)?.code
-        if (code !== 'ENOENT') throw err
-      } finally {
-        db?.close()
-      }
-    }
-    await use(page)
-  },
+export function resetTestDb() {
+  const dbPath = process.env.E2E_DB_PATH
+  if (!dbPath) return
+  let db: InstanceType<typeof Database> | undefined
+  try {
+    db = new Database(dbPath)
+    db.pragma('busy_timeout = 5000')
+    db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;')
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code
+    if (code !== 'ENOENT') throw err
+  } finally {
+    db?.close()
+  }
+}
+
+async function resetServerState() {
+  try {
+    await fetch(`${SERVER_URL}/api/test/reset`, { method: 'POST' })
+  } catch {
+    // Server might not be up yet on the very first test — tolerate
+  }
+}
+
+export const test = base.extend<{ _resetDb: void }>({
+  _resetDb: [async ({}, use) => {
+    resetTestDb()
+    await resetServerState()
+    await use()
+  }, { auto: true }],
 })
 
 export { expect }

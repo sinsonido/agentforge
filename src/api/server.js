@@ -364,6 +364,28 @@ function buildRouter(forge) {
     }
   });
 
+  // ── POST /api/test/reset (test mode only) ───────────────────────────────
+  /**
+   * Clear in-memory task queue and stop the orchestrator.
+   * Only mounted when NODE_ENV === 'test'. Used by the E2E fixture to
+   * reset server-side state between tests without restarting the server.
+   */
+  if (isTestEnv) {
+    router.post('/test/reset', (req, res) => {
+      try {
+        // Clear the in-memory task queue
+        forge.taskQueue._tasks.clear();
+        // Stop orchestrator so it doesn't pick up stale tasks
+        if (forge.orchestrator?._running) {
+          forge.orchestrator.stop();
+        }
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+  }
+
   // ── POST /api/review/:prNumber/approve ───────────────────────────────────
   /**
    * Approve a PR review.
@@ -410,18 +432,25 @@ function buildRouter(forge) {
 // Rate limiters
 // ---------------------------------------------------------------------------
 
-/** General read limiter: 200 req / 1 min per IP */
+// In test mode (NODE_ENV=test) skip rate limiting entirely so the E2E suite
+// can make hundreds of requests without hitting a 429.
+const isTestEnv = process.env.NODE_ENV === 'test';
+const skipInTest = () => isTestEnv;
+
+/** General read limiter: 200 req / 1 min per IP (bypassed in test) */
 const generalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 200,
+  skip: skipInTest,
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-/** Strict mutation limiter: 30 req / 1 min per IP on POST /api/* */
+/** Strict mutation limiter: 30 req / 1 min per IP on POST /api/* (bypassed in test) */
 const mutationLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  skip: skipInTest,
   standardHeaders: true,
   legacyHeaders: false,
 });
