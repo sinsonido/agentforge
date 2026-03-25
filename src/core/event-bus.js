@@ -28,6 +28,10 @@ class AgentForgeEventBus extends EventEmitter {
   getRecentEvents(n = 50) {
     return this._log.slice(-n);
   }
+
+  clearRecent() {
+    this._log = [];
+  }
 }
 
 // Singleton

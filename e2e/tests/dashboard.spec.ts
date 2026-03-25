@@ -6,10 +6,11 @@ test.describe('Dashboard — KPIs and orchestrator', () => {
   })
 
   test('shows KPI cards for task states', async ({ page }) => {
-    await expect(page.getByText('Queued')).toBeVisible()
-    await expect(page.getByText('Executing')).toBeVisible()
-    await expect(page.getByText('Completed')).toBeVisible()
-    await expect(page.getByText('Failed')).toBeVisible()
+    // Use exact:true to avoid matching 'task.queued' / 'task.completed' badges in ActivityFeed
+    await expect(page.getByText('Queued', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Executing', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Completed', { exact: true }).first()).toBeVisible()
+    await expect(page.getByText('Failed', { exact: true }).first()).toBeVisible()
   })
 
   test('orchestrator shows initial state badge', async ({ page }) => {
@@ -25,17 +26,20 @@ test.describe('Dashboard — KPIs and orchestrator', () => {
 
   test('can toggle orchestrator start/stop', async ({ page }) => {
     const startBtn = page.getByRole('button', { name: 'Start' })
-    const stopBtn = page.getByRole('button', { name: 'Stop' })
+    const stopBtn  = page.getByRole('button', { name: 'Stop' })
 
-    // Start if stopped
+    // Ensure we are in a known state — start the orchestrator first if stopped
+    await expect(startBtn.or(stopBtn).first()).toBeVisible()
+
     if (await startBtn.isVisible()) {
       await startBtn.click()
-      await expect(stopBtn).toBeVisible()
+      await expect(stopBtn).toBeVisible({ timeout: 5000 })
     }
 
-    // Always end in Stopped state to avoid affecting subsequent tests
+    // Stop and verify we return to Start state
+    await expect(stopBtn).toBeVisible()
     await stopBtn.click()
-    await expect(startBtn).toBeVisible()
+    await expect(startBtn).toBeVisible({ timeout: 5000 })
   })
 
   test('recent tasks table is present', async ({ page }) => {
