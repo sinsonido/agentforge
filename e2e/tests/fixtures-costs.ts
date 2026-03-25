@@ -3,7 +3,7 @@
  * Inherits the base DB-reset fixture and additionally seeds cost_records
  * and cost.recorded events so the Costs view renders with real data.
  */
-import { test as base, expect, resetTestDb } from './fixtures'
+import { test as base, expect } from './fixtures'
 import Database from 'better-sqlite3'
 
 export { expect }

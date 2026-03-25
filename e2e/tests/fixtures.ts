@@ -18,7 +18,7 @@ export function resetTestDb() {
   try {
     db = new Database(dbPath)
     db.pragma('busy_timeout = 5000')
-    db.exec('DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity;')
+    db.exec('BEGIN; DELETE FROM tasks; DELETE FROM cost_records; DELETE FROM events; DELETE FROM agent_activity; COMMIT;')
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException)?.code
     if (code !== 'ENOENT') throw err
@@ -28,10 +28,15 @@ export function resetTestDb() {
 }
 
 async function resetServerState() {
+  let res: Response
   try {
-    await fetch(`${SERVER_URL}/api/test/reset`, { method: 'POST' })
+    res = await fetch(`${SERVER_URL}/api/test/reset`, { method: 'POST' })
   } catch {
-    // Server might not be up yet on the very first test — tolerate
+    // Server might not be up yet on the very first test — tolerate network errors
+    return
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to reset server state: ${res.status} ${res.statusText}`.trim())
   }
 }
 

@@ -93,7 +93,7 @@ test.describe('Agents — edit dialog state', () => {
 })
 
 test.describe('Agents — card displays state transitions', () => {
-  test('state transitions count increments after agent config update event', async ({ page, request }) => {
+  test('state transitions count stays at 0 after agent config update (config change is not a lifecycle transition)', async ({ page, request }) => {
     await page.goto('/agents')
     await page.waitForLoadState('networkidle')
 

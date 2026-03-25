@@ -379,6 +379,8 @@ function buildRouter(forge) {
         if (forge.orchestrator?._running) {
           forge.orchestrator.stop();
         }
+        // Clear event bus replay log so WS replays don't leak events across tests
+        forge.eventBus?.clearRecent?.();
         res.json({ ok: true });
       } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

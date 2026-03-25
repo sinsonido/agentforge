@@ -20,7 +20,7 @@ test.describe('Error states — unknown routes', () => {
 
 test.describe('Error states — API bad input handling', () => {
   test('POST /api/tasks with no body returns 400 not 500', async ({ request }) => {
-    const res = await request.post('/api/tasks', { data: {} })
+    const res = await request.post('/api/tasks')
     expect(res.status()).toBe(400)
     const body = await res.json()
     expect(body.ok).toBe(false)
