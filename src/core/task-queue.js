@@ -86,6 +86,10 @@ export class TaskQueue {
     return Array.from(this._tasks.values());
   }
 
+  clear() {
+    this._tasks.clear();
+  }
+
   stats() {
     const all = this.getAll();
     return {

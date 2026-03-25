@@ -374,7 +374,7 @@ function buildRouter(forge) {
     router.post('/test/reset', (req, res) => {
       try {
         // Clear the in-memory task queue
-        forge.taskQueue._tasks.clear();
+        forge.taskQueue.clear();
         // Stop orchestrator so it doesn't pick up stale tasks
         if (forge.orchestrator?._running) {
           forge.orchestrator.stop();
