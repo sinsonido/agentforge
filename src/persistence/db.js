@@ -131,6 +131,7 @@ export class AgentForgeDB {
       updateUserLastLogin: this.db.prepare('UPDATE users SET last_login = unixepoch() WHERE id = ?'),
       deactivateUser: this.db.prepare('UPDATE users SET is_active = 0 WHERE id = ?'),
       updateUserRole: this.db.prepare('UPDATE users SET role = ? WHERE id = ?'),
+      updateUserPasswordHash: this.db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
       listUsers: this.db.prepare('SELECT * FROM users ORDER BY created_at ASC'),
       // ── Settings ───────────────────────────────────────────────────────────
       getSetting: this.db.prepare('SELECT value FROM db_settings WHERE key = ?'),
@@ -280,6 +281,14 @@ export class AgentForgeDB {
    */
   updateUserRole(id, role) {
     this._stmts.updateUserRole.run(role, id);
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} passwordHash - bcrypt hash
+   */
+  updateUserPasswordHash(id, passwordHash) {
+    this._stmts.updateUserPasswordHash.run(passwordHash, id);
   }
 
   /** @returns {object[]} */

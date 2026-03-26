@@ -36,8 +36,8 @@ describe('UserStore', () => {
   });
 
   it('authenticate returns user on correct credentials', async () => {
-    await store.create({ username: 'bob', password: 'hunter2', role: 'viewer' });
-    const user = await store.authenticate('bob', 'hunter2');
+    await store.create({ username: 'bob', password: 'hunter2!', role: 'viewer' });
+    const user = await store.authenticate('bob', 'hunter2!');
     assert.ok(user, 'should return user');
     assert.equal(user.username, 'bob');
     assert.ok(!('password_hash' in user));
@@ -107,8 +107,15 @@ describe('UserStore', () => {
   it('create rejects duplicate usernames', async () => {
     await store.create({ username: 'unique', password: 'pass1234', role: 'viewer' });
     await assert.rejects(
-      () => store.create({ username: 'unique', password: 'other', role: 'viewer' }),
+      () => store.create({ username: 'unique', password: 'other123', role: 'viewer' }),
       /UNIQUE|unique/i,
+    );
+  });
+
+  it('create rejects passwords shorter than 8 characters', async () => {
+    await assert.rejects(
+      () => store.create({ username: 'shortpw', password: 'short', role: 'viewer' }),
+      /at least 8 characters/i,
     );
   });
 });

@@ -197,7 +197,6 @@ function buildAuthRouter(forge) {
         return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters' });
       }
 
-      const store = new UserStore(db);
       // Re-authenticate to verify current password
       const user = db.findUserById(payload.userId);
       if (!user || !user.is_active) return res.status(401).json({ ok: false, error: 'Unauthorized' });
@@ -209,8 +208,7 @@ function buildAuthRouter(forge) {
       }
 
       const newHash = await hashPassword(newPassword);
-      // Update via raw DB since UserStore doesn't expose password update (by design)
-      db.db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+      db.updateUserPasswordHash(user.id, newHash);
 
       return res.json({ ok: true });
     } catch (err) {

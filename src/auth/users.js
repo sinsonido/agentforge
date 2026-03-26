@@ -18,6 +18,13 @@ function sanitize(row) {
   return rest;
 }
 
+/**
+ * A valid bcrypt hash used solely as a timing-safe dummy for non-existent
+ * users so that `authenticate` always runs a full bcrypt comparison and does
+ * not leak username existence via response-time differences.
+ */
+const DUMMY_HASH = '$2a$12$R9h/cIPz0gi.URNNX3kh2OPST9/PgBkqquzi.Ss7KIUgO2t0jWMUW';
+
 export class UserStore {
   /**
    * @param {import('../persistence/db.js').AgentForgeDB} db
@@ -35,6 +42,7 @@ export class UserStore {
   async create({ username, email = null, displayName = null, role = 'viewer', password }) {
     if (!username) throw new Error('username is required');
     if (!password) throw new Error('password is required');
+    if (password.length < 8) throw new Error('password must be at least 8 characters');
 
     const id = randomUUID();
     const passwordHash = await hashPassword(password);
@@ -53,10 +61,12 @@ export class UserStore {
    */
   async authenticate(username, password) {
     const row = this.db.findUserByUsername(username);
-    if (!row || !row.is_active) return null;
 
-    const ok = await verifyPassword(password, row.password_hash);
-    if (!ok) return null;
+    // Always run bcrypt to avoid leaking username existence via timing differences.
+    const hashToCheck = row?.password_hash ?? DUMMY_HASH;
+    const ok = await verifyPassword(password, hashToCheck);
+
+    if (!row || !row.is_active || !ok) return null;
 
     this.db.updateUserLastLogin(row.id);
     return sanitize(this.db.findUserById(row.id));
