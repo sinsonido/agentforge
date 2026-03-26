@@ -61,7 +61,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const data = await res.json() as { auth_enabled?: boolean }
           if (data.auth_enabled === false || !Object.prototype.hasOwnProperty.call(data, 'auth_enabled')) {
             // Auth disabled or status returned 200 without a token — bypass login
-            _token = token ?? ''
+            // Keep any stored token in _token (or leave null); no auth header needed
+            _token = token
             setIsAuthenticated(true)
             setChecking(false)
             return
@@ -118,9 +119,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // While we're checking auth state, render nothing (avoids flash of login page)
+  // While we're checking auth state, render a minimal spinner (avoids flash of login page)
   if (checking) {
-    return null
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <div className="h-8 w-8 rounded-full border-2 border-muted border-t-foreground animate-spin" />
+      </div>
+    )
   }
 
   return (
