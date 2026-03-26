@@ -16,8 +16,12 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     : {}
 
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...authHeaders },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+      ...(options?.headers as Record<string, string> | undefined),
+    },
   })
 
   if (res.status === 401) {

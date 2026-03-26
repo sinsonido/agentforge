@@ -17,7 +17,11 @@ export default function LoginView() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const redirect = searchParams.get('redirect') ?? '/dashboard'
+  const rawRedirect = searchParams.get('redirect') ?? '/dashboard'
+  // Guard against open redirect: only allow same-origin relative paths
+  const redirect = rawRedirect.startsWith('/') && !rawRedirect.startsWith('//')
+    ? rawRedirect
+    : '/dashboard'
 
   useEffect(() => {
     if (isAuthenticated) {
