@@ -17,15 +17,22 @@ export function UserMenu() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  // Close dropdown when clicking outside
+  // Close dropdown when clicking outside or pressing Escape
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) {
         setOpen(false)
       }
     }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Escape') setOpen(false)
+    }
     document.addEventListener('mousedown', handleClickOutside)
-    return () => document.removeEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleKeyDown)
+    }
   }, [])
 
   // Bypass mode — user is the local sentinel with no real identity
@@ -57,7 +64,11 @@ export function UserMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-10 z-50 w-48 rounded-md border bg-popover shadow-md">
+        <div
+          className="absolute right-0 top-10 z-50 w-48 rounded-md border bg-popover shadow-md"
+          role="menu"
+          aria-label="User menu"
+        >
           <div className="px-3 py-2 border-b">
             <p className="text-sm font-medium truncate">{user.displayName ?? user.username}</p>
             <p className="text-xs text-muted-foreground truncate">@{user.username}</p>
@@ -65,6 +76,7 @@ export function UserMenu() {
           <div className="py-1">
             <Link
               to="/profile"
+              role="menuitem"
               className="flex w-full items-center px-3 py-1.5 text-sm hover:bg-accent rounded-sm"
               onClick={() => setOpen(false)}
             >
@@ -72,6 +84,7 @@ export function UserMenu() {
             </Link>
             <Link
               to="/profile#password"
+              role="menuitem"
               className="flex w-full items-center px-3 py-1.5 text-sm hover:bg-accent rounded-sm"
               onClick={() => setOpen(false)}
             >
@@ -80,6 +93,7 @@ export function UserMenu() {
           </div>
           <div className="border-t py-1">
             <button
+              role="menuitem"
               className="flex w-full items-center px-3 py-1.5 text-sm text-destructive hover:bg-accent rounded-sm"
               onClick={handleLogout}
             >
