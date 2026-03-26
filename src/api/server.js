@@ -523,7 +523,7 @@ function buildRouter(forge) {
 
       // Add to team if teamId is set (non-fatal)
       if (inv.teamId && forge.teamStore) {
-        try { forge.teamStore.addMember(inv.teamId, user.id, 'member'); } catch (_) {}
+        try { forge.teamStore.addMember(inv.teamId, user.id, 'member'); } catch { /* non-fatal */ }
       }
 
       res.status(201).json({ ok: true, user: { id: user.id, username: user.username, role: user.role } });
