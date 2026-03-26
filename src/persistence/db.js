@@ -65,6 +65,29 @@ export class AgentForgeDB {
         timestamp INTEGER DEFAULT (unixepoch() * 1000)
       );
 
+      CREATE TABLE IF NOT EXISTS users (
+        id           TEXT PRIMARY KEY,
+        username     TEXT UNIQUE NOT NULL,
+        email        TEXT UNIQUE,
+        password_hash TEXT NOT NULL,
+        display_name TEXT,
+        role         TEXT NOT NULL DEFAULT 'viewer'
+                      CHECK (role IN ('admin', 'operator', 'viewer')),
+        created_at   INTEGER NOT NULL DEFAULT (unixepoch()),
+        last_login   INTEGER,
+        is_active    INTEGER NOT NULL DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS revoked_tokens (
+        jti        TEXT PRIMARY KEY,
+        expires_at INTEGER NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS db_settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
@@ -98,6 +121,27 @@ export class AgentForgeDB {
         INSERT INTO agent_activity (agent_id, from_state, to_state, task_id, data)
         VALUES (@agent_id, @from_state, @to_state, @task_id, @data)
       `),
+      // ── Users ──────────────────────────────────────────────────────────────
+      insertUser: this.db.prepare(`
+        INSERT INTO users (id, username, email, password_hash, display_name, role)
+        VALUES (@id, @username, @email, @password_hash, @display_name, @role)
+      `),
+      findUserByUsername: this.db.prepare('SELECT * FROM users WHERE username = ?'),
+      findUserById: this.db.prepare('SELECT * FROM users WHERE id = ?'),
+      updateUserLastLogin: this.db.prepare('UPDATE users SET last_login = unixepoch() WHERE id = ?'),
+      deactivateUser: this.db.prepare('UPDATE users SET is_active = 0 WHERE id = ?'),
+      updateUserRole: this.db.prepare('UPDATE users SET role = ? WHERE id = ?'),
+      listUsers: this.db.prepare('SELECT * FROM users ORDER BY created_at ASC'),
+      // ── Settings ───────────────────────────────────────────────────────────
+      getSetting: this.db.prepare('SELECT value FROM db_settings WHERE key = ?'),
+      setSetting: this.db.prepare(`
+        INSERT INTO db_settings (key, value) VALUES (?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+      `),
+      // ── Revoked tokens ─────────────────────────────────────────────────────
+      revokeToken: this.db.prepare('INSERT OR IGNORE INTO revoked_tokens (jti, expires_at) VALUES (?, ?)'),
+      isTokenRevoked: this.db.prepare('SELECT 1 FROM revoked_tokens WHERE jti = ?'),
+      cleanExpiredTokens: this.db.prepare('DELETE FROM revoked_tokens WHERE expires_at < unixepoch()'),
     };
   }
 
@@ -189,6 +233,99 @@ export class AgentForgeDB {
       task_id: taskId || null,
       data: Object.keys(data).length ? JSON.stringify(data) : null,
     });
+  }
+
+  // ─── User operations ─────────────────────────────────
+
+  /**
+   * Create a new user.
+   * @param {{ id: string, username: string, email?: string, passwordHash: string, displayName?: string, role?: string }} opts
+   * @returns {object} the newly created user row
+   */
+  createUser({ id, username, email = null, passwordHash, displayName = null, role = 'viewer' }) {
+    this._stmts.insertUser.run({
+      id,
+      username,
+      email: email || null,
+      password_hash: passwordHash,
+      display_name: displayName || null,
+      role,
+    });
+    return this.findUserById(id);
+  }
+
+  /** @param {string} username @returns {object|undefined} */
+  findUserByUsername(username) {
+    return this._stmts.findUserByUsername.get(username);
+  }
+
+  /** @param {string} id @returns {object|undefined} */
+  findUserById(id) {
+    return this._stmts.findUserById.get(id);
+  }
+
+  /** @param {string} id */
+  updateUserLastLogin(id) {
+    this._stmts.updateUserLastLogin.run(id);
+  }
+
+  /** @param {string} id */
+  deactivateUser(id) {
+    this._stmts.deactivateUser.run(id);
+  }
+
+  /**
+   * @param {string} id
+   * @param {string} role
+   */
+  updateUserRole(id, role) {
+    this._stmts.updateUserRole.run(role, id);
+  }
+
+  /** @returns {object[]} */
+  listUsers() {
+    return this._stmts.listUsers.all();
+  }
+
+  // ─── Settings operations ─────────────────────────────
+
+  /**
+   * @param {string} key
+   * @returns {string|undefined}
+   */
+  getSetting(key) {
+    return this._stmts.getSetting.get(key)?.value;
+  }
+
+  /**
+   * @param {string} key
+   * @param {string} value
+   */
+  setSetting(key, value) {
+    this._stmts.setSetting.run(key, value);
+  }
+
+  // ─── Token revocation ────────────────────────────────
+
+  /**
+   * @param {string} jti
+   * @param {number} expiresAt - Unix timestamp in seconds
+   */
+  revokeToken(jti, expiresAt) {
+    this._stmts.revokeToken.run(jti, expiresAt);
+  }
+
+  /**
+   * @param {string} jti
+   * @returns {boolean}
+   */
+  isTokenRevoked(jti) {
+    return !!this._stmts.isTokenRevoked.get(jti);
+  }
+
+  /** Delete expired revoked token entries. */
+  cleanExpiredTokens() {
+    this._stmts.cleanExpiredTokens.run();
   }
 
   close() {

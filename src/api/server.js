@@ -16,6 +16,9 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { createAuthMiddleware } from '../auth/auth.js';
+import { UserStore } from '../auth/users.js';
+import { signToken, verifyToken, revokeToken } from '../auth/session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -46,6 +49,193 @@ function corsMiddleware(req, res, next) {
 // ---------------------------------------------------------------------------
 // Route builder
 // ---------------------------------------------------------------------------
+
+/**
+ * Build auth routes for a given forge instance and return an Express Router.
+ * Mounted at /api/auth.
+ *
+ * @param {Object} forge
+ * @returns {import('express').Router}
+ */
+function buildAuthRouter(forge) {
+  const router = express.Router();
+  const db = forge.db;
+
+  // ── POST /api/auth/setup ───────────────────────────────────────────────────
+  /**
+   * Create the first admin user. Only available when no users exist.
+   * Body: { username, password, displayName? }
+   */
+  router.post('/setup', async (req, res) => {
+    try {
+      if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const existingUsers = db.listUsers();
+      if (existingUsers.length > 0) {
+        return res.status(409).json({ ok: false, error: 'Setup already complete. Users already exist.' });
+      }
+      const { username, password, displayName } = req.body ?? {};
+      if (!username || !password) {
+        return res.status(400).json({ ok: false, error: '`username` and `password` are required' });
+      }
+      const store = new UserStore(db);
+      const user = await store.create({ username, password, displayName, role: 'admin' });
+      return res.status(201).json({ ok: true, user });
+    } catch (err) {
+      if (err.message?.includes('UNIQUE')) {
+        return res.status(409).json({ ok: false, error: 'Username already exists' });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/auth/login ───────────────────────────────────────────────────
+  /**
+   * Authenticate with username + password and receive a JWT.
+   * Body: { username, password }
+   */
+  router.post('/login', async (req, res) => {
+    try {
+      if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const { username, password } = req.body ?? {};
+      if (!username || !password) {
+        return res.status(400).json({ ok: false, error: '`username` and `password` are required' });
+      }
+      const store = new UserStore(db);
+      const user = await store.authenticate(username, password);
+      if (!user) {
+        return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+      }
+      const token = signToken(db, { userId: user.id, username: user.username, role: user.role });
+      return res.json({
+        ok: true,
+        token,
+        user: { id: user.id, username: user.username, displayName: user.display_name, role: user.role },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/auth/logout ──────────────────────────────────────────────────
+  /**
+   * Revoke the current JWT. Requires Authorization: Bearer <token>.
+   */
+  router.post('/logout', (req, res) => {
+    try {
+      if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      if (!token) {
+        return res.status(401).json({ ok: false, error: 'Unauthorized' });
+      }
+      const payload = verifyToken(db, token);
+      if (!payload) {
+        return res.status(401).json({ ok: false, error: 'Unauthorized' });
+      }
+      revokeToken(db, payload.jti);
+      return res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/auth/me ───────────────────────────────────────────────────────
+  /**
+   * Return the authenticated user's profile and permissions.
+   * Requires Authorization: Bearer <token>.
+   */
+  router.get('/me', (req, res) => {
+    try {
+      if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      if (!token) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const payload = verifyToken(db, token);
+      if (!payload) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const store = new UserStore(db);
+      const user = store.findById(payload.userId);
+      if (!user || !user.is_active) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const permissions = rolePermissions(user.role);
+      return res.json({
+        ok: true,
+        user: {
+          id: user.id,
+          username: user.username,
+          displayName: user.display_name,
+          role: user.role,
+          permissions,
+        },
+      });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/auth/change-password ────────────────────────────────────────
+  /**
+   * Change the authenticated user's password.
+   * Body: { currentPassword, newPassword }
+   */
+  router.post('/change-password', async (req, res) => {
+    try {
+      if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const authHeader = req.headers.authorization || '';
+      const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      if (!token) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const payload = verifyToken(db, token);
+      if (!payload) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const { currentPassword, newPassword } = req.body ?? {};
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ ok: false, error: '`currentPassword` and `newPassword` are required' });
+      }
+      if (newPassword.length < 8) {
+        return res.status(400).json({ ok: false, error: 'New password must be at least 8 characters' });
+      }
+
+      const store = new UserStore(db);
+      // Re-authenticate to verify current password
+      const user = db.findUserById(payload.userId);
+      if (!user || !user.is_active) return res.status(401).json({ ok: false, error: 'Unauthorized' });
+
+      const { verifyPassword, hashPassword } = await import('../auth/password.js');
+      const ok = await verifyPassword(currentPassword, user.password_hash);
+      if (!ok) {
+        return res.status(400).json({ ok: false, error: 'Current password is incorrect' });
+      }
+
+      const newHash = await hashPassword(newPassword);
+      // Update via raw DB since UserStore doesn't expose password update (by design)
+      db.db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(newHash, user.id);
+
+      return res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  return router;
+}
+
+/**
+ * Return a list of permission strings for a given role.
+ * @param {string} role
+ * @returns {string[]}
+ */
+function rolePermissions(role) {
+  const base = ['tasks:read', 'agents:read', 'costs:read', 'events:read', 'quotas:read'];
+  if (role === 'operator' || role === 'admin') {
+    base.push('tasks:write', 'agents:write', 'control:write');
+  }
+  if (role === 'admin') {
+    base.push('users:read', 'users:write', 'providers:write');
+  }
+  return base;
+}
 
 /**
  * Build and return an Express Router wired to the forge instance.
@@ -511,6 +701,18 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
 
+  // Auth middleware (optional — only enforced when auth.secret is configured or DB is present)
+  const authConfig = forge.config?.auth ?? {};
+  const authMiddleware = createAuthMiddleware(authConfig, forge.db ?? null);
+  // Apply auth to all /api routes except /api/auth/* (login, setup)
+  app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/auth/')) return next();
+    authMiddleware(req, res, next);
+  });
+
+  // Auth routes — unauthenticated
+  app.use('/api/auth', buildAuthRouter(forge));
+
   // API routes
   app.use('/api', buildRouter(forge));
 
@@ -533,6 +735,13 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   httpServer.listen(port, host, () => {
     console.log('[agentforge:api] REST API listening on http://%s:%d', host, port);
     console.log('[agentforge:api] WebSocket endpoint: ws://%s:%d/ws', host, port);
+
+    // First-run detection: prompt admin to create an account if none exist
+    const userCount = forge.db?.listUsers?.()?.length ?? 1;
+    if (userCount === 0) {
+      console.log('[agentforge:setup] No admin account found.');
+      console.log(`[agentforge:setup] Visit http://${host}:${port}/setup to create one.`);
+    }
   });
 
   return httpServer;
