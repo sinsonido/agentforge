@@ -47,6 +47,18 @@ export interface CostTransaction {
   cost?: number
 }
 
+export interface Invitation {
+  id: string
+  email: string
+  role: string
+  teamId: string | null
+  invitedBy: string
+  createdAt: number
+  expiresAt: number
+  usedAt: number | null
+  status: 'pending' | 'accepted' | 'expired' | 'revoked'
+}
+
 export interface ApiEvent {
   id: number
   event: string

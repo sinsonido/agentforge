@@ -29,4 +29,22 @@ export const api = {
   controlStop: () => request<{ ok: boolean }>('/control/stop', { method: 'POST' }),
   testProvider: (provider: string) =>
     request<{ ok: boolean; error?: string }>('/providers/test', { method: 'POST', body: JSON.stringify({ provider }) }),
+  listInvitations: (status?: string) =>
+    request<{ ok: boolean; count: number; invitations: import('../types/api').Invitation[] }>(
+      `/invitations${status ? `?status=${status}` : ''}`
+    ),
+  createInvitation: (body: { email: string; role?: string; teamId?: string }) =>
+    request<{ ok: boolean; invitation: import('../types/api').Invitation }>(
+      '/invitations', { method: 'POST', body: JSON.stringify(body) }
+    ),
+  revokeInvitation: (id: string) =>
+    request<{ ok: boolean }>(`/invitations/${id}/revoke`, { method: 'DELETE' }),
+  validateInvitation: (token: string) =>
+    request<{ ok: boolean; invitation: { email: string; role: string; teamId: string | null } }>(
+      `/invitations/validate/${token}`
+    ),
+  acceptInvitation: (body: { token: string; username: string; password: string }) =>
+    request<{ ok: boolean; user: { id: string; username: string; role: string } }>(
+      '/invitations/accept', { method: 'POST', body: JSON.stringify(body) }
+    ),
 }

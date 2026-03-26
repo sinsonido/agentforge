@@ -16,6 +16,8 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { InvitationStore } from '../auth/invitations.js';
+import { requirePermission } from '../auth/rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -387,6 +389,152 @@ function buildRouter(forge) {
       }
     });
   }
+
+  // ── Invitations ──────────────────────────────────────────────────────────
+
+  // Lazy-initialise an InvitationStore per forge instance (if DB available)
+  function getInvitationStore() {
+    if (!forge.db) return null;
+    if (!forge._invitationStore) {
+      forge._invitationStore = new InvitationStore(forge.db.db);
+    }
+    return forge._invitationStore;
+  }
+
+  /**
+   * GET /api/invitations — list all invitations (admin only).
+   */
+  router.get('/invitations', requirePermission('invitations:manage'), (req, res) => {
+    try {
+      const store = getInvitationStore();
+      if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const { status } = req.query;
+      const invitations = store.listInvitations(status ? { status } : undefined);
+      res.json({ ok: true, count: invitations.length, invitations });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/invitations — create invitation (admin only).
+   * Body: { email, role?, teamId? }
+   */
+  router.post('/invitations', requirePermission('invitations:manage'), (req, res) => {
+    try {
+      const store = getInvitationStore();
+      if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const { email, role = 'viewer', teamId } = req.body ?? {};
+      if (!email) return res.status(400).json({ ok: false, error: '`email` is required' });
+      const invitedBy = req.user?.id ?? 'system';
+      const invitation = store.createInvitation({ email, role, teamId: teamId ?? null, invitedBy });
+      res.status(201).json({ ok: true, invitation });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /**
+   * DELETE /api/invitations/:id/revoke — revoke invitation (admin only).
+   */
+  router.delete('/invitations/:id/revoke', requirePermission('invitations:manage'), (req, res) => {
+    try {
+      const store = getInvitationStore();
+      if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const revoked = store.revokeInvitation(req.params.id);
+      if (!revoked) return res.status(404).json({ ok: false, error: 'Invitation not found or already processed' });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /**
+   * GET /api/invitations/validate/:token — validate token (public).
+   * Returns { ok, invitation: { email, role, teamId } } or 404.
+   */
+  router.get('/invitations/validate/:token', (req, res) => {
+    try {
+      const store = getInvitationStore();
+      if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
+      // Expire stale first
+      store.expireStale();
+      const inv = store.getByToken(req.params.token);
+      if (!inv || inv.status !== 'pending') {
+        return res.status(404).json({ ok: false, error: 'Invalid or expired invitation' });
+      }
+      res.json({ ok: true, invitation: { email: inv.email, role: inv.role, teamId: inv.teamId } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  /**
+   * POST /api/invitations/accept — accept invitation and create user account.
+   * Body: { token, username, password }
+   */
+  router.post('/invitations/accept', async (req, res) => {
+    try {
+      const store = getInvitationStore();
+      if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
+      const { token, username, password } = req.body ?? {};
+      if (!token)    return res.status(400).json({ ok: false, error: '`token` is required' });
+      if (!username) return res.status(400).json({ ok: false, error: '`username` is required' });
+      if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
+
+      // Expire stale first
+      store.expireStale();
+
+      const inv = store.getByToken(token);
+      if (!inv) return res.status(404).json({ ok: false, error: 'Invalid invitation token' });
+      if (inv.status !== 'pending') {
+        return res.status(409).json({ ok: false, error: `Invitation is ${inv.status}` });
+      }
+
+      // Check expiry
+      const now = Math.floor(Date.now() / 1000);
+      if (inv.expiresAt <= now) {
+        store.expireStale();
+        return res.status(409).json({ ok: false, error: 'Invitation has expired' });
+      }
+
+      // Create user account
+      let user;
+      if (forge.userStore) {
+        // Full user store available
+        user = await forge.userStore.create({ username, email: inv.email, role: inv.role, password });
+      } else if (forge.db) {
+        // Minimal user creation directly on db
+        const { randomUUID } = await import('node:crypto');
+        const userId = randomUUID();
+        forge.db.db.prepare(
+          `INSERT INTO users (id, username, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`
+        ).run(userId, username, inv.email, password, inv.role);
+        user = { id: userId, username, role: inv.role };
+      } else {
+        return res.status(503).json({ ok: false, error: 'User store not available' });
+      }
+
+      // Add to team if teamId is set
+      if (inv.teamId && forge.teamStore) {
+        try {
+          forge.teamStore.addMember(inv.teamId, user.id, 'member');
+        } catch (_) {
+          // Non-fatal: team may not exist
+        }
+      }
+
+      // Mark invitation as accepted
+      store.acceptInvitation(token);
+
+      res.status(201).json({ ok: true, user: { id: user.id, username: user.username, role: user.role } });
+    } catch (err) {
+      if (err.code === 'SQLITE_CONSTRAINT_UNIQUE' || err.code === 'DUPLICATE_USERNAME') {
+        return res.status(409).json({ ok: false, error: 'Username already taken' });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
 
   // ── POST /api/review/:prNumber/approve ───────────────────────────────────
   /**

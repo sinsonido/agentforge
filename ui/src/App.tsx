@@ -6,12 +6,18 @@ import KanbanView from '@/views/KanbanView'
 import AgentsView from '@/views/AgentsView'
 import ProvidersView from '@/views/ProvidersView'
 import CostsView from '@/views/CostsView'
+import InvitationsView from '@/views/admin/InvitationsView'
+import AcceptInviteView from '@/views/AcceptInviteView'
 
 export default function App() {
   return (
     <BrowserRouter>
       <WebSocketProvider>
         <Routes>
+          {/* Public routes — no auth layout */}
+          <Route path="/accept-invite" element={<AcceptInviteView />} />
+
+          {/* Authenticated routes — inside layout */}
           <Route element={<Layout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardView />} />
@@ -19,6 +25,7 @@ export default function App() {
             <Route path="/agents" element={<AgentsView />} />
             <Route path="/providers" element={<ProvidersView />} />
             <Route path="/costs" element={<CostsView />} />
+            <Route path="/admin/invitations" element={<InvitationsView />} />
           </Route>
         </Routes>
       </WebSocketProvider>
