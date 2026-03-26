@@ -41,6 +41,7 @@ export class UserStore {
    */
   async create({ username, email = null, displayName = null, role = 'viewer', password }) {
     if (!username) throw new Error('username is required');
+    if (username.length < 3) throw new Error('username must be at least 3 characters');
     if (!password) throw new Error('password is required');
     if (password.length < 8) throw new Error('password must be at least 8 characters');
 

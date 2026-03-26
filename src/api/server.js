@@ -85,7 +85,7 @@ function buildAuthRouter(forge) {
       if (err.message?.includes('UNIQUE')) {
         return res.status(409).json({ ok: false, error: 'Username already exists' });
       }
-      if (err.message?.includes('at least 8 characters')) {
+      if (err.message?.includes('at least')) {
         return res.status(400).json({ ok: false, error: err.message });
       }
       res.status(500).json({ ok: false, error: err.message });
@@ -136,7 +136,7 @@ function buildAuthRouter(forge) {
       if (!payload) {
         return res.status(401).json({ ok: false, error: 'Unauthorized' });
       }
-      revokeToken(db, payload.jti);
+      revokeToken(db, payload.jti, payload.exp);
       return res.json({ ok: true });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });

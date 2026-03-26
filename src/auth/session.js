@@ -49,7 +49,7 @@ export function signToken(db, { userId, username, role }) {
  *
  * @param {import('../persistence/db.js').AgentForgeDB} db
  * @param {string} token
- * @returns {{ userId: string, username: string, role: string, jti: string } | null}
+ * @returns {{ userId: string, username: string, role: string, jti: string, exp: number } | null}
  */
 export function verifyToken(db, token) {
   try {
@@ -63,6 +63,7 @@ export function verifyToken(db, token) {
       username: decoded.username,
       role: decoded.role,
       jti,
+      exp: decoded.exp,
     };
   } catch {
     return null;
