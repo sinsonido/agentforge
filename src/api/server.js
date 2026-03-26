@@ -18,6 +18,7 @@ import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
 import { createAuthMiddleware } from '../auth/auth.js';
 import { UserStore } from '../auth/users.js';
+import { hashPassword, verifyPassword } from '../auth/password.js';
 import { signToken, verifyToken, revokeToken } from '../auth/session.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -83,6 +84,9 @@ function buildAuthRouter(forge) {
     } catch (err) {
       if (err.message?.includes('UNIQUE')) {
         return res.status(409).json({ ok: false, error: 'Username already exists' });
+      }
+      if (err.message?.includes('at least 8 characters')) {
+        return res.status(400).json({ ok: false, error: err.message });
       }
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -201,7 +205,6 @@ function buildAuthRouter(forge) {
       const user = db.findUserById(payload.userId);
       if (!user || !user.is_active) return res.status(401).json({ ok: false, error: 'Unauthorized' });
 
-      const { verifyPassword, hashPassword } = await import('../auth/password.js');
       const ok = await verifyPassword(currentPassword, user.password_hash);
       if (!ok) {
         return res.status(400).json({ ok: false, error: 'Current password is incorrect' });
@@ -739,6 +742,11 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
     if (userCount === 0) {
       console.log('[agentforge:setup] No admin account found.');
       console.log(`[agentforge:setup] Visit http://${host}:${port}/setup to create one.`);
+    }
+
+    // Periodically purge expired revoked-token entries (every 6 hours)
+    if (forge.db) {
+      setInterval(() => forge.db.cleanExpiredTokens(), 6 * 60 * 60 * 1000).unref();
     }
   });
 
