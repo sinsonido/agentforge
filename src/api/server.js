@@ -433,22 +433,42 @@ function buildRouter(forge) {
   /**
    * Retrieve audit log entries (append-only; no delete endpoint).
    * Query params: ?limit=50&offset=0&user=<userId>&action=<action>
+   *
+   * Protected as admin-only via X-Admin-Token header. The provided token must
+   * match process.env.ADMIN_API_TOKEN or access will be denied.
    */
-  router.get('/admin/audit', (req, res) => {
-    try {
-      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
-      const offset = parseInt(req.query.offset, 10) || 0;
-      const entries = forge.db?.getAuditLog({
-        limit,
-        offset,
-        userId: req.query.user,
-        action: req.query.action,
-      }) ?? [];
-      res.json({ ok: true, count: entries.length, entries });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
+  router.get(
+    '/admin/audit',
+    (req, res, next) => {
+      const token = req.get('x-admin-token'); // req.get() is case-insensitive per HTTP spec
+      const expected = process.env.ADMIN_API_TOKEN;
+
+      if (!expected) {
+        return res.status(500).json({ ok: false, error: 'Admin token is not configured on the server' });
+      }
+
+      if (!token || token !== expected) {
+        return res.status(403).json({ ok: false, error: 'Admin access required' });
+      }
+
+      next();
+    },
+    (req, res) => {
+      try {
+        const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+        const offset = parseInt(req.query.offset, 10) || 0;
+        const result = forge.db?.getAuditLog({
+          limit,
+          offset,
+          userId: req.query.user,
+          action: req.query.action,
+        }) ?? { rows: [], hasMore: false };
+        res.json({ ok: true, count: result.rows.length, hasMore: result.hasMore, entries: result.rows });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
     }
-  });
+  );
 
   return router;
 }

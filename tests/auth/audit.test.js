@@ -1,5 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { unlinkSync } from 'node:fs';
 import { AgentForgeDB } from '../../src/persistence/db.js';
 import { createAuditMiddleware, sanitizePayload } from '../../src/auth/audit.js';
 
@@ -15,7 +16,7 @@ describe('audit log', () => {
   after(() => {
     db.close();
     try {
-      import('node:fs').then(fs => fs.unlinkSync(DB_PATH));
+      unlinkSync(DB_PATH);
     } catch { /* ignore */ }
   });
 
@@ -31,7 +32,7 @@ describe('audit log', () => {
       ip: '127.0.0.1',
     });
 
-    const rows = db.getAuditLog({ limit: 10, offset: 0 });
+    const { rows } = db.getAuditLog({ limit: 10, offset: 0 });
     assert.ok(rows.length >= 1, 'should have at least one row');
 
     const row = rows.find(r => r.username === 'alice' && r.action === 'task.created');
@@ -46,7 +47,7 @@ describe('audit log', () => {
     db.logAudit({ userId: 'user-filter-test', username: 'bob', action: 'orchestrator.started' });
     db.logAudit({ userId: 'other-user', username: 'carol', action: 'orchestrator.stopped' });
 
-    const rows = db.getAuditLog({ limit: 100, offset: 0, userId: 'user-filter-test' });
+    const { rows } = db.getAuditLog({ limit: 100, offset: 0, userId: 'user-filter-test' });
     assert.ok(rows.every(r => r.user_id === 'user-filter-test'), 'all rows should match the userId filter');
     assert.ok(rows.some(r => r.username === 'bob'), 'bob should appear in filtered results');
   });
@@ -55,9 +56,26 @@ describe('audit log', () => {
     db.logAudit({ userId: 'u1', username: 'dave', action: 'review.approved', resource: 'pr:42' });
     db.logAudit({ userId: 'u2', username: 'eve', action: 'review.rejected', resource: 'pr:43' });
 
-    const rows = db.getAuditLog({ limit: 100, offset: 0, action: 'review.approved' });
+    const { rows } = db.getAuditLog({ limit: 100, offset: 0, action: 'review.approved' });
     assert.ok(rows.every(r => r.action === 'review.approved'), 'all rows should match the action filter');
     assert.ok(rows.some(r => r.resource === 'pr:42'), 'pr:42 should appear');
+  });
+
+  it('getAuditLog returns hasMore=true when more rows exist beyond the page', () => {
+    // Insert 3 entries with a unique action to isolate this test
+    for (let i = 0; i < 3; i++) {
+      db.logAudit({ userId: 'page-test', username: 'pager', action: 'user.login' });
+    }
+    // Fetch with limit=2 — should report hasMore
+    const { rows, hasMore } = db.getAuditLog({ limit: 2, offset: 0, userId: 'page-test' });
+    assert.equal(rows.length, 2, 'should return exactly limit rows');
+    assert.equal(hasMore, true, 'hasMore should be true when more rows exist');
+  });
+
+  it('getAuditLog returns hasMore=false on the last page', () => {
+    const { rows, hasMore } = db.getAuditLog({ limit: 100, offset: 0, userId: 'page-test' });
+    assert.ok(rows.length <= 100);
+    assert.equal(hasMore, false, 'hasMore should be false when all rows fit in the page');
   });
 
   // ─── sanitizePayload ─────────────────────────────────────────────────────

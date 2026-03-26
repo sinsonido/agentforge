@@ -36,7 +36,7 @@ export const api = {
     if (params?.user) qs.set('user', params.user)
     if (params?.action) qs.set('action', params.action)
     const query = qs.toString()
-    return request<{ ok: boolean; count: number; entries: import('../types/api').AuditEntry[] }>(
+    return request<{ ok: boolean; count: number; hasMore: boolean; entries: import('../types/api').AuditEntry[] }>(
       `/admin/audit${query ? `?${query}` : ''}`
     )
   },

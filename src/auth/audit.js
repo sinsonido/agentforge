@@ -17,10 +17,11 @@ const SENSITIVE_FIELDS = new Set([
 
 /**
  * Strip sensitive fields from a request body object.
- * Returns a shallow copy with sensitive keys removed.
+ * Returns a shallow copy of `body` with sensitive keys removed.
+ * Non-object values (null, undefined, arrays) are returned as-is.
  *
- * @param {Record<string, unknown>} body
- * @returns {Record<string, unknown>}
+ * @param {unknown} body
+ * @returns {unknown}
  */
 export function sanitizePayload(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return body;

@@ -10,7 +10,7 @@ function formatDate(unixSec: number): string {
 
 export default function AuditView() {
   const [entries, setEntries] = useState<AuditEntry[]>([])
-  const [count, setCount] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
   const [page, setPage] = useState(0)
   const [filterUser, setFilterUser] = useState('')
   const [filterAction, setFilterAction] = useState('')
@@ -28,7 +28,7 @@ export default function AuditView() {
         action: filterAction || undefined,
       })
       setEntries(res.entries)
-      setCount(res.count)
+      setHasMore(res.hasMore)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load audit log')
     } finally {
@@ -40,11 +40,6 @@ export default function AuditView() {
     void load()
   }, [load])
 
-  // Reset page when filters change
-  useEffect(() => {
-    setPage(0)
-  }, [filterUser, filterAction])
-
   return (
     <div className="p-6 space-y-4">
       <h1 className="text-xl font-semibold">Audit Log</h1>
@@ -53,16 +48,16 @@ export default function AuditView() {
       <div className="flex flex-wrap gap-3">
         <input
           type="text"
-          placeholder="Filter by username"
+          placeholder="Filter by user ID"
           value={filterUser}
-          onChange={e => setFilterUser(e.target.value)}
+          onChange={e => { setPage(0); setFilterUser(e.target.value) }}
           className="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring w-48"
         />
         <input
           type="text"
           placeholder="Filter by action"
           value={filterAction}
-          onChange={e => setFilterAction(e.target.value)}
+          onChange={e => { setPage(0); setFilterAction(e.target.value) }}
           className="rounded-md border bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring w-48"
         />
       </div>
@@ -126,10 +121,10 @@ export default function AuditView() {
         >
           Previous
         </button>
-        <span>Page {page + 1} · {count} result{count !== 1 ? 's' : ''}</span>
+        <span>Page {page + 1} · {entries.length} result{entries.length !== 1 ? 's' : ''}</span>
         <button
           onClick={() => setPage(p => p + 1)}
-          disabled={count < PAGE_SIZE}
+          disabled={!hasMore}
           className="rounded border px-3 py-1 hover:bg-accent disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Next

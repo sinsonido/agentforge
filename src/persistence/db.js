@@ -236,23 +236,31 @@ export class AgentForgeDB {
 
   /**
    * Query audit log with optional filters.
+   * Returns `{ rows, hasMore }` where `hasMore` indicates whether additional
+   * pages exist beyond the current page.
+   *
    * @param {Object} opts
    * @param {number} [opts.limit=50]
    * @param {number} [opts.offset=0]
    * @param {string} [opts.userId]
    * @param {string} [opts.action]
+   * @returns {{ rows: Array, hasMore: boolean }}
    */
   getAuditLog({ limit = 50, offset = 0, userId, action } = {}) {
+    // Fetch one extra row to determine whether another page exists.
+    const fetchLimit = limit + 1;
+    let rows;
     if (userId && action) {
-      return this._stmts.getAuditLogByUserAndAction.all(userId, action, limit, offset);
+      rows = this._stmts.getAuditLogByUserAndAction.all(userId, action, fetchLimit, offset);
+    } else if (userId) {
+      rows = this._stmts.getAuditLogByUser.all(userId, fetchLimit, offset);
+    } else if (action) {
+      rows = this._stmts.getAuditLogByAction.all(action, fetchLimit, offset);
+    } else {
+      rows = this._stmts.getAuditLog.all(fetchLimit, offset);
     }
-    if (userId) {
-      return this._stmts.getAuditLogByUser.all(userId, limit, offset);
-    }
-    if (action) {
-      return this._stmts.getAuditLogByAction.all(action, limit, offset);
-    }
-    return this._stmts.getAuditLog.all(limit, offset);
+    const hasMore = rows.length > limit;
+    return { rows: hasMore ? rows.slice(0, limit) : rows, hasMore };
   }
 
   close() {
