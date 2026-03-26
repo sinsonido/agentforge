@@ -12,27 +12,29 @@
 import crypto from 'node:crypto';
 
 /**
- * Hash a plaintext password using SHA-256 with a random salt.
+ * Hash a plaintext password using scrypt with a random salt.
  * Returns a string of the form "salt:hash".
  * @param {string} password
  * @returns {string}
  */
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
+  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
   return `${salt}:${hash}`;
 }
 
 /**
  * Verify a plaintext password against a stored "salt:hash" string.
+ * Uses a timing-safe comparison to prevent timing attacks.
  * @param {string} password
  * @param {string} stored
  * @returns {boolean}
  */
 function verifyPassword(password, stored) {
   const [salt, hash] = stored.split(':');
-  const check = crypto.createHash('sha256').update(salt + password).digest('hex');
-  return check === hash;
+  const derivedHash = crypto.scryptSync(password, salt, 64);
+  const storedHash = Buffer.from(hash, 'hex');
+  return crypto.timingSafeEqual(derivedHash, storedHash);
 }
 
 /**
@@ -62,11 +64,20 @@ export class UserStore {
   }
 
   _seed() {
+    // Only seed a default admin account in dev/test environments or when
+    // explicitly requested via AGENTFORGE_SEED_ADMIN=true.
+    const env = process.env.NODE_ENV;
+    const isDevLike = env === 'development' || env === 'test';
+    const explicitSeed = process.env.AGENTFORGE_SEED_ADMIN === 'true';
+
+    if (!isDevLike && !explicitSeed) return;
+
+    const password = process.env.AGENTFORGE_ADMIN_PASSWORD || 'admin';
     this.create({
       username: 'admin',
       displayName: 'Administrator',
       role: 'admin',
-      password: 'admin',
+      password,
     });
   }
 
@@ -152,7 +163,11 @@ export class UserStore {
    */
   update(id, patch) {
     const user = this._users.get(String(id));
-    if (!user) throw new Error(`User '${id}' not found`);
+    if (!user) {
+      const err = new Error(`User '${id}' not found`);
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
 
     if (patch.role !== undefined) user.role = patch.role;
     if (patch.displayName !== undefined) user.displayName = patch.displayName;
@@ -169,9 +184,27 @@ export class UserStore {
    */
   resetPassword(id, password) {
     const user = this._users.get(String(id));
-    if (!user) throw new Error(`User '${id}' not found`);
+    if (!user) {
+      const err = new Error(`User '${id}' not found`);
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
     if (!password) throw new Error('password is required');
     user.password_hash = hashPassword(password);
+  }
+
+  /**
+   * Delete a user by id.
+   * @param {string} id
+   * @throws {Error} if user not found.
+   */
+  delete(id) {
+    if (!this._users.has(String(id))) {
+      const err = new Error(`User '${id}' not found`);
+      err.code = 'NOT_FOUND';
+      throw err;
+    }
+    this._users.delete(String(id));
   }
 
   /**

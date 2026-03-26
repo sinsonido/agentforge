@@ -9,6 +9,7 @@ import {
 import { NewUserDialog } from '@/components/admin/NewUserDialog'
 import { EditUserDialog } from '@/components/admin/EditUserDialog'
 import { ResetPasswordDialog } from '@/components/admin/ResetPasswordDialog'
+import { DeleteUserDialog } from '@/components/admin/DeleteUserDialog'
 import type { AdminUser } from '@/types/api'
 
 // ---------------------------------------------------------------------------
@@ -64,6 +65,15 @@ function UsersTable() {
       void refresh()
     } catch (err) {
       console.error('Failed to toggle user active state:', err)
+    }
+  }
+
+  async function deleteUser(user: AdminUser) {
+    try {
+      await api.adminDeleteUser(user.id)
+      void refresh()
+    } catch (err) {
+      console.error('Failed to delete user:', err)
     }
   }
 
@@ -130,6 +140,11 @@ function UsersTable() {
                       >
                         {user.isActive ? 'Deactivate' : 'Activate'}
                       </Button>
+                      <DeleteUserDialog
+                        user={user}
+                        onDelete={deleteUser}
+                        onDeleted={() => void refresh()}
+                      />
                     </div>
                   </TableCell>
                 </TableRow>

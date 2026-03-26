@@ -3,10 +3,11 @@
  * @description Authentication middleware for AgentForge API.
  *
  * Provides a simple Bearer-token-based auth middleware that populates
- * req.user from the UserStore when a valid token is presented.
+ * req.user from the UserStore when valid credentials are presented.
  *
- * In development / test mode the middleware is a no-op so that the rest of
- * the API stack remains accessible without credentials.
+ * The current implementation uses a Base64-encoded "username:password"
+ * scheme (HTTP Basic-style) for ease of development and testing.
+ * Replace with a proper JWT or session-based implementation for production.
  *
  * GitHub issue #98
  */
@@ -14,9 +15,13 @@
 /**
  * Build an auth middleware bound to the given UserStore.
  *
- * The current implementation uses a trivially simple "username:password"
- * Base64 scheme (HTTP Basic-style) for ease of testing without a full JWT
- * stack.  Replace with a proper JWT implementation for production use.
+ * Expects an Authorization header of the form:
+ *   Authorization: Bearer base64(username:password)
+ *
+ * On success, sets req.user to { userId, username, role }.
+ * On failure or missing header, req.user remains undefined and the
+ * next middleware (e.g. requirePermission) is responsible for rejecting
+ * unauthenticated requests.
  *
  * @param {import('./users.js').UserStore} userStore
  * @returns {import('express').RequestHandler}

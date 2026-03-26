@@ -17,7 +17,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
 import { UserStore } from '../auth/users.js';
-import { requirePermission } from '../auth/rbac.js';
+import { requirePermission, VALID_ROLES } from '../auth/rbac.js';
+import { buildAuthMiddleware } from '../auth/auth.js';
 
 // Singleton user store shared across all server instances in the same process
 const globalUserStore = new UserStore();
@@ -38,7 +39,7 @@ function corsMiddleware(req, res, next) {
   const origin = req.headers.origin || '';
   if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   }
   if (req.method === 'OPTIONS') {
@@ -458,6 +459,9 @@ function buildRouter(forge) {
       if (!username) return res.status(400).json({ ok: false, error: '`username` is required' });
       if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
       if (!role)     return res.status(400).json({ ok: false, error: '`role` is required' });
+      if (!VALID_ROLES.has(role)) {
+        return res.status(400).json({ ok: false, error: '`role` must be admin, operator, or viewer' });
+      }
 
       const user = forge.userStore.create({ username, email, displayName, role, password });
       res.status(201).json({ ok: true, user });
@@ -479,6 +483,11 @@ function buildRouter(forge) {
       const id = req.params.id;
       const { role, displayName, isActive } = req.body ?? {};
 
+      // Validate role if provided
+      if (role !== undefined && !VALID_ROLES.has(role)) {
+        return res.status(400).json({ ok: false, error: '`role` must be admin, operator, or viewer' });
+      }
+
       // Prevent self-deactivation
       if (isActive === false && req.user && String(req.user.userId) === String(id)) {
         return res.status(400).json({ ok: false, error: 'Cannot deactivate your own account' });
@@ -495,7 +504,24 @@ function buildRouter(forge) {
       const user = forge.userStore.update(id, { role, displayName, isActive });
       res.json({ ok: true, user });
     } catch (err) {
-      if (err.message.includes('not found')) {
+      if (err.code === 'NOT_FOUND') {
+        return res.status(404).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── DELETE /api/admin/users/:id ───────────────────────────────────────────
+  /**
+   * Delete a user by id.
+   * Requires users:write permission.
+   */
+  router.delete('/admin/users/:id', requirePermission('users:write'), (req, res) => {
+    try {
+      forge.userStore.delete(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
         return res.status(404).json({ ok: false, error: err.message });
       }
       res.status(500).json({ ok: false, error: err.message });
@@ -515,7 +541,7 @@ function buildRouter(forge) {
       forge.userStore.resetPassword(req.params.id, password);
       res.json({ ok: true });
     } catch (err) {
-      if (err.message.includes('not found')) {
+      if (err.code === 'NOT_FOUND') {
         return res.status(404).json({ ok: false, error: err.message });
       }
       res.status(500).json({ ok: false, error: err.message });
@@ -611,6 +637,9 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // Rate limiting — scoped to API routes only (not static files)
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
+
+  // Authentication — populates req.user for RBAC middleware downstream
+  app.use('/api', buildAuthMiddleware(forge.userStore));
 
   // API routes
   app.use('/api', buildRouter(forge));

@@ -9,6 +9,13 @@
  */
 
 /**
+ * The set of valid role names.
+ * Used for role validation in both RBAC and API endpoints.
+ * @type {Set<string>}
+ */
+export const VALID_ROLES = new Set(['admin', 'operator', 'viewer']);
+
+/**
  * Permission sets per role.
  * @type {Record<string, Set<string>>}
  */
@@ -31,17 +38,23 @@ export function hasPermission(role, permission) {
 /**
  * Express middleware factory.
  *
- * In test mode (NODE_ENV === 'test') or when req.user is absent, permission
- * checks are bypassed so tests can run without a full auth stack.
+ * In test mode (NODE_ENV === 'test'), permission checks are bypassed so
+ * tests can run without a full auth stack. In all other environments,
+ * the request must have an authenticated user and the required permission.
  *
  * @param {string} permission
  * @returns {import('express').RequestHandler}
  */
 export function requirePermission(permission) {
   return (req, res, next) => {
-    // Skip in test environment or when no auth middleware is wired
-    if (process.env.NODE_ENV === 'test' || !req.user) {
+    // Skip RBAC checks entirely in test environment
+    if (process.env.NODE_ENV === 'test') {
       return next();
+    }
+
+    // In non-test environments, missing authentication is unauthorized
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
 
     if (!hasPermission(req.user.role, permission)) {

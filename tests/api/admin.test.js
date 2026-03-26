@@ -184,6 +184,17 @@ describe('POST /api/admin/users', () => {
     assert.equal(status, 400);
     assert.equal(body.ok, false);
   });
+
+  it('returns 400 for an invalid role value', async () => {
+    const { status, body } = await req(server, 'POST', '/api/admin/users', {
+      username: 'dave',
+      role: 'superuser',
+      password: 'x',
+    });
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    assert.ok(body.error.includes('role'));
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -224,9 +235,10 @@ describe('PATCH /api/admin/users/:id', () => {
   });
 
   it('returns 400 when attempting to deactivate the last active admin', async () => {
-    // The seeded admin has id '1'
-    const adminId = '1';
-    const { status, body } = await req(server, 'PATCH', `/api/admin/users/${adminId}`, {
+    // Look up the seeded admin by username rather than assuming a specific id
+    const adminUser = userStore.findByUsername('admin');
+    assert.ok(adminUser, 'seeded admin should exist');
+    const { status, body } = await req(server, 'PATCH', `/api/admin/users/${adminUser.id}`, {
       isActive: false,
     });
     assert.equal(status, 400);
@@ -240,6 +252,15 @@ describe('PATCH /api/admin/users/:id', () => {
     });
     assert.equal(status, 404);
     assert.equal(body.ok, false);
+  });
+
+  it('returns 400 for an invalid role value', async () => {
+    const { status, body } = await req(server, 'PATCH', `/api/admin/users/${operatorId}`, {
+      role: 'god',
+    });
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    assert.ok(body.error.includes('role'));
   });
 });
 
@@ -329,5 +350,40 @@ describe('PATCH /api/admin/users/:id — self-deactivation guard', () => {
     const admin2 = userStore.findByUsername('admin2');
     userStore.update(admin2.id, { isActive: false });
     assert.equal(userStore.countAdmins(), 1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// DELETE /api/admin/users/:id
+// ---------------------------------------------------------------------------
+
+describe('DELETE /api/admin/users/:id', () => {
+  let server, userStore, deletableId;
+
+  before(async () => {
+    userStore = new UserStore();
+    const u = userStore.create({ username: 'todelete', role: 'viewer', password: 'pw' });
+    deletableId = u.id;
+
+    server = startServer(makeForge(userStore), 0);
+    await new Promise(r => server.once('listening', r));
+  });
+
+  after(async () => new Promise(r => server.close(r)));
+
+  it('deletes an existing user and returns ok:true', async () => {
+    const { status, body } = await req(server, 'DELETE', `/api/admin/users/${deletableId}`);
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    // User should no longer appear in list
+    const list = await req(server, 'GET', '/api/admin/users');
+    const found = list.body.users.find(u => u.id === deletableId);
+    assert.equal(found, undefined);
+  });
+
+  it('returns 404 when deleting a non-existent user', async () => {
+    const { status, body } = await req(server, 'DELETE', '/api/admin/users/9999');
+    assert.equal(status, 404);
+    assert.equal(body.ok, false);
   });
 });

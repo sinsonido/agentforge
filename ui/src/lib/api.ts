@@ -33,10 +33,12 @@ export const api = {
   // ── Admin user management ──────────────────────────────────────────────
   adminListUsers: () =>
     request<{ ok: boolean; users: import('../types/api').AdminUser[] }>('/admin/users'),
-  adminCreateUser: (data: { username: string; email?: string; displayName?: string; role: string; password: string }) =>
+  adminCreateUser: (data: { username: string; email?: string; displayName?: string; role: import('../types/api').AdminUser['role']; password: string }) =>
     request<{ ok: boolean; user: import('../types/api').AdminUser }>('/admin/users', { method: 'POST', body: JSON.stringify(data) }),
-  adminUpdateUser: (id: string, data: { role?: string; displayName?: string; isActive?: boolean }) =>
+  adminUpdateUser: (id: string, data: { role?: import('../types/api').AdminUser['role']; displayName?: string; isActive?: boolean }) =>
     request<{ ok: boolean; user: import('../types/api').AdminUser }>(`/admin/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   adminResetPassword: (id: string, password: string) =>
     request<{ ok: boolean }>(`/admin/users/${id}/reset-password`, { method: 'POST', body: JSON.stringify({ password }) }),
+  adminDeleteUser: (id: string) =>
+    request<{ ok: boolean }>(`/admin/users/${id}`, { method: 'DELETE' }),
 }
