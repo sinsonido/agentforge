@@ -29,4 +29,26 @@ export const api = {
   controlStop: () => request<{ ok: boolean }>('/control/stop', { method: 'POST' }),
   testProvider: (provider: string) =>
     request<{ ok: boolean; error?: string }>('/providers/test', { method: 'POST', body: JSON.stringify({ provider }) }),
+
+  // ── Teams ──────────────────────────────────────────────────────────────
+  listTeams: () =>
+    request<{ ok: boolean; teams: import('../types/api').Team[] }>('/teams'),
+  createTeam: (body: { name: string; description?: string }) =>
+    request<{ ok: boolean; team: import('../types/api').Team }>('/teams', { method: 'POST', body: JSON.stringify(body) }),
+  getTeam: (id: string) =>
+    request<{ ok: boolean; team: import('../types/api').Team }>(`/teams/${id}`),
+  updateTeam: (id: string, body: { name?: string; description?: string }) =>
+    request<{ ok: boolean; team: import('../types/api').Team }>(`/teams/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  deleteTeam: (id: string) =>
+    request<{ ok: boolean }>(`/teams/${id}`, { method: 'DELETE' }),
+  addTeamMember: (teamId: string, userId: string, role?: string) =>
+    request<{ ok: boolean }>(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify({ userId, role }) }),
+  removeTeamMember: (teamId: string, userId: string) =>
+    request<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
+  setTeamMemberRole: (teamId: string, userId: string, role: string) =>
+    request<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
+  addTeamProject: (teamId: string, projectId: string) =>
+    request<{ ok: boolean }>(`/teams/${teamId}/projects`, { method: 'POST', body: JSON.stringify({ projectId }) }),
+  removeTeamProject: (teamId: string, projectId: string) =>
+    request<{ ok: boolean }>(`/teams/${teamId}/projects/${projectId}`, { method: 'DELETE' }),
 }

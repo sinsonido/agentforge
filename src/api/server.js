@@ -16,6 +16,8 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { TeamStore } from '../auth/teams.js';
+import { requirePermission } from '../auth/rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +35,7 @@ function corsMiddleware(req, res, next) {
   const origin = req.headers.origin || '';
   if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   }
   if (req.method === 'OPTIONS') {
@@ -388,6 +390,218 @@ function buildRouter(forge) {
     });
   }
 
+  // ── Teams routes /api/teams ───────────────────────────────────────────────
+  {
+    // Initialise the TeamStore once, backed by the raw better-sqlite3 handle.
+    // forge.db is an AgentForgeDB instance; its .db property is the raw Database.
+    const teamStore = forge.db ? new TeamStore(forge.db.db) : null;
+
+    /**
+     * Helper: return 503 when the DB / TeamStore is unavailable.
+     */
+    function requireTeamStore(res) {
+      if (!teamStore) {
+        res.status(503).json({ ok: false, error: 'Database not available' });
+        return false;
+      }
+      return true;
+    }
+
+    // GET /api/teams — list all teams
+    router.get('/teams', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const teams = teamStore.listTeams();
+        res.json({ ok: true, teams });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // POST /api/teams — create team (admin only)
+    router.post('/teams', requirePermission('teams:manage'), (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const { name, description } = req.body ?? {};
+        if (!name) {
+          return res.status(400).json({ ok: false, error: '`name` is required' });
+        }
+        const team = teamStore.createTeam({ name, description });
+        res.status(201).json({ ok: true, team });
+      } catch (err) {
+        if (err.message.includes('UNIQUE constraint')) {
+          return res.status(409).json({ ok: false, error: 'Team name already exists' });
+        }
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // GET /api/teams/:id — get team with members and projects
+    router.get('/teams/:id', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const team = teamStore.getTeam(req.params.id);
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        const members = teamStore.listMembers(req.params.id);
+        const projects = teamStore.listProjects(req.params.id);
+        res.json({ ok: true, team: { ...team, members, projects } });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // PUT /api/teams/:id — update team (admin only)
+    router.put('/teams/:id', requirePermission('teams:manage'), (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const { name, description } = req.body ?? {};
+        const team = teamStore.updateTeam(req.params.id, { name, description });
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        res.json({ ok: true, team });
+      } catch (err) {
+        if (err.message.includes('UNIQUE constraint')) {
+          return res.status(409).json({ ok: false, error: 'Team name already exists' });
+        }
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // DELETE /api/teams/:id — delete team (admin only)
+    router.delete('/teams/:id', requirePermission('teams:manage'), (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const deleted = teamStore.deleteTeam(req.params.id);
+        if (!deleted) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // GET /api/teams/:id/members — list members
+    router.get('/teams/:id/members', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const team = teamStore.getTeam(req.params.id);
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        const members = teamStore.listMembers(req.params.id);
+        res.json({ ok: true, members });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // POST /api/teams/:id/members — add member
+    router.post('/teams/:id/members', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const { userId, role } = req.body ?? {};
+        if (!userId) {
+          return res.status(400).json({ ok: false, error: '`userId` is required' });
+        }
+        const team = teamStore.getTeam(req.params.id);
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        teamStore.addMember(req.params.id, userId, role ?? 'member');
+        res.status(201).json({ ok: true });
+      } catch (err) {
+        if (err.message.includes('already a member')) {
+          return res.status(400).json({ ok: false, error: err.message });
+        }
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // DELETE /api/teams/:id/members/:uid — remove member
+    router.delete('/teams/:id/members/:uid', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const removed = teamStore.removeMember(req.params.id, req.params.uid);
+        if (!removed) {
+          return res.status(404).json({ ok: false, error: 'Member not found' });
+        }
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // PUT /api/teams/:id/members/:uid — set role
+    router.put('/teams/:id/members/:uid', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const { role } = req.body ?? {};
+        if (!role) {
+          return res.status(400).json({ ok: false, error: '`role` is required' });
+        }
+        const updated = teamStore.setMemberRole(req.params.id, req.params.uid, role);
+        if (!updated) {
+          return res.status(404).json({ ok: false, error: 'Member not found' });
+        }
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // GET /api/teams/:id/projects — list projects
+    router.get('/teams/:id/projects', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const team = teamStore.getTeam(req.params.id);
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        const projects = teamStore.listProjects(req.params.id);
+        res.json({ ok: true, projects });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // POST /api/teams/:id/projects — add project
+    router.post('/teams/:id/projects', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const { projectId } = req.body ?? {};
+        if (!projectId) {
+          return res.status(400).json({ ok: false, error: '`projectId` is required' });
+        }
+        const team = teamStore.getTeam(req.params.id);
+        if (!team) {
+          return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
+        }
+        teamStore.addProject(req.params.id, projectId);
+        res.status(201).json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+
+    // DELETE /api/teams/:id/projects/:pid — remove project
+    router.delete('/teams/:id/projects/:pid', (req, res) => {
+      if (!requireTeamStore(res)) return;
+      try {
+        const removed = teamStore.removeProject(req.params.id, req.params.pid);
+        if (!removed) {
+          return res.status(404).json({ ok: false, error: 'Project association not found' });
+        }
+        res.json({ ok: true });
+      } catch (err) {
+        res.status(500).json({ ok: false, error: err.message });
+      }
+    });
+  }
+
   // ── POST /api/review/:prNumber/approve ───────────────────────────────────
   /**
    * Approve a PR review.
@@ -510,6 +724,8 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // Rate limiting — scoped to API routes only (not static files)
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
+  app.put('/api/*splat', mutationLimiter);
+  app.delete('/api/*splat', mutationLimiter);
 
   // API routes
   app.use('/api', buildRouter(forge));

@@ -72,6 +72,28 @@ export class AgentForgeDB {
       CREATE INDEX IF NOT EXISTS idx_events_name ON events(event);
     `);
 
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS teams (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT DEFAULT '',
+        created_at INTEGER DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE IF NOT EXISTS team_members (
+        team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        user_id TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'member',
+        PRIMARY KEY (team_id, user_id)
+      );
+
+      CREATE TABLE IF NOT EXISTS team_projects (
+        team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
+        project_id TEXT NOT NULL,
+        PRIMARY KEY (team_id, project_id)
+      );
+    `);
+
     // Prepared statements for performance
     this._stmts = {
       upsertTask: this.db.prepare(`

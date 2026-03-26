@@ -54,6 +54,21 @@ export interface ApiEvent {
   timestamp: number
 }
 
+export interface Team {
+  id: string
+  name: string
+  description: string
+  created_at: number
+  member_count?: number
+  members?: TeamMember[]
+  projects?: string[]
+}
+
+export interface TeamMember {
+  userId: string
+  role: 'owner' | 'member'
+}
+
 export interface SystemStatus {
   ok: boolean
   orchestrator: { running: boolean }
