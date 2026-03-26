@@ -77,6 +77,7 @@ function wsTokenEqual(a, b) {
 }
 
 /**
+ * Send a single message to a specific client, ignoring send errors
  * (the client may have disconnected between the readyState check and send).
  *
  * @param {import('ws').WebSocket} ws
