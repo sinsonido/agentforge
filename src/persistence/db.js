@@ -65,11 +65,24 @@ export class AgentForgeDB {
         timestamp INTEGER DEFAULT (unixepoch() * 1000)
       );
 
+      CREATE TABLE IF NOT EXISTS audit_log (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id    TEXT NOT NULL DEFAULT 'system',
+        username   TEXT NOT NULL DEFAULT 'system',
+        action     TEXT NOT NULL,
+        resource   TEXT,
+        payload    TEXT,
+        ip         TEXT,
+        created_at INTEGER NOT NULL DEFAULT (unixepoch())
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
       CREATE INDEX IF NOT EXISTS idx_cost_project ON cost_records(project_id);
       CREATE INDEX IF NOT EXISTS idx_events_name ON events(event);
+      CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
     `);
 
     // Prepared statements for performance
@@ -97,6 +110,22 @@ export class AgentForgeDB {
       insertActivity: this.db.prepare(`
         INSERT INTO agent_activity (agent_id, from_state, to_state, task_id, data)
         VALUES (@agent_id, @from_state, @to_state, @task_id, @data)
+      `),
+      insertAudit: this.db.prepare(`
+        INSERT INTO audit_log (user_id, username, action, resource, payload, ip)
+        VALUES (@user_id, @username, @action, @resource, @payload, @ip)
+      `),
+      getAuditLog: this.db.prepare(`
+        SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?
+      `),
+      getAuditLogByUser: this.db.prepare(`
+        SELECT * FROM audit_log WHERE user_id = ? ORDER BY id DESC LIMIT ? OFFSET ?
+      `),
+      getAuditLogByAction: this.db.prepare(`
+        SELECT * FROM audit_log WHERE action = ? ORDER BY id DESC LIMIT ? OFFSET ?
+      `),
+      getAuditLogByUserAndAction: this.db.prepare(`
+        SELECT * FROM audit_log WHERE user_id = ? AND action = ? ORDER BY id DESC LIMIT ? OFFSET ?
       `),
     };
   }
@@ -189,6 +218,41 @@ export class AgentForgeDB {
       task_id: taskId || null,
       data: Object.keys(data).length ? JSON.stringify(data) : null,
     });
+  }
+
+  // ─── Audit log ───────────────────────────────────────
+
+  /** Append an audit entry (append-only; no delete) */
+  logAudit({ userId = 'system', username = 'system', action, resource = null, payload = null, ip = null }) {
+    this._stmts.insertAudit.run({
+      user_id: userId,
+      username,
+      action,
+      resource: resource ?? null,
+      payload: payload ?? null,
+      ip: ip ?? null,
+    });
+  }
+
+  /**
+   * Query audit log with optional filters.
+   * @param {Object} opts
+   * @param {number} [opts.limit=50]
+   * @param {number} [opts.offset=0]
+   * @param {string} [opts.userId]
+   * @param {string} [opts.action]
+   */
+  getAuditLog({ limit = 50, offset = 0, userId, action } = {}) {
+    if (userId && action) {
+      return this._stmts.getAuditLogByUserAndAction.all(userId, action, limit, offset);
+    }
+    if (userId) {
+      return this._stmts.getAuditLogByUser.all(userId, limit, offset);
+    }
+    if (action) {
+      return this._stmts.getAuditLogByAction.all(action, limit, offset);
+    }
+    return this._stmts.getAuditLog.all(limit, offset);
   }
 
   close() {

@@ -16,6 +16,7 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { createAuditMiddleware } from '../auth/audit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -61,6 +62,7 @@ function corsMiddleware(req, res, next) {
  */
 function buildRouter(forge) {
   const router = express.Router();
+  const audit = createAuditMiddleware(forge.db);
 
   // ── GET /api/status ──────────────────────────────────────────────────────
   /**
@@ -120,7 +122,7 @@ function buildRouter(forge) {
    * Add a new task.
    * Body: { title, type, priority, agent_id }
    */
-  router.post('/tasks', (req, res) => {
+  router.post('/tasks', audit('task.created'), (req, res) => {
     try {
       const { title, type, priority, agent_id } = req.body ?? {};
       if (!title) {
@@ -154,7 +156,7 @@ function buildRouter(forge) {
    * Update the status of a task (used by the Kanban board drag-and-drop).
    * Body: { status }
    */
-  router.post('/tasks/:id/status', (req, res) => {
+  router.post('/tasks/:id/status', audit('task.status_changed', r => `task:${r.params.id}`), (req, res) => {
     try {
       const { status } = req.body ?? {};
       const validStatuses = ['queued', 'executing', 'completed', 'failed'];
@@ -192,7 +194,7 @@ function buildRouter(forge) {
    * Update an agent's runtime config (model, systemPrompt).
    * Body: { model?, systemPrompt? }
    */
-  router.post('/agents/:id', (req, res) => {
+  router.post('/agents/:id', audit('agent.config_updated', r => `agent:${r.params.id}`), (req, res) => {
     try {
       const agentId = req.params.id;
       const { model, systemPrompt } = req.body ?? {};
@@ -330,7 +332,7 @@ function buildRouter(forge) {
   /**
    * Start the orchestrator.
    */
-  router.post('/control/start', (req, res) => {
+  router.post('/control/start', audit('orchestrator.started'), (req, res) => {
     try {
       if (!forge.orchestrator) {
         return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
@@ -349,7 +351,7 @@ function buildRouter(forge) {
   /**
    * Stop the orchestrator.
    */
-  router.post('/control/stop', (req, res) => {
+  router.post('/control/stop', audit('orchestrator.stopped'), (req, res) => {
     try {
       if (!forge.orchestrator) {
         return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
@@ -392,7 +394,7 @@ function buildRouter(forge) {
   /**
    * Approve a PR review.
    */
-  router.post('/review/:prNumber/approve', (req, res) => {
+  router.post('/review/:prNumber/approve', audit('review.approved', r => `pr:${r.params.prNumber}`), (req, res) => {
     try {
       const prNumber = parseInt(req.params.prNumber, 10);
       if (!Number.isFinite(prNumber) || prNumber < 1) {
@@ -410,7 +412,7 @@ function buildRouter(forge) {
    * Reject a PR review.
    * Body: { reason }
    */
-  router.post('/review/:prNumber/reject', (req, res) => {
+  router.post('/review/:prNumber/reject', audit('review.rejected', r => `pr:${r.params.prNumber}`), (req, res) => {
     try {
       const prNumber = parseInt(req.params.prNumber, 10);
       if (!Number.isFinite(prNumber) || prNumber < 1) {
@@ -422,6 +424,27 @@ function buildRouter(forge) {
       }
       forge.eventBus.emit('review.rejected', { prNumber, reason, rejectedAt: Date.now() });
       res.json({ ok: true, prNumber, action: 'rejected', reason });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/admin/audit ─────────────────────────────────────────────────
+  /**
+   * Retrieve audit log entries (append-only; no delete endpoint).
+   * Query params: ?limit=50&offset=0&user=<userId>&action=<action>
+   */
+  router.get('/admin/audit', (req, res) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+      const offset = parseInt(req.query.offset, 10) || 0;
+      const entries = forge.db?.getAuditLog({
+        limit,
+        offset,
+        userId: req.query.user,
+        action: req.query.action,
+      }) ?? [];
+      res.json({ ok: true, count: entries.length, entries });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
