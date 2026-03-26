@@ -23,9 +23,8 @@ export class InvitationStore {
    * @param {{ email: string, role?: string, teamId?: string, invitedBy: string, expiresInHours?: number }} opts
    * @returns {{ id: string, email: string, role: string, teamId: string|null, token: string, invitedBy: string, createdAt: number, expiresAt: number, usedAt: null, status: string }}
    */
-  createInvitation({ email, role = 'viewer', teamId = null, invitedBy, expiresInHours = 72 }) {
+  createInvitation({ email, role = 'viewer', teamId = null, invitedBy = null, expiresInHours = 168 }) {
     if (!email) throw new Error('email is required');
-    if (!invitedBy) throw new Error('invitedBy is required');
 
     const id = randomUUID();
     const token = randomBytes(32).toString('hex');
@@ -86,15 +85,12 @@ export class InvitationStore {
    * @returns {object|null} updated invitation, or null if not found / not pending
    */
   acceptInvitation(token) {
-    const row = this.db.prepare('SELECT * FROM invitations WHERE token = ?').get(token);
-    if (!row) return null;
-    if (row.status !== 'pending') return null;
-
     const now = Math.floor(Date.now() / 1000);
-    this.db.prepare(
-      `UPDATE invitations SET used_at = ?, status = 'accepted' WHERE token = ?`
+    // Atomic: only updates if still pending (prevents race conditions)
+    const info = this.db.prepare(
+      `UPDATE invitations SET used_at = ?, status = 'accepted' WHERE token = ? AND status = 'pending'`
     ).run(now, token);
-
+    if (info.changes === 0) return null;
     return this._format(this.db.prepare('SELECT * FROM invitations WHERE token = ?').get(token));
   }
 

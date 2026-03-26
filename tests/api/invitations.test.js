@@ -46,7 +46,7 @@ function makeDb() {
       role TEXT NOT NULL DEFAULT 'viewer',
       team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
       token TEXT NOT NULL UNIQUE,
-      invited_by TEXT NOT NULL REFERENCES users(id),
+      invited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
       created_at INTEGER DEFAULT (unixepoch()),
       expires_at INTEGER NOT NULL,
       used_at INTEGER,
@@ -94,9 +94,9 @@ describe('InvitationStore', () => {
       assert.equal(inv.status, 'pending');
       assert.ok(inv.token.length >= 64, 'token is 64+ hex chars');
       assert.ok(inv.expiresAt > inv.createdAt, 'expiresAt is after createdAt');
-      // Default 72 h
+      // Default 168 h (7 days)
       const diffHours = (inv.expiresAt - inv.createdAt) / 3600;
-      assert.ok(diffHours >= 71 && diffHours <= 73, `expiry is ~72h, got ${diffHours}`);
+      assert.ok(diffHours >= 167 && diffHours <= 169, `expiry is ~168h, got ${diffHours}`);
     });
 
     it('creates an invitation with custom role and expiry', () => {
@@ -118,11 +118,11 @@ describe('InvitationStore', () => {
       );
     });
 
-    it('throws when invitedBy is missing', () => {
-      assert.throws(
-        () => store.createInvitation({ email: 'x@x.com' }),
-        /invitedBy is required/i
-      );
+    it('allows creating invitation without invitedBy (nullable)', () => {
+      // invitedBy is now nullable — no error expected
+      const inv = store.createInvitation({ email: 'noinviter@example.com' });
+      assert.equal(inv.email, 'noinviter@example.com');
+      assert.equal(inv.invitedBy, null);
     });
   });
 

@@ -57,6 +57,7 @@ export interface Invitation {
   expiresAt: number
   usedAt: number | null
   status: 'pending' | 'accepted' | 'expired' | 'revoked'
+  token: string
 }
 
 export interface ApiEvent {

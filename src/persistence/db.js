@@ -90,7 +90,7 @@ export class AgentForgeDB {
         role TEXT NOT NULL DEFAULT 'viewer',
         team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
         token TEXT NOT NULL UNIQUE,
-        invited_by TEXT NOT NULL REFERENCES users(id),
+        invited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
         created_at INTEGER DEFAULT (unixepoch()),
         expires_at INTEGER NOT NULL,
         used_at INTEGER,
@@ -102,7 +102,7 @@ export class AgentForgeDB {
       CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
       CREATE INDEX IF NOT EXISTS idx_cost_project ON cost_records(project_id);
       CREATE INDEX IF NOT EXISTS idx_events_name ON events(event);
-      CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
+      -- Note: idx_invitations_token is implicit from UNIQUE constraint on token
       CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
     `);
 

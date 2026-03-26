@@ -45,10 +45,9 @@ function InviteLink({ token }: { token: string }) {
   const link = `${window.location.origin}/accept-invite?token=${token}`
 
   function handleCopy() {
-    void navigator.clipboard.writeText(link).then(() => {
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    })
+    void navigator.clipboard.writeText(link)
+      .then(() => { setCopied(true); setTimeout(() => setCopied(false), 2000) })
+      .catch(() => { /* clipboard not available (non-HTTPS or permissions denied) */ })
   }
 
   return (

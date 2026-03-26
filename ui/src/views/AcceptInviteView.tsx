@@ -28,6 +28,11 @@ export default function AcceptInviteView() {
 
   // Validate token on mount
   useEffect(() => {
+    // Reset state when token changes
+    setInvite(null)
+    setValidationError(null)
+    setValidating(true)
+
     if (!token) {
       setValidationError('No invitation token provided.')
       setValidating(false)

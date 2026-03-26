@@ -481,6 +481,7 @@ function buildRouter(forge) {
       if (!token)    return res.status(400).json({ ok: false, error: '`token` is required' });
       if (!username) return res.status(400).json({ ok: false, error: '`username` is required' });
       if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
+      if (password.length < 8) return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
 
       // Expire stale first
       store.expireStale();
@@ -491,41 +492,39 @@ function buildRouter(forge) {
         return res.status(409).json({ ok: false, error: `Invitation is ${inv.status}` });
       }
 
-      // Check expiry
       const now = Math.floor(Date.now() / 1000);
       if (inv.expiresAt <= now) {
         store.expireStale();
         return res.status(409).json({ ok: false, error: 'Invitation has expired' });
       }
 
+      // Atomically claim the invitation before creating the user (prevents race conditions)
+      const claimed = store.acceptInvitation(token);
+      if (!claimed) {
+        return res.status(409).json({ ok: false, error: 'Invitation already used or expired' });
+      }
+
       // Create user account
       let user;
       if (forge.userStore) {
-        // Full user store available
         user = await forge.userStore.create({ username, email: inv.email, role: inv.role, password });
       } else if (forge.db) {
-        // Minimal user creation directly on db
         const { randomUUID } = await import('node:crypto');
+        const bcrypt = await import('bcryptjs');
         const userId = randomUUID();
+        const passwordHash = bcrypt.hashSync(password, 12);
         forge.db.db.prepare(
           `INSERT INTO users (id, username, email, password_hash, role) VALUES (?, ?, ?, ?, ?)`
-        ).run(userId, username, inv.email, password, inv.role);
+        ).run(userId, username, inv.email, passwordHash, inv.role);
         user = { id: userId, username, role: inv.role };
       } else {
         return res.status(503).json({ ok: false, error: 'User store not available' });
       }
 
-      // Add to team if teamId is set
+      // Add to team if teamId is set (non-fatal)
       if (inv.teamId && forge.teamStore) {
-        try {
-          forge.teamStore.addMember(inv.teamId, user.id, 'member');
-        } catch (_) {
-          // Non-fatal: team may not exist
-        }
+        try { forge.teamStore.addMember(inv.teamId, user.id, 'member'); } catch (_) {}
       }
-
-      // Mark invitation as accepted
-      store.acceptInvitation(token);
 
       res.status(201).json({ ok: true, user: { id: user.id, username: user.username, role: user.role } });
     } catch (err) {
