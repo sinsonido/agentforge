@@ -137,6 +137,26 @@ function buildRouter(forge) {
     }
   });
 
+  // ── PATCH /api/auth/users/:id/role ────────────────────────────────────────
+  /**
+   * Update a user's role. Requires users:write permission (admin only).
+   * Body: { role }
+   */
+  router.patch('/auth/users/:id/role', requirePermission('users:write'), (req, res) => {
+    try {
+      const { role } = req.body ?? {};
+      const user = userStore.updateRole(req.params.id, role);
+      if (!user) {
+        return res.status(404).json({ ok: false, error: 'User not found' });
+      }
+      res.json({ ok: true, user });
+    } catch (err) {
+      if (err.message.includes('Invalid role')) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
 
   // ── GET /api/status ──────────────────────────────────────────────────────
   /**

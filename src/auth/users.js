@@ -9,7 +9,7 @@
  * Roles: 'admin' | 'operator' | 'viewer'
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,7 +84,9 @@ export class UserStore {
     if (!id) return null;
     const user = this._byId.get(id);
     if (!user) return null;
-    if (user.passwordHash !== hashPassword(password)) return null;
+    const expected = Buffer.from(user.passwordHash, 'hex');
+    const actual   = Buffer.from(hashPassword(password), 'hex');
+    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
     return this._safe(user);
   }
 
