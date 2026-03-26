@@ -85,6 +85,10 @@ function sendToClient(ws, message) {
  * The WebSocket endpoint is mounted at `/ws` on the same port as the REST API.
  *
  * Behaviour per connection:
+ *  - When `authConfig.enabled` is true (and `NODE_ENV !== 'test'`), the
+ *    connecting client must supply the shared secret as a `?token=<secret>`
+ *    query parameter.  Connections without a valid token are closed with code
+ *    4401 and the message "Unauthorized".
  *  - Replays the last 20 events immediately on connect.
  *  - Forwards every listed event from the eventBus as it fires.
  *  - Sends a ping frame every 30 s; closes the connection if no pong is
@@ -93,6 +97,7 @@ function sendToClient(ws, message) {
  *
  * @param {import('http').Server} httpServer - The Node.js HTTP server to attach to.
  * @param {import('../core/event-bus.js').default} eventBus - The AgentForge event bus singleton.
+ * @param {{ enabled?: boolean, secret?: string }} [authConfig={}] - Auth config.
  * @returns {WebSocketServer} The created WebSocket server instance.
  *
  * @example
@@ -103,14 +108,23 @@ function sendToClient(ws, message) {
  *
  * const app = express();
  * const httpServer = http.createServer(app);
- * startWebSocketServer(httpServer, eventBus);
+ * startWebSocketServer(httpServer, eventBus, { enabled: false });
  * httpServer.listen(3000);
  */
-export function startWebSocketServer(httpServer, eventBus) {
+export function startWebSocketServer(httpServer, eventBus, authConfig = {}) {
   const wss = new WebSocketServer({ server: httpServer, path: '/ws' });
 
   // ── Per-connection logic ─────────────────────────────────────────────────
-  wss.on('connection', (ws) => {
+  wss.on('connection', (ws, req) => {
+    // Token auth check for WebSocket connections
+    if (authConfig.enabled && process.env.NODE_ENV !== 'test') {
+      const url = new URL(req.url, 'http://localhost');
+      const token = url.searchParams.get('token');
+      if (!token || token !== authConfig.secret) {
+        ws.close(4401, 'Unauthorized');
+        return;
+      }
+    }
     // Replay the last 20 events so the dashboard can hydrate immediately
     const recent = eventBus.getRecentEvents(20);
     for (const entry of recent) {
