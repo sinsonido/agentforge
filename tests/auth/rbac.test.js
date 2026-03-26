@@ -5,9 +5,14 @@
  * Tests requirePermission middleware using mock req/res/next — no HTTP server needed.
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { requirePermission, getPermissions, ROLE_PERMISSIONS } from '../../src/auth/rbac.js';
+
+// rbac.test.js tests real RBAC behavior — unset NODE_ENV so test-mode bypass doesn't hide results.
+let _savedEnv;
+before(() => { _savedEnv = process.env.NODE_ENV; delete process.env.NODE_ENV; });
+after(() => { if (_savedEnv !== undefined) process.env.NODE_ENV = _savedEnv; });
 
 // ---------------------------------------------------------------------------
 // Helpers — build minimal mock req / res / next
@@ -88,27 +93,28 @@ describe('getPermissions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// requirePermission — null user (static token / auth disabled / test mode)
+// requirePermission — null user returns 401 (unauthenticated) in non-test env
 // ---------------------------------------------------------------------------
 
 describe('requirePermission — null user', () => {
-  it('calls next() when req.user is null (no RBAC restriction)', () => {
+  it('returns 401 when req.user is null (unauthenticated)', () => {
     const mw   = requirePermission('tasks:write');
     const req  = makeReq(null);
     const res  = makeRes();
     const next = makeNext();
     mw(req, res, next);
-    assert.ok(next.wasCalled(), 'next() should be called for null user');
-    assert.equal(res._status, null, 'no status should be set');
+    assert.ok(!next.wasCalled(), 'next() should NOT be called for null user');
+    assert.equal(res._status, 401, 'should respond with 401 Unauthorized');
   });
 
-  it('calls next() when req.user is undefined', () => {
+  it('returns 401 when req.user is undefined (unauthenticated)', () => {
     const mw   = requirePermission('users:write');
     const req  = makeReq(undefined);
     const res  = makeRes();
     const next = makeNext();
     mw(req, res, next);
-    assert.ok(next.wasCalled());
+    assert.ok(!next.wasCalled(), 'next() should NOT be called for undefined user');
+    assert.equal(res._status, 401);
   });
 });
 

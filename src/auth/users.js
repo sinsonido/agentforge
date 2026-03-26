@@ -9,16 +9,10 @@
  * Roles: 'admin' | 'operator' | 'viewer'
  */
 
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
+import bcrypt from 'bcryptjs';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function hashPassword(password) {
-  // SHA-256 hash — in production use bcrypt/argon2.
-  return createHash('sha256').update(password).digest('hex');
-}
+const BCRYPT_ROUNDS = 12;
 
 // ---------------------------------------------------------------------------
 // UserStore
@@ -31,17 +25,21 @@ export class UserStore {
     /** @type {Map<string, string>} username → id */
     this._byUsername = new Map();
 
-    // Seed a default admin so the system is usable out of the box.
-    // Override via AGENTFORGE_ADMIN_PASSWORD env var.
-    const adminPassword = process.env.AGENTFORGE_ADMIN_PASSWORD ?? 'admin';
-    this._seed('admin', adminPassword, 'admin');
+    // Seed a default admin only in development/test or when explicitly requested.
+    const isDevLike = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+    const explicitSeed = process.env.AGENTFORGE_SEED_ADMIN === 'true';
+    if (isDevLike || explicitSeed) {
+      const adminPassword = process.env.AGENTFORGE_ADMIN_PASSWORD ?? 'admin';
+      this._seed('admin', adminPassword, 'admin');
+    }
   }
 
   // ── Internal ──────────────────────────────────────────────────────────────
 
   _seed(username, password, role) {
     const id = randomUUID();
-    const user = { id, username, passwordHash: hashPassword(password), role };
+    const passwordHash = bcrypt.hashSync(password, BCRYPT_ROUNDS);
+    const user = { id, username, passwordHash, role };
     this._byId.set(id, user);
     this._byUsername.set(username, id);
     return user;
@@ -56,7 +54,11 @@ export class UserStore {
    */
   create({ username, password, role = 'viewer' }) {
     if (!username || !password) throw new Error('username and password are required');
-    if (this._byUsername.has(username)) throw new Error(`User '${username}' already exists`);
+    if (this._byUsername.has(username)) {
+      const err = new Error(`User '${username}' already exists`);
+      err.code = 'DUPLICATE_USERNAME';
+      throw err;
+    }
     const validRoles = ['admin', 'operator', 'viewer'];
     if (!validRoles.includes(role)) throw new Error(`Invalid role '${role}'`);
     const user = this._seed(username, password, role);
@@ -84,9 +86,7 @@ export class UserStore {
     if (!id) return null;
     const user = this._byId.get(id);
     if (!user) return null;
-    const expected = Buffer.from(user.passwordHash, 'hex');
-    const actual   = Buffer.from(hashPassword(password), 'hex');
-    if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) return null;
+    if (!bcrypt.compareSync(password, user.passwordHash)) return null;
     return this._safe(user);
   }
 

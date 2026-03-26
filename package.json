@@ -13,7 +13,7 @@
     "start:verbose": "bash scripts/start.sh --verbose",
     "start:tunnel:verbose": "bash scripts/start.sh --tunnel --verbose",
     "dev": "node --watch src/index.js",
-    "test": "node --test $(find tests -name '*.test.js' | LC_ALL=C sort)",
+    "test": "NODE_ENV=test node --test $(find tests -name '*.test.js' | LC_ALL=C sort)",
     "test:watch": "node --test --watch $(find tests -name '*.test.js' | LC_ALL=C sort)",
     "lint": "eslint src/",
     "docker:build": "docker build -t agentforge .",
@@ -44,6 +44,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.80.0",
     "@google/generative-ai": "^0.24.1",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^12.8.0",
     "commander": "^14.0.3",
     "express": "^5.2.1",
