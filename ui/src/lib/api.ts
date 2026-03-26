@@ -1,10 +1,30 @@
+import { getToken } from '@/contexts/AuthContext'
+
 const BASE = '/api'
 
+// Module-level callback invoked when a 401 response is received
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getToken()
+  const authHeaders: Record<string, string> = token
+    ? { Authorization: `Bearer ${token}` }
+    : {}
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...authHeaders },
     ...options,
   })
+
+  if (res.status === 401) {
+    onUnauthorized?.()
+    throw new Error('Unauthorized')
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error((err as { error?: string }).error ?? res.statusText)
@@ -29,4 +49,6 @@ export const api = {
   controlStop: () => request<{ ok: boolean }>('/control/stop', { method: 'POST' }),
   testProvider: (provider: string) =>
     request<{ ok: boolean; error?: string }>('/providers/test', { method: 'POST', body: JSON.stringify({ provider }) }),
+  changePassword: (body: { currentPassword: string; newPassword: string }) =>
+    request<{ ok: boolean }>('/auth/change-password', { method: 'POST', body: JSON.stringify(body) }),
 }
