@@ -181,9 +181,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return perms.includes('*') || perms.includes(permission)
   }, [user])
 
-  // While checking auth state, render nothing to avoid flash of login page
+  // While checking auth state, render a blank screen to avoid flash of login page
   if (checking) {
-    return null
+    return <div className="min-h-screen bg-background" />
   }
 
   return (

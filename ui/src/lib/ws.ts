@@ -48,7 +48,9 @@ class WebSocketManager {
       try {
         const msg = JSON.parse(e.data) as WsMessage
         for (const l of this.listeners) l(msg)
-      } catch {}
+      } catch (e) {
+        console.warn('[ws] failed to parse message', e)
+      }
     }
   }
 

@@ -50,6 +50,7 @@ export function UserMenu() {
         )}
         onClick={() => setOpen((v) => !v)}
         aria-label="User menu"
+        aria-haspopup="menu"
         aria-expanded={open}
       >
         {initials(user)}

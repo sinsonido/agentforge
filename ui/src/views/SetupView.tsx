@@ -57,9 +57,7 @@ export default function SetupView() {
 
       navigate('/login?message=Account+created+successfully.+Please+sign+in.', { replace: true })
     } catch (err) {
-      if (!alreadySetup) {
-        setError(err instanceof Error ? err.message : 'Setup failed')
-      }
+      setError(err instanceof Error ? err.message : 'Setup failed')
     } finally {
       setLoading(false)
     }
