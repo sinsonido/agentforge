@@ -107,7 +107,7 @@ interface EditTeamDialogProps {
 
 function EditTeamDialog({ team, open, onClose, onUpdated }: EditTeamDialogProps) {
   const [name, setName] = useState(team.name)
-  const [description, setDescription] = useState(team.description)
+  const [description, setDescription] = useState(team.description ?? '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
