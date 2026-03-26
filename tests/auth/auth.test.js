@@ -136,14 +136,15 @@ describe('authMiddleware — auth enabled', () => {
     assert.equal(req.user.role,     user.role);
   });
 
-  it('sets req.user = null and calls next() for a valid static API key', async () => {
+  it('sets req.user to admin sentinel and calls next() for a valid static API key', async () => {
     process.env.AGENTFORGE_API_KEY = 'my-static-key';
     const mwWithKey = await loadMiddleware();
     const req  = makeReq({ authorization: 'Bearer my-static-key' });
     const res  = makeRes();
     const next = makeNext();
     mwWithKey(req, res, next);
-    assert.equal(req.user, null);
+    assert.ok(req.user, 'req.user should be set');
+    assert.equal(req.user.role, 'admin', 'static API key grants admin role');
     assert.ok(next.wasCalled());
     delete process.env.AGENTFORGE_API_KEY;
   });

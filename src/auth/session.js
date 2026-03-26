@@ -8,13 +8,17 @@
  * The JWT payload includes: { sub, username, role, iat, exp }
  */
 
-import { createHmac, randomBytes } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 
 // Secret used to sign tokens — in production set AUTH_SECRET env var.
 const SECRET = process.env.AUTH_SECRET ?? 'agentforge-dev-secret-change-in-production';
 
 /** Token lifetime in seconds (default 24 h). */
-const TOKEN_TTL = parseInt(process.env.AUTH_TOKEN_TTL ?? '86400', 10);
+const _rawTTL = parseInt(process.env.AUTH_TOKEN_TTL ?? '86400', 10);
+if (!Number.isFinite(_rawTTL) || _rawTTL <= 0) {
+  throw new Error(`AUTH_TOKEN_TTL must be a positive integer; got '${process.env.AUTH_TOKEN_TTL}'`);
+}
+const TOKEN_TTL = _rawTTL;
 
 // ---------------------------------------------------------------------------
 // Encoding helpers
@@ -66,11 +70,18 @@ export function verifyToken(token) {
   const parts = token.split('.');
   if (parts.length !== 3) return null;
   const [header, payload, sig] = parts;
+
+  // Timing-safe signature comparison to prevent timing attacks.
   const expected = sign(`${header}.${payload}`);
-  if (sig !== expected) return null;
+  const sigBuf = Buffer.from(sig, 'base64url');
+  const expBuf = Buffer.from(expected, 'base64url');
+  if (sigBuf.length !== expBuf.length || !timingSafeEqual(sigBuf, expBuf)) return null;
+
   try {
     const data = JSON.parse(fromB64url(payload));
-    if (data.exp && data.exp < Math.floor(Date.now() / 1000)) return null;
+    // Require exp to be a finite positive number; tokens without a valid exp are rejected.
+    if (!Number.isFinite(data.exp) || data.exp <= 0) return null;
+    if (data.exp < Math.floor(Date.now() / 1000)) return null;
     return data;
   } catch {
     return null;

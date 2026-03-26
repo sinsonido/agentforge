@@ -4,9 +4,9 @@
  *
  * Reads the Authorization header and populates req.user:
  *   - "Bearer <jwt>"        → verifies JWT, sets req.user = { id, username, role }
- *   - "Bearer <static-key>" → matches AGENTFORGE_API_KEY, sets req.user = null
- *                             (null means "authenticated but no role restrictions")
- *   - No header (test mode) → req.user = null (RBAC skips null users)
+ *   - "Bearer <static-key>" → matches AGENTFORGE_API_KEY, sets req.user to an
+ *                             admin-role sentinel so RBAC passes all permission checks
+ *   - No header (test mode) → req.user = null (RBAC is bypassed in test mode)
  *   - Invalid/expired JWT   → 401
  *
  * Auth is disabled entirely when NODE_ENV === 'test' and no AUTH_ENABLED env
@@ -57,9 +57,9 @@ export function authMiddleware(req, res, next) {
 
   const token = authHeader.slice(7);
 
-  // Static API key — grants access but no role (RBAC will not restrict).
+  // Static API key — grants full admin-level access (bypasses RBAC role checks).
   if (STATIC_API_KEY && token === STATIC_API_KEY) {
-    req.user = null;
+    req.user = { id: 'static-api-key', username: '__api_key__', role: 'admin' };
     return next();
   }
 

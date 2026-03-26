@@ -5,7 +5,18 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import { createToken, verifyToken, generateStaticToken } from '../../src/auth/session.js';
+
+// Helper: create a properly signed token with a custom payload.
+// Uses the same known secret that session.js will pick up from the env.
+const TEST_SECRET = process.env.AUTH_SECRET ?? 'agentforge-dev-secret-change-in-production';
+function signedToken(payloadObj) {
+  const header  = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify(payloadObj)).toString('base64url');
+  const sig = createHmac('sha256', TEST_SECRET).update(`${header}.${payload}`).digest('base64url');
+  return `${header}.${payload}.${sig}`;
+}
 
 const SAMPLE_USER = { id: 'abc-123', username: 'alice', role: 'operator' };
 
@@ -61,21 +72,23 @@ describe('verifyToken', () => {
   });
 
   it('returns null for an expired token', () => {
-    // Build a token whose exp is in the past.
-    const header  = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
-    const payload = Buffer.from(JSON.stringify({
+    // Use a properly signed token with an exp well in the past.
+    // This exercises the expiry check directly (not the signature check).
+    const token = signedToken({
       sub: '1', username: 'x', role: 'viewer',
       iat: 1_000_000, exp: 1_000_001,   // well in the past
-    })).toString('base64url');
-    // Sign with the same mechanism as session.js (HMAC-SHA256 via createToken shape).
-    // We can't reproduce the exact sig without importing internals, so just assert
-    // that a valid-looking token with past exp is rejected.
-    // Use a real token then monkey-patch the payload to an expired one:
-    const realToken = createToken(SAMPLE_USER);
-    const realParts = realToken.split('.');
-    realParts[1] = payload;
-    // Sig won't match → null. Covers the tamper-before-expiry path.
-    assert.equal(verifyToken(realParts.join('.')), null);
+    });
+    assert.equal(verifyToken(token), null, 'expired token should be rejected');
+  });
+
+  it('returns null for a token with missing exp', () => {
+    const token = signedToken({ sub: '1', username: 'x', role: 'viewer', iat: Math.floor(Date.now() / 1000) });
+    assert.equal(verifyToken(token), null, 'token without exp should be rejected');
+  });
+
+  it('returns null for a token with non-numeric exp', () => {
+    const token = signedToken({ sub: '1', username: 'x', role: 'viewer', exp: 'never' });
+    assert.equal(verifyToken(token), null, 'token with non-numeric exp should be rejected');
   });
 });
 
