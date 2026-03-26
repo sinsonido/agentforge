@@ -85,7 +85,7 @@ describe('InvitationStore', () => {
   // ── createInvitation ───────────────────────────────────────────────────────
 
   describe('createInvitation()', () => {
-    it('creates an invitation with default role and 72h expiry', () => {
+    it('creates an invitation with default role and 168h expiry', () => {
       const inv = store.createInvitation({ email: 'alice@example.com', invitedBy: 'u1' });
       assert.ok(inv.id, 'has id');
       assert.equal(inv.email, 'alice@example.com');
