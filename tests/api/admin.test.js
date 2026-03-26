@@ -55,9 +55,10 @@ function makeForge(userStore) {
  * @param {string} method
  * @param {string} path
  * @param {unknown} [body]
+ * @param {Record<string, string>} [extraHeaders]
  * @returns {Promise<{status: number, body: unknown}>}
  */
-function req(server, method, path, body) {
+function req(server, method, path, body, extraHeaders = {}) {
   return new Promise((resolve, reject) => {
     const addr = server.address();
     const opts = {
@@ -65,7 +66,7 @@ function req(server, method, path, body) {
       port: addr.port,
       path,
       method,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...extraHeaders },
     };
     const r = http.request(opts, res => {
       let data = '';
@@ -82,6 +83,20 @@ function req(server, method, path, body) {
     if (body !== undefined) r.write(JSON.stringify(body));
     r.end();
   });
+}
+
+/**
+ * Build an Authorization header value for use with the server's auth middleware.
+ *
+ * Encodes credentials as Base64("username:password") and wraps them in a
+ * Bearer token, matching the format expected by buildAuthMiddleware().
+ *
+ * @param {string} username
+ * @param {string} password
+ * @returns {string} The Authorization header value, e.g. "Bearer <base64>".
+ */
+function bearerToken(username, password) {
+  return `Bearer ${Buffer.from(`${username}:${password}`).toString('base64')}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -306,7 +321,7 @@ describe('POST /api/admin/users/:id/reset-password', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Self-deactivation guard (requires req.user to be set)
+// Self-deactivation guard — HTTP-level test via auth middleware
 // ---------------------------------------------------------------------------
 
 describe('PATCH /api/admin/users/:id — self-deactivation guard', () => {
@@ -314,43 +329,129 @@ describe('PATCH /api/admin/users/:id — self-deactivation guard', () => {
 
   before(async () => {
     userStore = new UserStore();
-    // Create a second admin so the "last admin" guard doesn't fire first
+    // Create a second admin so "last admin" guard doesn't fire first
     userStore.create({ username: 'admin2', role: 'admin', password: 'pw' });
 
-    const forge = makeForge(userStore);
-
-    server = startServer(forge, 0);
-
-    // After server starts, monkey-patch the route to simulate an authenticated
-    // request where userId matches the target id.  We achieve this by adding
-    // Express middleware that sets req.user before the route runs.
-    // Since NODE_ENV=test bypasses requirePermission we inject req.user via a
-    // one-time patch directly on the forge userStore reference used by tests.
-    //
-    // Simpler approach: call the endpoint and verify the guard fires when
-    // req.user.userId === id.  In test mode req.user is undefined so we test
-    // the guard by checking the PATCH endpoint rejects the deactivate-self
-    // scenario through a direct userStore call sequence (not over HTTP in
-    // test mode, since req.user is undefined and the route skips the check).
-    //
-    // The HTTP-level guard IS tested here — but only fires when req.user is
-    // present.  We verify the underlying store logic works independently.
+    server = startServer(makeForge(userStore), 0);
     await new Promise(r => server.once('listening', r));
   });
 
   after(async () => new Promise(r => server.close(r)));
 
   it('userStore.countAdmins() reflects active admin count', () => {
-    // Seed admin (id=1) + admin2 (id=2) = 2 active admins
     assert.equal(userStore.countAdmins(), 2);
   });
 
+  it('returns 400 when an admin tries to deactivate their own account (HTTP, Bearer token)', async () => {
+    // The auth middleware runs in all environments and populates req.user from
+    // a valid Bearer token even when NODE_ENV=test.  The self-deactivation
+    // guard in the route handler fires when req.user.userId === :id.
+    const admin = userStore.findByUsername('admin');
+    assert.ok(admin, 'seeded admin should exist');
+    const authHeader = bearerToken('admin', 'admin');
+    const { status, body } = await req(
+      server, 'PATCH', `/api/admin/users/${admin.id}`,
+      { isActive: false },
+      { Authorization: authHeader },
+    );
+    assert.equal(status, 400);
+    assert.equal(body.ok, false);
+    assert.ok(body.error.includes('Cannot deactivate your own account'));
+  });
+
   it('deactivating one admin still leaves another active admin', () => {
-    // Direct store manipulation to verify countAdmins() is correct
     const admin2 = userStore.findByUsername('admin2');
     userStore.update(admin2.id, { isActive: false });
     assert.equal(userStore.countAdmins(), 1);
   });
+});
+
+// ---------------------------------------------------------------------------
+// RBAC — 401 / 403 enforcement in non-test environments
+// ---------------------------------------------------------------------------
+
+describe('RBAC — admin-only access controls', () => {
+  let server, userStore;
+
+  before(async () => {
+    userStore = new UserStore();
+    // Seed a viewer and an operator for role-based rejection tests
+    userStore.create({ username: 'viewer1', role: 'viewer', password: 'pw' });
+    userStore.create({ username: 'op1', role: 'operator', password: 'pw' });
+
+    server = startServer(makeForge(userStore), 0);
+    await new Promise(r => server.once('listening', r));
+  });
+
+  after(async () => new Promise(r => server.close(r)));
+
+  // Helper that runs the callback with NODE_ENV temporarily set to 'production'
+  // so that requirePermission() enforces auth instead of bypassing for tests.
+  async function withProdEnv(fn) {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    try {
+      return await fn();
+    } finally {
+      process.env.NODE_ENV = original;
+    }
+  }
+
+  it('returns 401 when no credentials are provided', () =>
+    withProdEnv(async () => {
+      const { status, body } = await req(server, 'GET', '/api/admin/users');
+      assert.equal(status, 401);
+      assert.equal(body.ok, false);
+      assert.equal(body.error, 'Unauthorized');
+    }),
+  );
+
+  it('returns 403 for a viewer attempting to list users', () =>
+    withProdEnv(async () => {
+      const { status, body } = await req(
+        server, 'GET', '/api/admin/users', undefined,
+        { Authorization: bearerToken('viewer1', 'pw') },
+      );
+      assert.equal(status, 403);
+      assert.equal(body.ok, false);
+      assert.equal(body.error, 'Forbidden');
+    }),
+  );
+
+  it('returns 403 for an operator attempting to list users', () =>
+    withProdEnv(async () => {
+      const { status, body } = await req(
+        server, 'GET', '/api/admin/users', undefined,
+        { Authorization: bearerToken('op1', 'pw') },
+      );
+      assert.equal(status, 403);
+      assert.equal(body.ok, false);
+      assert.equal(body.error, 'Forbidden');
+    }),
+  );
+
+  it('allows an admin to list users when authenticated', () =>
+    withProdEnv(async () => {
+      const { status, body } = await req(
+        server, 'GET', '/api/admin/users', undefined,
+        { Authorization: bearerToken('admin', 'admin') },
+      );
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.ok(Array.isArray(body.users));
+    }),
+  );
+
+  it('returns 403 for a viewer attempting to create a user', () =>
+    withProdEnv(async () => {
+      const { status } = await req(
+        server, 'POST', '/api/admin/users',
+        { username: 'x', role: 'viewer', password: 'x' },
+        { Authorization: bearerToken('viewer1', 'pw') },
+      );
+      assert.equal(status, 403);
+    }),
+  );
 });
 
 // ---------------------------------------------------------------------------
