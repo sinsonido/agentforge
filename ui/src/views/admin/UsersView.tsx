@@ -122,7 +122,7 @@ function UsersTable() {
                   <TableCell className="font-medium">{user.username}</TableCell>
                   <TableCell>{user.displayName ?? <span className="text-muted-foreground">—</span>}</TableCell>
                   <TableCell><RoleBadge role={user.role} /></TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{formatDate(user.lastLogin)}</TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{formatDate(user.lastLogin ?? undefined)}</TableCell>
                   <TableCell>
                     <Badge variant={user.isActive ? 'default' : 'outline'}>
                       {user.isActive ? 'Active' : 'Inactive'}
