@@ -54,6 +54,17 @@ export interface ApiEvent {
   timestamp: number
 }
 
+export interface AdminUser {
+  id: string
+  username: string
+  email?: string
+  displayName?: string
+  role: 'admin' | 'operator' | 'viewer'
+  isActive: boolean
+  createdAt: number
+  lastLogin?: number
+}
+
 export interface SystemStatus {
   ok: boolean
   orchestrator: { running: boolean }
