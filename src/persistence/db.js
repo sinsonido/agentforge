@@ -83,7 +83,7 @@ export class AgentForgeDB {
       CREATE TABLE IF NOT EXISTS team_members (
         team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
         user_id TEXT NOT NULL,
-        role TEXT NOT NULL DEFAULT 'member',
+        role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
         PRIMARY KEY (team_id, user_id)
       );
 

@@ -7,6 +7,8 @@
 
 import { randomUUID } from 'node:crypto';
 
+export const VALID_ROLES = ['owner', 'member'];
+
 export class TeamStore {
   /**
    * @param {import('better-sqlite3').Database} db - raw better-sqlite3 instance
@@ -66,8 +68,26 @@ export class TeamStore {
   updateTeam(id, { name, description }) {
     const existing = this.getTeam(id);
     if (!existing) return null;
-    const newName = name !== undefined ? name.trim() : existing.name;
-    const newDesc = description !== undefined ? description : existing.description;
+
+    let newName = existing.name;
+    if (name !== undefined) {
+      if (typeof name !== 'string') throw new Error('Team name is required');
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error('Team name is required');
+      newName = trimmed;
+    }
+
+    let newDesc = existing.description;
+    if (description !== undefined) {
+      if (description == null) {
+        newDesc = '';
+      } else if (typeof description === 'string') {
+        newDesc = description;
+      } else {
+        newDesc = String(description);
+      }
+    }
+
     this.db.prepare(
       'UPDATE teams SET name = ?, description = ? WHERE id = ?'
     ).run(newName, newDesc, id);
@@ -94,6 +114,9 @@ export class TeamStore {
    * @throws if the user is already a member
    */
   addMember(teamId, userId, role = 'member') {
+    if (!VALID_ROLES.includes(role)) {
+      throw new Error(`Invalid role '${role}'. Must be one of: ${VALID_ROLES.join(', ')}`);
+    }
     const existing = this.db.prepare(
       'SELECT 1 FROM team_members WHERE team_id = ? AND user_id = ?'
     ).get(teamId, userId);
@@ -137,6 +160,9 @@ export class TeamStore {
    * @returns {boolean}
    */
   setMemberRole(teamId, userId, role) {
+    if (!VALID_ROLES.includes(role)) {
+      throw new Error(`Invalid role '${role}'. Must be one of: ${VALID_ROLES.join(', ')}`);
+    }
     const info = this.db.prepare(
       'UPDATE team_members SET role = ? WHERE team_id = ? AND user_id = ?'
     ).run(role, teamId, userId);

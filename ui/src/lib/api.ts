@@ -41,11 +41,11 @@ export const api = {
     request<{ ok: boolean; team: import('../types/api').Team }>(`/teams/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   deleteTeam: (id: string) =>
     request<{ ok: boolean }>(`/teams/${id}`, { method: 'DELETE' }),
-  addTeamMember: (teamId: string, userId: string, role?: string) =>
+  addTeamMember: (teamId: string, userId: string, role?: 'owner' | 'member') =>
     request<{ ok: boolean }>(`/teams/${teamId}/members`, { method: 'POST', body: JSON.stringify({ userId, role }) }),
   removeTeamMember: (teamId: string, userId: string) =>
     request<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' }),
-  setTeamMemberRole: (teamId: string, userId: string, role: string) =>
+  setTeamMemberRole: (teamId: string, userId: string, role: 'owner' | 'member') =>
     request<{ ok: boolean }>(`/teams/${teamId}/members/${userId}`, { method: 'PUT', body: JSON.stringify({ role }) }),
   addTeamProject: (teamId: string, projectId: string) =>
     request<{ ok: boolean }>(`/teams/${teamId}/projects`, { method: 'POST', body: JSON.stringify({ projectId }) }),

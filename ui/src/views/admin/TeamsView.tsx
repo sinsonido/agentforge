@@ -304,6 +304,22 @@ function TeamRow({ team, isAdmin, onRefresh }: TeamRowProps) {
   )
 }
 
+// ─── Admin status helper ─────────────────────────────────────────────────────
+
+/** Derive admin status from session storage. Falls back to false when
+ *  localStorage is unavailable (SSR/worker contexts) or no value is set. */
+function getIsAdminFromSession(): boolean {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return false
+    const explicitFlag = window.localStorage.getItem('isAdmin')
+    if (explicitFlag != null) return explicitFlag === 'true'
+    const role = window.localStorage.getItem('userRole')
+    return role === 'admin'
+  } catch {
+    return false
+  }
+}
+
 // ─── Main view ────────────────────────────────────────────────────────────────
 
 export default function TeamsView() {
@@ -311,9 +327,7 @@ export default function TeamsView() {
   const teams = data?.teams ?? []
   const [newOpen, setNewOpen] = useState(false)
 
-  // For now treat all users as potential admins since auth middleware is not yet
-  // enforced client-side; the server validates permissions on mutations.
-  const isAdmin = true
+  const isAdmin = getIsAdminFromSession()
 
   if (loading) {
     return (

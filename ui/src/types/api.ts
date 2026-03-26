@@ -57,7 +57,7 @@ export interface ApiEvent {
 export interface Team {
   id: string
   name: string
-  description: string
+  description: string | null
   created_at: number
   member_count?: number
   members?: TeamMember[]

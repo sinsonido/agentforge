@@ -26,7 +26,7 @@ const TEAMS_DDL = `
   CREATE TABLE IF NOT EXISTS team_members (
     team_id TEXT NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
     user_id TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'member',
+    role TEXT NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'member')),
     PRIMARY KEY (team_id, user_id)
   );
 
@@ -140,6 +140,22 @@ describe('TeamStore', () => {
       const updated = store.updateTeam(team.id, {});
       assert.equal(updated.description, 'Keep me');
     });
+
+    it('throws when updating with an empty name', () => {
+      const team = store.createTeam({ name: 'Eta-empty' });
+      assert.throws(() => store.updateTeam(team.id, { name: '   ' }), /required/i);
+    });
+
+    it('throws when updating with a non-string name', () => {
+      const team = store.createTeam({ name: 'Eta-type' });
+      assert.throws(() => store.updateTeam(team.id, { name: 42 }), /required/i);
+    });
+
+    it('normalises null description to empty string', () => {
+      const team = store.createTeam({ name: 'Eta-null-desc', description: 'something' });
+      const updated = store.updateTeam(team.id, { description: null });
+      assert.equal(updated.description, '');
+    });
   });
 
   // ─── Delete team ───────────────────────────────────────────────────────────
@@ -203,6 +219,11 @@ describe('TeamStore', () => {
       const team = store.createTeam({ name: 'Xi' });
       assert.equal(store.removeMember(team.id, 'ghost'), false);
     });
+
+    it('throws when adding a member with an invalid role', () => {
+      const team = store.createTeam({ name: 'Lambda-invalid-role' });
+      assert.throws(() => store.addMember(team.id, 'user-x', 'admin'), /[Ii]nvalid role/);
+    });
   });
 
   describe('setMemberRole()', () => {
@@ -218,6 +239,12 @@ describe('TeamStore', () => {
     it('returns false when member not found', () => {
       const team = store.createTeam({ name: 'Pi' });
       assert.equal(store.setMemberRole(team.id, 'nobody', 'owner'), false);
+    });
+
+    it('throws when setting an invalid role', () => {
+      const team = store.createTeam({ name: 'Pi-invalid-role' });
+      store.addMember(team.id, 'u4', 'member');
+      assert.throws(() => store.setMemberRole(team.id, 'u4', 'superuser'), /[Ii]nvalid role/);
     });
   });
 

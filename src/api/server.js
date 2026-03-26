@@ -16,7 +16,7 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
-import { TeamStore } from '../auth/teams.js';
+import { TeamStore, VALID_ROLES } from '../auth/teams.js';
 import { requirePermission } from '../auth/rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -499,19 +499,22 @@ function buildRouter(forge) {
       }
     });
 
-    // POST /api/teams/:id/members — add member
-    router.post('/teams/:id/members', (req, res) => {
+    // POST /api/teams/:id/members — add member (admin only)
+    router.post('/teams/:id/members', requirePermission('teams:manage'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
-        const { userId, role } = req.body ?? {};
+        const { userId, role = 'member' } = req.body ?? {};
         if (!userId) {
           return res.status(400).json({ ok: false, error: '`userId` is required' });
+        }
+        if (!VALID_ROLES.includes(role)) {
+          return res.status(400).json({ ok: false, error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` });
         }
         const team = teamStore.getTeam(req.params.id);
         if (!team) {
           return res.status(404).json({ ok: false, error: `Team '${req.params.id}' not found` });
         }
-        teamStore.addMember(req.params.id, userId, role ?? 'member');
+        teamStore.addMember(req.params.id, userId, role);
         res.status(201).json({ ok: true });
       } catch (err) {
         if (err.message.includes('already a member')) {
@@ -521,8 +524,8 @@ function buildRouter(forge) {
       }
     });
 
-    // DELETE /api/teams/:id/members/:uid — remove member
-    router.delete('/teams/:id/members/:uid', (req, res) => {
+    // DELETE /api/teams/:id/members/:uid — remove member (admin only)
+    router.delete('/teams/:id/members/:uid', requirePermission('teams:manage'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const removed = teamStore.removeMember(req.params.id, req.params.uid);
@@ -535,13 +538,16 @@ function buildRouter(forge) {
       }
     });
 
-    // PUT /api/teams/:id/members/:uid — set role
-    router.put('/teams/:id/members/:uid', (req, res) => {
+    // PUT /api/teams/:id/members/:uid — set role (admin only)
+    router.put('/teams/:id/members/:uid', requirePermission('teams:manage'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const { role } = req.body ?? {};
         if (!role) {
           return res.status(400).json({ ok: false, error: '`role` is required' });
+        }
+        if (!VALID_ROLES.includes(role)) {
+          return res.status(400).json({ ok: false, error: `Invalid role. Must be one of: ${VALID_ROLES.join(', ')}` });
         }
         const updated = teamStore.setMemberRole(req.params.id, req.params.uid, role);
         if (!updated) {
@@ -568,8 +574,8 @@ function buildRouter(forge) {
       }
     });
 
-    // POST /api/teams/:id/projects — add project
-    router.post('/teams/:id/projects', (req, res) => {
+    // POST /api/teams/:id/projects — add project (admin only)
+    router.post('/teams/:id/projects', requirePermission('teams:manage'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const { projectId } = req.body ?? {};
@@ -587,8 +593,8 @@ function buildRouter(forge) {
       }
     });
 
-    // DELETE /api/teams/:id/projects/:pid — remove project
-    router.delete('/teams/:id/projects/:pid', (req, res) => {
+    // DELETE /api/teams/:id/projects/:pid — remove project (admin only)
+    router.delete('/teams/:id/projects/:pid', requirePermission('teams:manage'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const removed = teamStore.removeProject(req.params.id, req.params.pid);
