@@ -5,6 +5,32 @@
  * GitHub issue #93
  */
 
+import { timingSafeEqual } from 'node:crypto';
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Constant-time string comparison using Node's crypto.timingSafeEqual to
+ * prevent timing side-channel attacks when comparing secrets.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function safeEqual(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    // Lengths differ — still run timingSafeEqual on equal-length buffers to
+    // avoid a length-based timing leak, then return false.
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -51,7 +77,7 @@ export function createAuthMiddleware(authConfig = {}) {
     const match = /^Bearer\s+(\S+)$/i.exec(authHeader);
     const token = match ? match[1] : null;
 
-    if (!token || token !== authConfig.secret) {
+    if (!token || !authConfig.secret || !safeEqual(token, authConfig.secret)) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
 

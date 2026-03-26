@@ -10,6 +10,7 @@
  */
 
 import { WebSocketServer } from 'ws';
+import { timingSafeEqual } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Event list — all events that are broadcast to connected clients
@@ -59,7 +60,23 @@ function broadcast(wss, message) {
 }
 
 /**
- * Send a single message to a specific client, ignoring send errors
+ * Constant-time token comparison to prevent timing side-channel attacks.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {boolean}
+ */
+function wsTokenEqual(a, b) {
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) {
+    timingSafeEqual(bufA, bufA);
+    return false;
+  }
+  return timingSafeEqual(bufA, bufB);
+}
+
+/**
  * (the client may have disconnected between the readyState check and send).
  *
  * @param {import('ws').WebSocket} ws
@@ -120,7 +137,7 @@ export function startWebSocketServer(httpServer, eventBus, authConfig = {}) {
     if (authConfig.enabled && process.env.NODE_ENV !== 'test') {
       const url = new URL(req.url, 'http://localhost');
       const token = url.searchParams.get('token');
-      if (!token || token !== authConfig.secret) {
+      if (!token || !authConfig.secret || !wsTokenEqual(token, authConfig.secret)) {
         ws.close(4401, 'Unauthorized');
         return;
       }
