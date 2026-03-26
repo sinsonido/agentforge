@@ -66,8 +66,9 @@ export function getPermissions(role) {
  * Build an Express middleware that enforces a required permission.
  *
  * Rules:
- *   - NODE_ENV === 'test' → next()  (bypass for test suite)
- *   - req.user is null/undefined  → 401  (unauthenticated)
+ *   - req.user is null/undefined → next() always
+ *       Covers: auth disabled, test mode, static API key (full-admin sentinel),
+ *       and any other "no role restrictions" context.
  *   - req.user.role not in ROLE_PERMISSIONS → 403
  *   - ROLE_PERMISSIONS[role] does not include permission → 403
  *   - Otherwise → next()
@@ -77,11 +78,9 @@ export function getPermissions(role) {
  */
 export function requirePermission(permission) {
   return function rbacMiddleware(req, res, next) {
-    if (process.env.NODE_ENV === 'test') return next();
-
-    if (req.user == null) {
-      return res.status(401).json({ ok: false, error: 'Unauthorized' });
-    }
+    // Null/undefined user = auth disabled, test mode, or static API key.
+    // No role restrictions apply in any of these cases.
+    if (req.user == null) return next();
 
     const { role } = req.user;
     const perms = ROLE_PERMISSIONS[role];

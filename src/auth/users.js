@@ -12,7 +12,8 @@
 import { randomUUID } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 
-const BCRYPT_ROUNDS = 12;
+// Use fewer rounds in test mode so the test suite doesn't crawl.
+const BCRYPT_ROUNDS = process.env.NODE_ENV === 'test' ? 1 : 12;
 
 // ---------------------------------------------------------------------------
 // UserStore
@@ -50,9 +51,9 @@ export class UserStore {
   /**
    * Create a new user.
    * @param {{ username: string, password: string, role?: string }} opts
-   * @returns {{ id: string, username: string, role: string }}
+   * @returns {Promise<{ id: string, username: string, role: string }>}
    */
-  create({ username, password, role = 'viewer' }) {
+  async create({ username, password, role = 'viewer' }) {
     if (!username || !password) throw new Error('username and password are required');
     if (this._byUsername.has(username)) {
       const err = new Error(`User '${username}' already exists`);
@@ -61,7 +62,11 @@ export class UserStore {
     }
     const validRoles = ['admin', 'operator', 'viewer'];
     if (!validRoles.includes(role)) throw new Error(`Invalid role '${role}'`);
-    const user = this._seed(username, password, role);
+    const id = randomUUID();
+    const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const user = { id, username, passwordHash, role };
+    this._byId.set(id, user);
+    this._byUsername.set(username, id);
     return this._safe(user);
   }
 
@@ -79,14 +84,14 @@ export class UserStore {
    * Authenticate with username + password.
    * @param {string} username
    * @param {string} password
-   * @returns {{ id: string, username: string, role: string } | null}
+   * @returns {Promise<{ id: string, username: string, role: string } | null>}
    */
-  authenticate(username, password) {
+  async authenticate(username, password) {
     const id = this._byUsername.get(username);
     if (!id) return null;
     const user = this._byId.get(id);
     if (!user) return null;
-    if (!bcrypt.compareSync(password, user.passwordHash)) return null;
+    if (!await bcrypt.compare(password, user.passwordHash)) return null;
     return this._safe(user);
   }
 

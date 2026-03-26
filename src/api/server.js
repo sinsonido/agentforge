@@ -74,13 +74,13 @@ function buildRouter(forge) {
    * Authenticate with username + password. Returns a signed JWT.
    * Body: { username, password }
    */
-  router.post('/auth/login', (req, res) => {
+  router.post('/auth/login', async (req, res) => {
     try {
       const { username, password } = req.body ?? {};
       if (!username || !password) {
         return res.status(400).json({ ok: false, error: '`username` and `password` are required' });
       }
-      const user = userStore.authenticate(username, password);
+      const user = await userStore.authenticate(username, password);
       if (!user) {
         return res.status(401).json({ ok: false, error: 'Invalid credentials' });
       }
@@ -124,10 +124,10 @@ function buildRouter(forge) {
    * Create a user. Requires users:write permission (admin only).
    * Body: { username, password, role }
    */
-  router.post('/auth/users', requirePermission('users:write'), (req, res) => {
+  router.post('/auth/users', requirePermission('users:write'), async (req, res) => {
     try {
       const { username, password, role } = req.body ?? {};
-      const user = userStore.create({ username, password, role });
+      const user = await userStore.create({ username, password, role });
       res.status(201).json({ ok: true, user });
     } catch (err) {
       if (err.message.includes('already exists') || err.message.includes('required') || err.message.includes('Invalid role')) {

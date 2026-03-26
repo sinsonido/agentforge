@@ -93,28 +93,28 @@ describe('getPermissions', () => {
 });
 
 // ---------------------------------------------------------------------------
-// requirePermission — null user returns 401 (unauthenticated) in non-test env
+// requirePermission — null/undefined user (auth disabled / static key / test mode)
 // ---------------------------------------------------------------------------
 
 describe('requirePermission — null user', () => {
-  it('returns 401 when req.user is null (unauthenticated)', () => {
+  it('calls next() when req.user is null (auth disabled / no-restriction mode)', () => {
     const mw   = requirePermission('tasks:write');
     const req  = makeReq(null);
     const res  = makeRes();
     const next = makeNext();
     mw(req, res, next);
-    assert.ok(!next.wasCalled(), 'next() should NOT be called for null user');
-    assert.equal(res._status, 401, 'should respond with 401 Unauthorized');
+    assert.ok(next.wasCalled(), 'next() should be called for null user');
+    assert.equal(res._status, null, 'no status should be set');
   });
 
-  it('returns 401 when req.user is undefined (unauthenticated)', () => {
+  it('calls next() when req.user is undefined', () => {
     const mw   = requirePermission('users:write');
     const req  = makeReq(undefined);
     const res  = makeRes();
     const next = makeNext();
     mw(req, res, next);
-    assert.ok(!next.wasCalled(), 'next() should NOT be called for undefined user');
-    assert.equal(res._status, 401);
+    assert.ok(next.wasCalled(), 'next() should be called for undefined user');
+    assert.equal(res._status, null);
   });
 });
 

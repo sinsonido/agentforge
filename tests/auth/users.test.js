@@ -11,7 +11,8 @@ let store;
 
 describe('UserStore', () => {
   beforeEach(() => {
-    // Ensure a default admin password for deterministic tests.
+    // Ensure test-mode seeding and low bcrypt rounds even when run directly.
+    process.env.NODE_ENV = 'test';
     process.env.AGENTFORGE_ADMIN_PASSWORD = 'admin';
     store = new UserStore();
   });
@@ -35,39 +36,39 @@ describe('UserStore', () => {
   // ── create ────────────────────────────────────────────────────────────────
 
   describe('create', () => {
-    it('creates a new user and returns safe shape', () => {
-      const user = store.create({ username: 'bob', password: 'secret', role: 'viewer' });
+    it('creates a new user and returns safe shape', async () => {
+      const user = await store.create({ username: 'bob', password: 'secret', role: 'viewer' });
       assert.equal(user.username, 'bob');
       assert.equal(user.role, 'viewer');
       assert.ok(user.id);
       assert.equal(user.passwordHash, undefined);
     });
 
-    it('defaults role to viewer when not specified', () => {
-      const user = store.create({ username: 'carol', password: 'pw' });
+    it('defaults role to viewer when not specified', async () => {
+      const user = await store.create({ username: 'carol', password: 'pw' });
       assert.equal(user.role, 'viewer');
     });
 
-    it('throws on missing username or password', () => {
-      assert.throws(() => store.create({ password: 'pw' }), /required/);
-      assert.throws(() => store.create({ username: 'x' }),  /required/);
+    it('throws on missing username or password', async () => {
+      await assert.rejects(store.create({ password: 'pw' }),  /required/);
+      await assert.rejects(store.create({ username: 'x' }),   /required/);
     });
 
-    it('throws on duplicate username', () => {
-      store.create({ username: 'dave', password: 'pw' });
-      assert.throws(() => store.create({ username: 'dave', password: 'pw2' }), /already exists/);
+    it('throws on duplicate username', async () => {
+      await store.create({ username: 'dave', password: 'pw' });
+      await assert.rejects(store.create({ username: 'dave', password: 'pw2' }), /already exists/);
     });
 
-    it('throws on invalid role', () => {
-      assert.throws(() => store.create({ username: 'eve', password: 'pw', role: 'superadmin' }), /Invalid role/);
+    it('throws on invalid role', async () => {
+      await assert.rejects(store.create({ username: 'eve', password: 'pw', role: 'superadmin' }), /Invalid role/);
     });
   });
 
   // ── getById ───────────────────────────────────────────────────────────────
 
   describe('getById', () => {
-    it('returns user for known id', () => {
-      const created = store.create({ username: 'frank', password: 'pw' });
+    it('returns user for known id', async () => {
+      const created = await store.create({ username: 'frank', password: 'pw' });
       const found   = store.getById(created.id);
       assert.equal(found.username, 'frank');
     });
@@ -80,33 +81,33 @@ describe('UserStore', () => {
   // ── authenticate ─────────────────────────────────────────────────────────
 
   describe('authenticate', () => {
-    it('returns user on correct credentials', () => {
-      const user = store.authenticate('admin', 'admin');
+    it('returns user on correct credentials', async () => {
+      const user = await store.authenticate('admin', 'admin');
       assert.ok(user);
       assert.equal(user.username, 'admin');
       assert.equal(user.passwordHash, undefined);
     });
 
-    it('returns null for wrong password', () => {
-      assert.equal(store.authenticate('admin', 'wrong'), null);
+    it('returns null for wrong password', async () => {
+      assert.equal(await store.authenticate('admin', 'wrong'), null);
     });
 
-    it('returns null for unknown username', () => {
-      assert.equal(store.authenticate('ghost', 'pw'), null);
+    it('returns null for unknown username', async () => {
+      assert.equal(await store.authenticate('ghost', 'pw'), null);
     });
 
-    it('is case-sensitive for passwords', () => {
-      store.create({ username: 'grace', password: 'Secret' });
-      assert.equal(store.authenticate('grace', 'secret'), null);
-      assert.ok(store.authenticate('grace', 'Secret'));
+    it('is case-sensitive for passwords', async () => {
+      await store.create({ username: 'grace', password: 'Secret' });
+      assert.equal(await store.authenticate('grace', 'secret'), null);
+      assert.ok(await store.authenticate('grace', 'Secret'));
     });
   });
 
   // ── updateRole ────────────────────────────────────────────────────────────
 
   describe('updateRole', () => {
-    it('updates the role of an existing user', () => {
-      const created = store.create({ username: 'henry', password: 'pw', role: 'viewer' });
+    it('updates the role of an existing user', async () => {
+      const created = await store.create({ username: 'henry', password: 'pw', role: 'viewer' });
       const updated = store.updateRole(created.id, 'operator');
       assert.equal(updated.role, 'operator');
     });
@@ -115,8 +116,8 @@ describe('UserStore', () => {
       assert.equal(store.updateRole('no-such-id', 'operator'), null);
     });
 
-    it('throws on invalid role', () => {
-      const { id } = store.create({ username: 'iris', password: 'pw' });
+    it('throws on invalid role', async () => {
+      const { id } = await store.create({ username: 'iris', password: 'pw' });
       assert.throws(() => store.updateRole(id, 'god'), /Invalid role/);
     });
   });
@@ -124,8 +125,8 @@ describe('UserStore', () => {
   // ── list ──────────────────────────────────────────────────────────────────
 
   describe('list', () => {
-    it('returns all users without passwordHash', () => {
-      store.create({ username: 'jack', password: 'pw' });
+    it('returns all users without passwordHash', async () => {
+      await store.create({ username: 'jack', password: 'pw' });
       const users = store.list();
       assert.equal(users.length, 2);
       for (const u of users) {
