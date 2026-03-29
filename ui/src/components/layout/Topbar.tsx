@@ -1,6 +1,7 @@
 import { Menu } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useWebSocketContext } from '@/contexts/WebSocketContext'
+import { UserMenu } from '@/components/layout/UserMenu'
 import { cn } from '@/lib/utils'
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -9,6 +10,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/agents': 'Agents',
   '/providers': 'Providers',
   '/costs': 'Costs',
+  '/profile': 'Profile',
 }
 
 interface TopbarProps {
@@ -43,6 +45,8 @@ export function Topbar({ onMenuClick }: TopbarProps) {
         />
         <span className="text-xs text-muted-foreground capitalize">{status}</span>
       </div>
+
+      <UserMenu />
     </header>
   )
 }

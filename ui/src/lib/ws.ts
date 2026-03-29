@@ -1,3 +1,5 @@
+import { getToken } from '@/contexts/AuthContext'
+
 export type WsMessage = {
   event: string
   data: unknown
@@ -6,7 +8,12 @@ export type WsMessage = {
 
 export type WsListener = (msg: WsMessage) => void
 
-const WS_URL = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+// Module-level callback invoked on 4401 close code (unauthorized)
+let onUnauthorized: (() => void) | null = null
+
+export function setWsUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
 
 class WebSocketManager {
   private ws: WebSocket | null = null
@@ -17,12 +24,22 @@ class WebSocketManager {
 
   get status() { return this._status }
 
+  private _buildUrl(): string {
+    const base = `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`
+    const token = getToken()
+    return token ? `${base}?token=${encodeURIComponent(token)}` : base
+  }
+
   connect() {
     if (this.ws?.readyState === WebSocket.OPEN) return
     this._setStatus('connecting')
-    this.ws = new WebSocket(WS_URL)
+    this.ws = new WebSocket(this._buildUrl())
     this.ws.onopen = () => this._setStatus('connected')
-    this.ws.onclose = () => {
+    this.ws.onclose = (evt) => {
+      if (evt.code === 4401) {
+        onUnauthorized?.()
+        return
+      }
       this._setStatus('disconnected')
       this.reconnectTimer = setTimeout(() => this.connect(), 3000)
     }
@@ -31,7 +48,9 @@ class WebSocketManager {
       try {
         const msg = JSON.parse(e.data) as WsMessage
         for (const l of this.listeners) l(msg)
-      } catch {}
+      } catch (err) {
+        console.warn('[ws] failed to parse message', err)
+      }
     }
   }
 

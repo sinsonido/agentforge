@@ -1,27 +1,44 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom'
 import { WebSocketProvider } from '@/contexts/WebSocketContext'
+import { AuthProvider, useAuth } from '@/contexts/AuthContext'
 import { Layout } from '@/components/layout/Layout'
 import DashboardView from '@/views/DashboardView'
 import KanbanView from '@/views/KanbanView'
 import AgentsView from '@/views/AgentsView'
 import ProvidersView from '@/views/ProvidersView'
 import CostsView from '@/views/CostsView'
+import LoginView from '@/views/LoginView'
+import SetupView from '@/views/SetupView'
+import ProfileView from '@/views/ProfileView'
+
+function ProtectedRoute() {
+  const { isAuthenticated } = useAuth()
+  if (!isAuthenticated) return <Navigate to="/login" replace />
+  return <Outlet />
+}
 
 export default function App() {
   return (
     <BrowserRouter>
-      <WebSocketProvider>
-        <Routes>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard" element={<DashboardView />} />
-            <Route path="/kanban" element={<KanbanView />} />
-            <Route path="/agents" element={<AgentsView />} />
-            <Route path="/providers" element={<ProvidersView />} />
-            <Route path="/costs" element={<CostsView />} />
-          </Route>
-        </Routes>
-      </WebSocketProvider>
+      <AuthProvider>
+        <WebSocketProvider>
+          <Routes>
+            <Route path="/login" element={<LoginView />} />
+            <Route path="/setup" element={<SetupView />} />
+            <Route element={<ProtectedRoute />}>
+              <Route element={<Layout />}>
+                <Route index element={<Navigate to="/dashboard" replace />} />
+                <Route path="/dashboard" element={<DashboardView />} />
+                <Route path="/kanban" element={<KanbanView />} />
+                <Route path="/agents" element={<AgentsView />} />
+                <Route path="/providers" element={<ProvidersView />} />
+                <Route path="/costs" element={<CostsView />} />
+                <Route path="/profile" element={<ProfileView />} />
+              </Route>
+            </Route>
+          </Routes>
+        </WebSocketProvider>
+      </AuthProvider>
     </BrowserRouter>
   )
 }
