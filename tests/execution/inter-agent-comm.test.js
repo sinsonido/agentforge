@@ -1,4 +1,4 @@
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { InterAgentComm } from '../../src/execution/inter-agent-comm.js';
 import eventBus from '../../src/core/event-bus.js';
@@ -8,9 +8,25 @@ describe('InterAgentComm', () => {
   let mockTaskQueue;
   let mockOrchestrator;
   let taskIdCounter;
+  let capturedTimers;
+  let originalSetTimeout;
+  let originalClearTimeout;
 
   beforeEach(() => {
     taskIdCounter = 0;
+    capturedTimers = [];
+    originalSetTimeout = global.setTimeout;
+    originalClearTimeout = global.clearTimeout;
+    // Stub setTimeout so ask() does not schedule real long-lived timers.
+    global.setTimeout = (fn, delay) => {
+      const handle = { fn, delay };
+      capturedTimers.push(handle);
+      return handle;
+    };
+    global.clearTimeout = (handle) => {
+      const idx = capturedTimers.indexOf(handle);
+      if (idx !== -1) capturedTimers.splice(idx, 1);
+    };
     mockTaskQueue = {
       add(opts) {
         return { id: `task-${++taskIdCounter}`, ...opts };
@@ -18,6 +34,11 @@ describe('InterAgentComm', () => {
     };
     mockOrchestrator = {};
     comm = new InterAgentComm({ taskQueue: mockTaskQueue, orchestrator: mockOrchestrator });
+  });
+
+  afterEach(() => {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
   });
 
   describe('constructor', () => {
@@ -33,62 +54,38 @@ describe('InterAgentComm', () => {
 
   describe('ask()', () => {
     it('creates a task with correct defaults', async () => {
-      const originalSetTimeout = global.setTimeout;
-      // Stub setTimeout so InterAgentComm.ask() does not create a long-lived timer.
-      global.setTimeout = (fn, delay, ...args) => {
-        // Do not schedule a real timer; just return a dummy handle.
-        return { _fakeTimeout: true, delay, fn, args };
+      const created = [];
+      comm.taskQueue = {
+        add(opts) {
+          const t = { id: `task-${++taskIdCounter}`, ...opts };
+          created.push(t);
+          return t;
+        },
       };
 
-      try {
-        const created = [];
-        comm.taskQueue = {
-          add(opts) {
-            const t = { id: `task-${++taskIdCounter}`, ...opts };
-            created.push(t);
-            return t;
-          },
-        };
+      const promise = comm.ask('agent-a', 'agent-b', 'What is the answer?');
 
-        const promise = comm.ask('agent-a', 'agent-b', 'What is the answer?');
+      assert.equal(created.length, 1);
+      assert.equal(created[0].title, 'What is the answer?');
+      assert.equal(created[0].type, 'implement');
+      assert.equal(created[0].priority, 'high');
+      assert.equal(created[0].agent_id, 'agent-b');
 
-        assert.equal(created.length, 1);
-        assert.equal(created[0].title, 'What is the answer?');
-        assert.equal(created[0].type, 'implement');
-        assert.equal(created[0].priority, 'high');
-        assert.equal(created[0].agent_id, 'agent-b');
-
-        // Resolve to avoid hanging
-        eventBus.emit('task.completed', { task: created[0] });
-        await promise;
-      } finally {
-        // Restore the original setTimeout after the test completes.
-        global.setTimeout = originalSetTimeout;
-      }
+      // Resolve to avoid hanging
+      eventBus.emit('task.completed', { task: created[0] });
+      await promise;
     });
 
     it('resolves with task result when task.completed fires', async () => {
-      const originalSetTimeout = global.setTimeout;
-      // Stub setTimeout so InterAgentComm.ask() does not create a long-lived timer.
-      global.setTimeout = (fn, delay, ...args) => {
-        // Do not schedule a real timer; just return a dummy handle.
-        return { _fakeTimeout: true, delay, fn, args };
-      };
+      const promise = comm.ask('agent-a', 'agent-b', 'Do something');
+      const taskId = `task-${taskIdCounter}`;
 
-      try {
-        const promise = comm.ask('agent-a', 'agent-b', 'Do something');
-        const taskId = `task-${taskIdCounter}`;
+      setImmediate(() => {
+        eventBus.emit('task.completed', { task: { id: taskId, result: 'done result' } });
+      });
 
-        setImmediate(() => {
-          eventBus.emit('task.completed', { task: { id: taskId, result: 'done result' } });
-        });
-
-        const result = await promise;
-        assert.equal(result, 'done result');
-      } finally {
-        // Restore the original setTimeout after the test completes.
-        global.setTimeout = originalSetTimeout;
-      }
+      const result = await promise;
+      assert.equal(result, 'done result');
     });
 
     it('resolves with empty string when task result is undefined', async () => {
@@ -182,6 +179,43 @@ describe('InterAgentComm', () => {
 
       await promise.catch(() => {});
       assert.equal(comm.pendingCount(), 0);
+    });
+
+    it('rejects with timeout error when timer fires', async () => {
+      const promise = comm.ask('agent-a', 'agent-b', 'Q');
+
+      assert.equal(capturedTimers.length, 1);
+      assert.equal(capturedTimers[0].delay, 5 * 60 * 1000);
+
+      // Fire the timeout callback synchronously
+      capturedTimers[0].fn();
+
+      await assert.rejects(promise, /ask_agent timeout/);
+      assert.equal(comm.pendingCount(), 0);
+    });
+
+    it('clears timeout when task completes', async () => {
+      const promise = comm.ask('agent-a', 'agent-b', 'Q');
+      const taskId = `task-${taskIdCounter}`;
+
+      assert.equal(capturedTimers.length, 1);
+
+      eventBus.emit('task.completed', { task: { id: taskId, result: 'done' } });
+      await promise;
+
+      assert.equal(capturedTimers.length, 0);
+    });
+
+    it('clears timeout when task fails', async () => {
+      const promise = comm.ask('agent-a', 'agent-b', 'Q');
+      const taskId = `task-${taskIdCounter}`;
+
+      assert.equal(capturedTimers.length, 1);
+
+      eventBus.emit('task.failed', { task: { id: taskId }, error: 'boom' });
+      await promise.catch(() => {});
+
+      assert.equal(capturedTimers.length, 0);
     });
   });
 
