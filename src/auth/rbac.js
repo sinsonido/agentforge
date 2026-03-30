@@ -24,6 +24,7 @@ export const ROLE_PERMISSIONS = {
     'costs:read',
     'events:read',
     'users:manage',
+    'teams:read',
     'teams:manage',
   ],
   operator: [
@@ -34,6 +35,7 @@ export const ROLE_PERMISSIONS = {
     'providers:read',
     'costs:read',
     'events:read',
+    'teams:read',
   ],
   viewer: [
     'tasks:read',
@@ -41,6 +43,7 @@ export const ROLE_PERMISSIONS = {
     'providers:read',
     'costs:read',
     'events:read',
+    'teams:read',
   ],
 };
 

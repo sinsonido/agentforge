@@ -408,7 +408,7 @@ function buildRouter(forge) {
     }
 
     // GET /api/teams — list all teams
-    router.get('/teams', (req, res) => {
+    router.get('/teams', requirePermission('teams:read'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const teams = teamStore.listTeams();
@@ -437,7 +437,7 @@ function buildRouter(forge) {
     });
 
     // GET /api/teams/:id — get team with members and projects
-    router.get('/teams/:id', (req, res) => {
+    router.get('/teams/:id', requirePermission('teams:read'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const team = teamStore.getTeam(req.params.id);
@@ -485,7 +485,7 @@ function buildRouter(forge) {
     });
 
     // GET /api/teams/:id/members — list members
-    router.get('/teams/:id/members', (req, res) => {
+    router.get('/teams/:id/members', requirePermission('teams:read'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const team = teamStore.getTeam(req.params.id);
@@ -560,7 +560,7 @@ function buildRouter(forge) {
     });
 
     // GET /api/teams/:id/projects — list projects
-    router.get('/teams/:id/projects', (req, res) => {
+    router.get('/teams/:id/projects', requirePermission('teams:read'), (req, res) => {
       if (!requireTeamStore(res)) return;
       try {
         const team = teamStore.getTeam(req.params.id);
