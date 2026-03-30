@@ -148,9 +148,11 @@ describe('ReviewWorkflow', () => {
       const longResult = 'x'.repeat(5000);
       const task = { id: 'x', title: 'T', type: 'test', model_used: 'claude', result: longResult };
       const prompt = workflow._buildReviewPrompt(task);
-      // The truncated result in the prompt should not contain more than 2000 x's
-      const xCount = (prompt.match(/x/g) || []).length;
-      assert.ok(xCount <= 2000);
+      // The truncated result in the prompt should include exactly the first 2000 characters of the result
+      const first2000 = longResult.slice(0, 2000);
+      const rest = longResult.slice(2000);
+      assert.ok(prompt.includes(first2000));
+      assert.ok(!prompt.includes(rest));
     });
 
     it('instructs reviewer to reply APPROVE or REJECT', () => {
