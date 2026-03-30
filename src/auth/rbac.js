@@ -21,9 +21,11 @@ const ROLE_PERMISSIONS = {
     'system:read',
     'system:write',
     'invitations:manage',
+    'teams:read',
+    'teams:manage',
   ]),
-  operator: new Set(['tasks:read', 'tasks:write', 'system:read']),
-  viewer: new Set(['tasks:read', 'system:read']),
+  operator: new Set(['tasks:read', 'tasks:write', 'system:read', 'teams:read']),
+  viewer: new Set(['tasks:read', 'system:read', 'teams:read']),
 };
 
 /**

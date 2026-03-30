@@ -17,6 +17,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
 import { InvitationStore } from '../auth/invitations.js';
+import { TeamStore, VALID_ROLES } from '../auth/teams.js';
 import { requirePermission } from '../auth/rbac.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
