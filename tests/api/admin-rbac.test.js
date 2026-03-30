@@ -2,13 +2,10 @@
  * @file tests/api/admin-rbac.test.js
  * @description RBAC enforcement tests for admin API endpoints.
  *
- * Runs in its own worker thread (separate process.env copy) with
- * NODE_ENV=production so that requirePermission() enforces auth
- * without racing against the NODE_ENV=test tests in admin.test.js.
+ * Uses startServer(..., { enforceRbac: true }) so requirePermission() enforces
+ * auth on the test server without mutating process.env.NODE_ENV (which is
+ * shared across concurrent worker threads and would race with admin.test.js).
  */
-
-// Set before any imports so requirePermission() captures this at load time.
-process.env.NODE_ENV = 'production';
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -94,7 +91,7 @@ describe('RBAC — admin-only access controls', () => {
     userStore.create({ username: 'viewer1', role: 'viewer', password: 'pw' });
     userStore.create({ username: 'op1', role: 'operator', password: 'pw' });
 
-    server = startServer(makeForge(userStore), 0);
+    server = startServer(makeForge(userStore), 0, '127.0.0.1', { enforceRbac: true });
     await new Promise(r => server.once('listening', r));
   });
 

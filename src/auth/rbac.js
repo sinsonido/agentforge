@@ -45,14 +45,25 @@ export function hasPermission(role, permission) {
  * @param {string} permission
  * @returns {import('express').RequestHandler}
  */
-export function requirePermission(permission) {
+/**
+ * Express middleware factory.
+ *
+ * In test mode (NODE_ENV === 'test') permission checks are bypassed unless
+ * `enforce` is explicitly set to true, so that tests can run without a full
+ * auth stack while still allowing RBAC-enforcement tests to opt in.
+ *
+ * @param {string} permission
+ * @param {{ enforce?: boolean }} [opts]
+ * @returns {import('express').RequestHandler}
+ */
+export function requirePermission(permission, { enforce = false } = {}) {
   return (req, res, next) => {
-    // Skip RBAC checks entirely in test environment
-    if (process.env.NODE_ENV === 'test') {
+    // Skip RBAC checks in test mode unless enforcement is explicitly requested.
+    if (!enforce && process.env.NODE_ENV === 'test') {
       return next();
     }
 
-    // In non-test environments, missing authentication is unauthorized
+    // In non-test environments (or when enforce=true), missing auth is unauthorized.
     if (!req.user) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }

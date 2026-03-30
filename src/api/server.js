@@ -65,8 +65,9 @@ function corsMiddleware(req, res, next) {
  * @param {Object} [forge.costTracker] - May not exist yet; handled gracefully.
  * @returns {import('express').Router}
  */
-function buildRouter(forge) {
+function buildRouter(forge, { enforceRbac = false } = {}) {
   const router = express.Router();
+  const perm = (p) => requirePermission(p, { enforce: enforceRbac });
 
   // ── GET /api/status ──────────────────────────────────────────────────────
   /**
@@ -438,7 +439,7 @@ function buildRouter(forge) {
    * List all users (strips password_hash).
    * Requires users:read permission.
    */
-  router.get('/admin/users', requirePermission('users:read'), (req, res) => {
+  router.get('/admin/users', perm('users:read'), (req, res) => {
     try {
       const users = forge.userStore.list();
       res.json({ ok: true, users });
@@ -453,7 +454,7 @@ function buildRouter(forge) {
    * Body: { username, email?, displayName?, role, password }
    * Returns 409 if username already exists.
    */
-  router.post('/admin/users', requirePermission('users:write'), (req, res) => {
+  router.post('/admin/users', perm('users:write'), (req, res) => {
     try {
       const { username, email, displayName, role, password } = req.body ?? {};
       if (!username) return res.status(400).json({ ok: false, error: '`username` is required' });
@@ -478,7 +479,7 @@ function buildRouter(forge) {
    * Update a user's role, displayName, or active state.
    * Cannot deactivate self or the last active admin.
    */
-  router.patch('/admin/users/:id', requirePermission('users:write'), (req, res) => {
+  router.patch('/admin/users/:id', perm('users:write'), (req, res) => {
     try {
       const id = req.params.id;
       const { role, displayName, isActive } = req.body ?? {};
@@ -516,7 +517,7 @@ function buildRouter(forge) {
    * Delete a user by id.
    * Requires users:write permission.
    */
-  router.delete('/admin/users/:id', requirePermission('users:write'), (req, res) => {
+  router.delete('/admin/users/:id', perm('users:write'), (req, res) => {
     try {
       forge.userStore.delete(req.params.id);
       res.json({ ok: true });
@@ -533,7 +534,7 @@ function buildRouter(forge) {
    * Admin resets a user's password.
    * Body: { password }
    */
-  router.post('/admin/users/:id/reset-password', requirePermission('users:write'), (req, res) => {
+  router.post('/admin/users/:id/reset-password', perm('users:write'), (req, res) => {
     try {
       const { password } = req.body ?? {};
       if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
@@ -601,7 +602,7 @@ const mutationLimiter = rateLimit({
  * const forge = await createAgentForge();
  * const server = startServer(forge, 3000);
  */
-export function startServer(forge, port = 3000, host = '127.0.0.1') {
+export function startServer(forge, port = 3000, host = '127.0.0.1', { enforceRbac = false } = {}) {
   // Attach a shared UserStore to the forge object so routes can access it.
   // If the forge already carries one (e.g. from tests) reuse it.
   if (!forge.userStore) {
@@ -642,7 +643,7 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   app.use('/api', buildAuthMiddleware(forge.userStore));
 
   // API routes
-  app.use('/api', buildRouter(forge));
+  app.use('/api', buildRouter(forge, { enforceRbac }));
 
   // Static UI — prefer React build (ui/dist/) over vanilla (src/ui/)
   const reactBuildDir = path.resolve(__dirname, '../../ui/dist');
