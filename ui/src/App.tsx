@@ -6,6 +6,7 @@ import KanbanView from '@/views/KanbanView'
 import AgentsView from '@/views/AgentsView'
 import ProvidersView from '@/views/ProvidersView'
 import CostsView from '@/views/CostsView'
+import TeamsView from '@/views/admin/TeamsView'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/agents" element={<AgentsView />} />
             <Route path="/providers" element={<ProvidersView />} />
             <Route path="/costs" element={<CostsView />} />
+            <Route path="/admin/teams" element={<TeamsView />} />
           </Route>
         </Routes>
       </WebSocketProvider>
