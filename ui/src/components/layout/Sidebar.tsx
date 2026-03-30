@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { X, LayoutDashboard, Columns2, Bot, Zap, DollarSign } from 'lucide-react'
+import { X, LayoutDashboard, Columns2, Bot, Zap, DollarSign, Users } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -8,6 +8,10 @@ const NAV_ITEMS = [
   { to: '/agents', label: 'Agents', Icon: Bot },
   { to: '/providers', label: 'Providers', Icon: Zap },
   { to: '/costs', label: 'Costs', Icon: DollarSign },
+]
+
+const ADMIN_NAV_ITEMS = [
+  { to: '/admin/users', label: 'Users', Icon: Users },
 ]
 
 interface SidebarProps {
@@ -53,6 +57,28 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           </NavLink>
         ))}
       </nav>
+
+      {/* Admin section */}
+      <div className="border-t p-2">
+        <p className="px-3 py-1 text-xs font-semibold text-muted-foreground uppercase tracking-wider">Admin</p>
+        {ADMIN_NAV_ITEMS.map(({ to, label, Icon }) => (
+          <NavLink
+            key={to}
+            to={to}
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                isActive
+                  ? 'bg-accent text-accent-foreground'
+                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+              )
+            }
+          >
+            <Icon className="h-4 w-4 shrink-0" />
+            {label}
+          </NavLink>
+        ))}
+      </div>
     </aside>
   )
 }

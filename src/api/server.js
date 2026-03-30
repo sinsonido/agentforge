@@ -16,6 +16,12 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { UserStore } from '../auth/users.js';
+import { requirePermission, VALID_ROLES } from '../auth/rbac.js';
+import { buildAuthMiddleware } from '../auth/auth.js';
+
+// Singleton user store shared across all server instances in the same process
+const globalUserStore = new UserStore();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -33,7 +39,7 @@ function corsMiddleware(req, res, next) {
   const origin = req.headers.origin || '';
   if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   }
   if (req.method === 'OPTIONS') {
@@ -59,8 +65,9 @@ function corsMiddleware(req, res, next) {
  * @param {Object} [forge.costTracker] - May not exist yet; handled gracefully.
  * @returns {import('express').Router}
  */
-function buildRouter(forge) {
+function buildRouter(forge, { enforceRbac = false } = {}) {
   const router = express.Router();
+  const perm = (p) => requirePermission(p, { enforce: enforceRbac });
 
   // ── GET /api/status ──────────────────────────────────────────────────────
   /**
@@ -427,6 +434,121 @@ function buildRouter(forge) {
     }
   });
 
+  // ── GET /api/admin/users ─────────────────────────────────────────────────
+  /**
+   * List all users (strips password_hash).
+   * Requires users:read permission.
+   */
+  router.get('/admin/users', perm('users:read'), (req, res) => {
+    try {
+      const users = forge.userStore.list();
+      res.json({ ok: true, users });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/admin/users ─────────────────────────────────────────────────
+  /**
+   * Create a new user.
+   * Body: { username, email?, displayName?, role, password }
+   * Returns 409 if username already exists.
+   */
+  router.post('/admin/users', perm('users:write'), (req, res) => {
+    try {
+      const { username, email, displayName, role, password } = req.body ?? {};
+      if (!username) return res.status(400).json({ ok: false, error: '`username` is required' });
+      if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
+      if (!role)     return res.status(400).json({ ok: false, error: '`role` is required' });
+      if (!VALID_ROLES.has(role)) {
+        return res.status(400).json({ ok: false, error: '`role` must be admin, operator, or viewer' });
+      }
+
+      const user = forge.userStore.create({ username, email, displayName, role, password });
+      res.status(201).json({ ok: true, user });
+    } catch (err) {
+      if (err.code === 'DUPLICATE_USERNAME') {
+        return res.status(409).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── PATCH /api/admin/users/:id ────────────────────────────────────────────
+  /**
+   * Update a user's role, displayName, or active state.
+   * Cannot deactivate self or the last active admin.
+   */
+  router.patch('/admin/users/:id', perm('users:write'), (req, res) => {
+    try {
+      const id = req.params.id;
+      const { role, displayName, isActive } = req.body ?? {};
+
+      // Validate role if provided
+      if (role !== undefined && !VALID_ROLES.has(role)) {
+        return res.status(400).json({ ok: false, error: '`role` must be admin, operator, or viewer' });
+      }
+
+      // Prevent self-deactivation
+      if (isActive === false && req.user && String(req.user.userId) === String(id)) {
+        return res.status(400).json({ ok: false, error: 'Cannot deactivate your own account' });
+      }
+
+      // Prevent deactivating the last active admin
+      if (isActive === false) {
+        const target = forge.userStore.findById(id);
+        if (target && target.role === 'admin' && forge.userStore.countAdmins() <= 1) {
+          return res.status(400).json({ ok: false, error: 'Cannot deactivate the last active admin' });
+        }
+      }
+
+      const user = forge.userStore.update(id, { role, displayName, isActive });
+      res.json({ ok: true, user });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        return res.status(404).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── DELETE /api/admin/users/:id ───────────────────────────────────────────
+  /**
+   * Delete a user by id.
+   * Requires users:write permission.
+   */
+  router.delete('/admin/users/:id', perm('users:write'), (req, res) => {
+    try {
+      forge.userStore.delete(req.params.id);
+      res.json({ ok: true });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        return res.status(404).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/admin/users/:id/reset-password ──────────────────────────────
+  /**
+   * Admin resets a user's password.
+   * Body: { password }
+   */
+  router.post('/admin/users/:id/reset-password', perm('users:write'), (req, res) => {
+    try {
+      const { password } = req.body ?? {};
+      if (!password) return res.status(400).json({ ok: false, error: '`password` is required' });
+
+      forge.userStore.resetPassword(req.params.id, password);
+      res.json({ ok: true });
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') {
+        return res.status(404).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   return router;
 }
 
@@ -480,7 +602,13 @@ const mutationLimiter = rateLimit({
  * const forge = await createAgentForge();
  * const server = startServer(forge, 3000);
  */
-export function startServer(forge, port = 3000, host = '127.0.0.1') {
+export function startServer(forge, port = 3000, host = '127.0.0.1', { enforceRbac = false } = {}) {
+  // Attach a shared UserStore to the forge object so routes can access it.
+  // If the forge already carries one (e.g. from tests) reuse it.
+  if (!forge.userStore) {
+    forge.userStore = globalUserStore;
+  }
+
   const app = express();
 
   // Security headers — allow inline styles/scripts needed by React/Vite build
@@ -511,8 +639,11 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
 
+  // Authentication — populates req.user for RBAC middleware downstream
+  app.use('/api', buildAuthMiddleware(forge.userStore));
+
   // API routes
-  app.use('/api', buildRouter(forge));
+  app.use('/api', buildRouter(forge, { enforceRbac }));
 
   // Static UI — prefer React build (ui/dist/) over vanilla (src/ui/)
   const reactBuildDir = path.resolve(__dirname, '../../ui/dist');
