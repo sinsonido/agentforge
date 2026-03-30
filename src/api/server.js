@@ -16,6 +16,7 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { createAuthMiddleware } from '../auth/auth.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -507,6 +508,9 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // CORS — must be before routes
   app.use(corsMiddleware);
 
+  // Auth — must be before rate limiters and router
+  app.use('/api', createAuthMiddleware(forge.config?.server?.auth ?? {}));
+
   // Rate limiting — scoped to API routes only (not static files)
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
@@ -528,7 +532,11 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
 
   // Create the HTTP server and attach the WebSocket server
   const httpServer = http.createServer(app);
-  startWebSocketServer(httpServer, forge.eventBus);
+  startWebSocketServer(httpServer, forge.eventBus, forge.config?.server?.auth ?? {});
+
+  if (!forge.config?.server?.auth?.enabled) {
+    console.warn('[agentforge:api] WARNING: API auth is disabled — set server.auth.secret in agentforge.yml for production use');
+  }
 
   httpServer.listen(port, host, () => {
     console.log('[agentforge:api] REST API listening on http://%s:%d', host, port);

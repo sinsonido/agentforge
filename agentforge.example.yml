@@ -220,3 +220,6 @@ alerts:
 server:
   port: 4242
   host: localhost
+  auth:
+    enabled: false          # Set to true + provide secret for production
+    secret: ${AGENTFORGE_SECRET}
