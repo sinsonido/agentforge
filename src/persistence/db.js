@@ -65,11 +65,45 @@ export class AgentForgeDB {
         timestamp INTEGER DEFAULT (unixepoch() * 1000)
       );
 
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT UNIQUE NOT NULL,
+        email TEXT UNIQUE,
+        password_hash TEXT NOT NULL DEFAULT '',
+        display_name TEXT,
+        role TEXT NOT NULL DEFAULT 'viewer',
+        created_at INTEGER NOT NULL DEFAULT (unixepoch()),
+        last_login INTEGER,
+        is_active INTEGER NOT NULL DEFAULT 1
+      );
+
+      CREATE TABLE IF NOT EXISTS teams (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT DEFAULT '',
+        created_at INTEGER DEFAULT (unixepoch())
+      );
+
+      CREATE TABLE IF NOT EXISTS invitations (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL,
+        role TEXT NOT NULL DEFAULT 'viewer',
+        team_id TEXT REFERENCES teams(id) ON DELETE SET NULL,
+        token TEXT NOT NULL UNIQUE,
+        invited_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        created_at INTEGER DEFAULT (unixepoch()),
+        expires_at INTEGER NOT NULL,
+        used_at INTEGER,
+        status TEXT NOT NULL DEFAULT 'pending'
+      );
+
       CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
       CREATE INDEX IF NOT EXISTS idx_tasks_agent ON tasks(agent_id);
       CREATE INDEX IF NOT EXISTS idx_tasks_project ON tasks(project_id);
       CREATE INDEX IF NOT EXISTS idx_cost_project ON cost_records(project_id);
       CREATE INDEX IF NOT EXISTS idx_events_name ON events(event);
+      -- Note: idx_invitations_token is implicit from UNIQUE constraint on token
+      CREATE INDEX IF NOT EXISTS idx_invitations_status ON invitations(status);
     `);
 
     // Prepared statements for performance
