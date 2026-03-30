@@ -29,4 +29,15 @@ export const api = {
   controlStop: () => request<{ ok: boolean }>('/control/stop', { method: 'POST' }),
   testProvider: (provider: string) =>
     request<{ ok: boolean; error?: string }>('/providers/test', { method: 'POST', body: JSON.stringify({ provider }) }),
+  getAuditLog: (params?: { limit?: number; offset?: number; user?: string; action?: string }) => {
+    const qs = new URLSearchParams()
+    if (params?.limit !== undefined) qs.set('limit', String(params.limit))
+    if (params?.offset !== undefined) qs.set('offset', String(params.offset))
+    if (params?.user) qs.set('user', params.user)
+    if (params?.action) qs.set('action', params.action)
+    const query = qs.toString()
+    return request<{ ok: boolean; count: number; hasMore: boolean; entries: import('../types/api').AuditEntry[] }>(
+      `/admin/audit${query ? `?${query}` : ''}`
+    )
+  },
 }

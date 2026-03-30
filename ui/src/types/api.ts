@@ -54,6 +54,17 @@ export interface ApiEvent {
   timestamp: number
 }
 
+export interface AuditEntry {
+  id: number
+  user_id: string
+  username: string
+  action: string
+  resource?: string | null
+  payload?: string | null
+  ip?: string | null
+  created_at: number
+}
+
 export interface SystemStatus {
   ok: boolean
   orchestrator: { running: boolean }

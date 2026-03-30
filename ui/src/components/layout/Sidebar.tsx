@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom'
-import { X, LayoutDashboard, Columns2, Bot, Zap, DollarSign } from 'lucide-react'
+import { X, LayoutDashboard, Columns2, Bot, Zap, DollarSign, ClipboardList } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV_ITEMS = [
@@ -8,6 +8,10 @@ const NAV_ITEMS = [
   { to: '/agents', label: 'Agents', Icon: Bot },
   { to: '/providers', label: 'Providers', Icon: Zap },
   { to: '/costs', label: 'Costs', Icon: DollarSign },
+]
+
+const ADMIN_ITEMS = [
+  { to: '/admin/audit', label: 'Audit Log', Icon: ClipboardList },
 ]
 
 interface SidebarProps {
@@ -34,24 +38,51 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </button>
       </div>
 
-      <nav className="flex-1 space-y-1 p-2">
-        {NAV_ITEMS.map(({ to, label, Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            className={({ isActive }) =>
-              cn(
-                'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
-                isActive
-                  ? 'bg-accent text-accent-foreground'
-                  : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
-              )
-            }
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {label}
-          </NavLink>
-        ))}
+      <nav className="flex-1 p-2 space-y-4 overflow-y-auto">
+        <div className="space-y-1">
+          {NAV_ITEMS.map(({ to, label, Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              className={({ isActive }) =>
+                cn(
+                  'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                  isActive
+                    ? 'bg-accent text-accent-foreground'
+                    : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                )
+              }
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {label}
+            </NavLink>
+          ))}
+        </div>
+
+        <div>
+          <p className="px-3 pb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            Admin
+          </p>
+          <div className="space-y-1">
+            {ADMIN_ITEMS.map(({ to, label, Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                className={({ isActive }) =>
+                  cn(
+                    'flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors',
+                    isActive
+                      ? 'bg-accent text-accent-foreground'
+                      : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+                  )
+                }
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        </div>
       </nav>
     </aside>
   )
