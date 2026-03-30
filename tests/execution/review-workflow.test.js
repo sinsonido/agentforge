@@ -158,7 +158,7 @@ describe('ReviewWorkflow', () => {
     it('instructs reviewer to reply APPROVE or REJECT', () => {
       const task = { id: 'x', title: 'T', type: 'test', model_used: 'claude', result: 'r' };
       const prompt = workflow._buildReviewPrompt(task);
-      assert.ok(prompt.includes('APPROVE') || prompt.includes('REJECT'));
+      assert.ok(prompt.includes('APPROVE') && prompt.includes('REJECT'));
     });
   });
 });
