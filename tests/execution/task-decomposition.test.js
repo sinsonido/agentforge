@@ -83,7 +83,6 @@ describe('TaskDecomposition', () => {
 
     it('returns empty array when parsed value is not an array', () => {
       const result = decomposer._parseSubtasks('{"key": "value"}', {});
-      // No array match — returns []
       assert.deepEqual(result, []);
     });
 

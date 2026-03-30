@@ -94,7 +94,7 @@ export class TaskDecomposition {
   _parseSubtasks(content, _parentTask) {
     try {
       // Extract JSON from content (may be wrapped in markdown)
-      const match = content.match(/\[[\s\S]*\]/);
+      const match = content.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
       if (!match) return [];
       const parsed = JSON.parse(match[0]);
       return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
