@@ -41,6 +41,25 @@ export function createAuthMiddleware(authConfig = {}, db = null) {
     if (db) {
       const payload = verifyToken(db, token);
       if (payload) {
+        // Optionally ensure the user still exists and is active.
+        let userIsActive = true;
+
+        if (typeof db.getUserById === 'function' && payload.userId != null) {
+          try {
+            const dbUser = db.getUserById(payload.userId);
+
+            if (!dbUser || dbUser.is_active === 0 || dbUser.is_active === false) {
+              userIsActive = false;
+            }
+          } catch (e) {
+            // On DB lookup failure, err on the side of denying access.
+            userIsActive = false;
+          }
+        }
+
+        if (!userIsActive) {
+          return res.status(401).json({ ok: false, error: 'Unauthorized' });
+        }
         req.user = payload;
         return next();
       }
