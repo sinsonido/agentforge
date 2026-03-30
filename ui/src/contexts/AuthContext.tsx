@@ -170,8 +170,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsAuthenticated(true)
     if (remember) {
       localStorage.setItem('agentforge_token', newToken)
+      sessionStorage.removeItem('agentforge_token')
     } else {
       sessionStorage.setItem('agentforge_token', newToken)
+      localStorage.removeItem('agentforge_token')
     }
   }, [])
 
