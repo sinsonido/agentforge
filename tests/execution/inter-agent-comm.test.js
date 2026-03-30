@@ -33,38 +33,62 @@ describe('InterAgentComm', () => {
 
   describe('ask()', () => {
     it('creates a task with correct defaults', async () => {
-      const created = [];
-      comm.taskQueue = {
-        add(opts) {
-          const t = { id: `task-${++taskIdCounter}`, ...opts };
-          created.push(t);
-          return t;
-        },
+      const originalSetTimeout = global.setTimeout;
+      // Stub setTimeout so InterAgentComm.ask() does not create a long-lived timer.
+      global.setTimeout = (fn, delay, ...args) => {
+        // Do not schedule a real timer; just return a dummy handle.
+        return { _fakeTimeout: true, delay, fn, args };
       };
 
-      const promise = comm.ask('agent-a', 'agent-b', 'What is the answer?');
+      try {
+        const created = [];
+        comm.taskQueue = {
+          add(opts) {
+            const t = { id: `task-${++taskIdCounter}`, ...opts };
+            created.push(t);
+            return t;
+          },
+        };
 
-      assert.equal(created.length, 1);
-      assert.equal(created[0].title, 'What is the answer?');
-      assert.equal(created[0].type, 'implement');
-      assert.equal(created[0].priority, 'high');
-      assert.equal(created[0].agent_id, 'agent-b');
+        const promise = comm.ask('agent-a', 'agent-b', 'What is the answer?');
 
-      // Resolve to avoid hanging
-      eventBus.emit('task.completed', { task: created[0] });
-      await promise;
+        assert.equal(created.length, 1);
+        assert.equal(created[0].title, 'What is the answer?');
+        assert.equal(created[0].type, 'implement');
+        assert.equal(created[0].priority, 'high');
+        assert.equal(created[0].agent_id, 'agent-b');
+
+        // Resolve to avoid hanging
+        eventBus.emit('task.completed', { task: created[0] });
+        await promise;
+      } finally {
+        // Restore the original setTimeout after the test completes.
+        global.setTimeout = originalSetTimeout;
+      }
     });
 
     it('resolves with task result when task.completed fires', async () => {
-      const promise = comm.ask('agent-a', 'agent-b', 'Do something');
-      const taskId = `task-${taskIdCounter}`;
+      const originalSetTimeout = global.setTimeout;
+      // Stub setTimeout so InterAgentComm.ask() does not create a long-lived timer.
+      global.setTimeout = (fn, delay, ...args) => {
+        // Do not schedule a real timer; just return a dummy handle.
+        return { _fakeTimeout: true, delay, fn, args };
+      };
 
-      setImmediate(() => {
-        eventBus.emit('task.completed', { task: { id: taskId, result: 'done result' } });
-      });
+      try {
+        const promise = comm.ask('agent-a', 'agent-b', 'Do something');
+        const taskId = `task-${taskIdCounter}`;
 
-      const result = await promise;
-      assert.equal(result, 'done result');
+        setImmediate(() => {
+          eventBus.emit('task.completed', { task: { id: taskId, result: 'done result' } });
+        });
+
+        const result = await promise;
+        assert.equal(result, 'done result');
+      } finally {
+        // Restore the original setTimeout after the test completes.
+        global.setTimeout = originalSetTimeout;
+      }
     });
 
     it('resolves with empty string when task result is undefined', async () => {
