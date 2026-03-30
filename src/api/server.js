@@ -426,8 +426,9 @@ function buildRouter(forge) {
       if (!store) return res.status(503).json({ ok: false, error: 'Database not available' });
       const { email, role = 'viewer', teamId } = req.body ?? {};
       if (!email) return res.status(400).json({ ok: false, error: '`email` is required' });
-      const invitedBy = req.user?.id ?? 'system';
-      const invitation = store.createInvitation({ email, role, teamId: teamId ?? null, invitedBy });
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ ok: false, error: 'Authenticated user required to create invitations' });
+      const invitation = store.createInvitation({ email, role, teamId: teamId ?? null, invitedBy: userId });
       res.status(201).json({ ok: true, invitation });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
