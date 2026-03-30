@@ -16,6 +16,10 @@ import express from 'express';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
+import { authMiddleware } from '../auth/auth.js';
+import { requirePermission, getPermissions } from '../auth/rbac.js';
+import { createToken } from '../auth/session.js';
+import { UserStore } from '../auth/users.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -62,6 +66,98 @@ function corsMiddleware(req, res, next) {
 function buildRouter(forge) {
   const router = express.Router();
 
+  // Shared UserStore instance (one per server lifetime).
+  const userStore = new UserStore();
+
+  // ── POST /api/auth/login ──────────────────────────────────────────────────
+  /**
+   * Authenticate with username + password. Returns a signed JWT.
+   * Body: { username, password }
+   */
+  router.post('/auth/login', async (req, res) => {
+    try {
+      const { username, password } = req.body ?? {};
+      if (!username || !password) {
+        return res.status(400).json({ ok: false, error: '`username` and `password` are required' });
+      }
+      const user = await userStore.authenticate(username, password);
+      if (!user) {
+        return res.status(401).json({ ok: false, error: 'Invalid credentials' });
+      }
+      const token = createToken(user);
+      res.json({ ok: true, token, user: { ...user, permissions: getPermissions(user.role) } });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/auth/me ──────────────────────────────────────────────────────
+  /**
+   * Return the currently authenticated user plus their permission list.
+   */
+  router.get('/auth/me', (req, res) => {
+    if (!req.user) {
+      return res.status(401).json({ ok: false, error: 'Not authenticated' });
+    }
+    const user = userStore.getById(req.user.id);
+    if (!user) {
+      // Fallback: use data embedded in the JWT payload.
+      return res.json({ ok: true, user: { ...req.user, permissions: getPermissions(req.user.role) } });
+    }
+    res.json({ ok: true, user: { ...user, permissions: getPermissions(user.role) } });
+  });
+
+  // ── GET /api/auth/users ───────────────────────────────────────────────────
+  /**
+   * List all users. Requires users:read permission (admin only).
+   */
+  router.get('/auth/users', requirePermission('users:read'), (req, res) => {
+    try {
+      res.json({ ok: true, users: userStore.list() });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── POST /api/auth/users ──────────────────────────────────────────────────
+  /**
+   * Create a user. Requires users:write permission (admin only).
+   * Body: { username, password, role }
+   */
+  router.post('/auth/users', requirePermission('users:write'), async (req, res) => {
+    try {
+      const { username, password, role } = req.body ?? {};
+      const user = await userStore.create({ username, password, role });
+      res.status(201).json({ ok: true, user });
+    } catch (err) {
+      if (err.message.includes('already exists') || err.message.includes('required') || err.message.includes('Invalid role')) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── PATCH /api/auth/users/:id/role ────────────────────────────────────────
+  /**
+   * Update a user's role. Requires users:write permission (admin only).
+   * Body: { role }
+   */
+  router.patch('/auth/users/:id/role', requirePermission('users:write'), (req, res) => {
+    try {
+      const { role } = req.body ?? {};
+      const user = userStore.updateRole(req.params.id, role);
+      if (!user) {
+        return res.status(404).json({ ok: false, error: 'User not found' });
+      }
+      res.json({ ok: true, user });
+    } catch (err) {
+      if (err.message.includes('Invalid role')) {
+        return res.status(400).json({ ok: false, error: err.message });
+      }
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── GET /api/status ──────────────────────────────────────────────────────
   /**
    * System overview: task stats, quota states, running agent count.
@@ -91,7 +187,7 @@ function buildRouter(forge) {
    * List tasks. Merges live queue with DB history.
    * Optional query param: ?status=queued|executing|completed|failed
    */
-  router.get('/tasks', (req, res) => {
+  router.get('/tasks', requirePermission('tasks:read'), (req, res) => {
     try {
       const { status } = req.query;
       const liveTasks = status
@@ -120,7 +216,7 @@ function buildRouter(forge) {
    * Add a new task.
    * Body: { title, type, priority, agent_id }
    */
-  router.post('/tasks', (req, res) => {
+  router.post('/tasks', requirePermission('tasks:write'), (req, res) => {
     try {
       const { title, type, priority, agent_id } = req.body ?? {};
       if (!title) {
@@ -137,7 +233,7 @@ function buildRouter(forge) {
   /**
    * Get a single task by ID.
    */
-  router.get('/tasks/:id', (req, res) => {
+  router.get('/tasks/:id', requirePermission('tasks:read'), (req, res) => {
     try {
       const task = forge.taskQueue.get(req.params.id);
       if (!task) {
@@ -154,7 +250,7 @@ function buildRouter(forge) {
    * Update the status of a task (used by the Kanban board drag-and-drop).
    * Body: { status }
    */
-  router.post('/tasks/:id/status', (req, res) => {
+  router.post('/tasks/:id/status', requirePermission('tasks:write'), (req, res) => {
     try {
       const { status } = req.body ?? {};
       const validStatuses = ['queued', 'executing', 'completed', 'failed'];
@@ -177,7 +273,7 @@ function buildRouter(forge) {
   /**
    * List all agents and their lifecycle status.
    */
-  router.get('/agents', (req, res) => {
+  router.get('/agents', requirePermission('agents:read'), (req, res) => {
     try {
       const statuses = forge.agentPool?.getAllStatuses?.() ?? {};
       const agents = Object.values(statuses);
@@ -192,7 +288,7 @@ function buildRouter(forge) {
    * Update an agent's runtime config (model, systemPrompt).
    * Body: { model?, systemPrompt? }
    */
-  router.post('/agents/:id', (req, res) => {
+  router.post('/agents/:id', requirePermission('agents:write'), (req, res) => {
     try {
       const agentId = req.params.id;
       const { model, systemPrompt } = req.body ?? {};
@@ -216,7 +312,7 @@ function buildRouter(forge) {
    * Test connectivity for a named provider.
    * Body: { provider }
    */
-  router.post('/providers/test', async (req, res) => {
+  router.post('/providers/test', requirePermission('providers:read'), async (req, res) => {
     try {
       const { provider } = req.body ?? {};
       if (!provider) {
@@ -244,7 +340,7 @@ function buildRouter(forge) {
   /**
    * All provider quota statuses (usage windows, state).
    */
-  router.get('/quotas', (req, res) => {
+  router.get('/quotas', requirePermission('tasks:read'), (req, res) => {
     try {
       const quotas = forge.quotaManager.getAllStatuses();
       res.json({ ok: true, quotas });
@@ -258,7 +354,7 @@ function buildRouter(forge) {
    * Cost stats with normalized shape for UI consumption.
    * Returns: { totalCostUSD, byAgent, byModel, transactions, budgets }
    */
-  router.get('/costs', (req, res) => {
+  router.get('/costs', requirePermission('costs:read'), (req, res) => {
     try {
       const costTracker = forge.costTracker ?? forge.orchestrator?.costTracker;
       const db = forge.db;
@@ -312,7 +408,7 @@ function buildRouter(forge) {
    * Recent events. Prefers DB when available.
    * Optional query param: ?limit=50  (default 50, max 1000)
    */
-  router.get('/events', (req, res) => {
+  router.get('/events', requirePermission('tasks:read'), (req, res) => {
     try {
       const limit = Math.min(parseInt(req.query.limit, 10) || 50, 1000);
       if (forge.db) {
@@ -330,7 +426,7 @@ function buildRouter(forge) {
   /**
    * Start the orchestrator.
    */
-  router.post('/control/start', (req, res) => {
+  router.post('/control/start', requirePermission('control:start'), (req, res) => {
     try {
       if (!forge.orchestrator) {
         return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
@@ -349,7 +445,7 @@ function buildRouter(forge) {
   /**
    * Stop the orchestrator.
    */
-  router.post('/control/stop', (req, res) => {
+  router.post('/control/stop', requirePermission('control:stop'), (req, res) => {
     try {
       if (!forge.orchestrator) {
         return res.status(503).json({ ok: false, error: 'Orchestrator not available' });
@@ -392,7 +488,7 @@ function buildRouter(forge) {
   /**
    * Approve a PR review.
    */
-  router.post('/review/:prNumber/approve', (req, res) => {
+  router.post('/review/:prNumber/approve', requirePermission('review:approve'), (req, res) => {
     try {
       const prNumber = parseInt(req.params.prNumber, 10);
       if (!Number.isFinite(prNumber) || prNumber < 1) {
@@ -410,7 +506,7 @@ function buildRouter(forge) {
    * Reject a PR review.
    * Body: { reason }
    */
-  router.post('/review/:prNumber/reject', (req, res) => {
+  router.post('/review/:prNumber/reject', requirePermission('review:approve'), (req, res) => {
     try {
       const prNumber = parseInt(req.params.prNumber, 10);
       if (!Number.isFinite(prNumber) || prNumber < 1) {
@@ -510,6 +606,17 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // Rate limiting — scoped to API routes only (not static files)
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
+
+  // Authentication middleware — applied to all /api routes.
+  // /api/auth/login and /api/status are exempt (they don't need a token to reach).
+  app.use('/api', (req, res, next) => {
+    // Pass-through for login endpoint and status endpoint — these are pre-auth.
+    if (req.path === '/status' || req.path.startsWith('/auth/login')) {
+      req.user = null;
+      return next();
+    }
+    authMiddleware(req, res, next);
+  });
 
   // API routes
   app.use('/api', buildRouter(forge));
