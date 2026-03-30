@@ -98,7 +98,7 @@ describe('ReviewWorkflow', () => {
       assert.match(result.feedback, /timeout/);
     });
 
-    it('emits review.submitted event', async (t) => {
+    it('emits review.submitted event', async () => {
       const eventPromise = new Promise(resolve => eventBus.once('review.submitted', resolve));
 
       const task = { id: 't7', agent_id: 'developer', title: 'T', type: 'test', model_used: 'claude', result: '' };
@@ -109,7 +109,7 @@ describe('ReviewWorkflow', () => {
       assert.equal(event.reviewer, 'reviewer');
     });
 
-    it('emits review.completed event with approved status', async (t) => {
+    it('emits review.completed event with approved status', async () => {
       const eventPromise = new Promise(resolve => eventBus.once('review.completed', resolve));
 
       mockComm._response = 'APPROVE';
