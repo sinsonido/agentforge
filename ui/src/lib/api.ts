@@ -1,10 +1,34 @@
+import { getToken } from '@/contexts/AuthContext'
+
 const BASE = '/api'
 
+// Module-level callback invoked when a 401 response is received
+let onUnauthorized: (() => void) | null = null
+
+export function setUnauthorizedHandler(fn: () => void) {
+  onUnauthorized = fn
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
+  const token = getToken()
+  const authHeaders: Record<string, string> = token
+    ? { Authorization: `Bearer ${token}` }
+    : {}
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
     ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders,
+      ...(options?.headers as Record<string, string> | undefined),
+    },
   })
+
+  if (res.status === 401) {
+    onUnauthorized?.()
+    throw new Error('Unauthorized')
+  }
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }))
     throw new Error((err as { error?: string }).error ?? res.statusText)
