@@ -52,6 +52,10 @@ export function createAuditMiddleware(db) {
         // Only log successful mutations
         if (res.statusCode >= 400) return;
 
+        // TODO: req.user is not populated by the API server (no auth middleware
+        // is wired up), so all audit rows are currently attributed to 'system'.
+        // Wire up JWT/session authentication middleware and populate req.user to
+        // enable per-user attribution in the audit log.
         const userId = req.user?.userId ?? 'system';
         const username = req.user?.username ?? 'system';
 
