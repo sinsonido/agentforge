@@ -52,12 +52,11 @@ export interface Invitation {
   email: string
   role: string
   teamId: string | null
-  invitedBy: string
+  invitedBy: string | null
   createdAt: number
   expiresAt: number
   usedAt: number | null
   status: 'pending' | 'accepted' | 'expired' | 'revoked'
-  token: string
   token: string
 }
 
