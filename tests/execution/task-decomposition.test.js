@@ -8,9 +8,11 @@ describe('TaskDecomposition', () => {
   let mockRouter;
   let mockProviders;
   let addedTasks;
+  let routerCalls;
 
   beforeEach(() => {
     addedTasks = [];
+    routerCalls = [];
     mockTaskQueue = {
       add(opts) {
         const t = { id: `task-${addedTasks.length + 1}`, ...opts };
@@ -19,7 +21,8 @@ describe('TaskDecomposition', () => {
       },
     };
     mockRouter = {
-      resolve(_task, _opts) {
+      resolve(task, _opts) {
+        routerCalls.push(task);
         return { action: 'execute', provider: 'anthropic', model: 'claude-opus' };
       },
     };
@@ -109,6 +112,8 @@ describe('TaskDecomposition', () => {
       assert.equal(mockProviders.calls.length, 1);
       assert.equal(mockProviders.calls[0].providerId, 'anthropic');
       assert.equal(mockProviders.calls[0].params.model, 'claude-opus');
+      assert.equal(routerCalls.length, 1);
+      assert.equal(routerCalls[0].type, 'planning');
     });
 
     it('adds subtasks to the queue with parent project_id', async () => {

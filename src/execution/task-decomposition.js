@@ -97,7 +97,20 @@ export class TaskDecomposition {
       const match = content.match(/(\[[\s\S]*\]|\{[\s\S]*\})/);
       if (!match) return [];
       const parsed = JSON.parse(match[0]);
-      return Array.isArray(parsed) ? parsed.slice(0, 10) : [];
+
+      let subtasksArray = null;
+
+      if (Array.isArray(parsed)) {
+        // Preferred format: top-level array of subtasks
+        subtasksArray = parsed;
+      } else if (parsed && typeof parsed === 'object') {
+        // Fallback: object-wrapped response, e.g. { "subtasks": [ ... ] }
+        if (Array.isArray(parsed.subtasks)) {
+          subtasksArray = parsed.subtasks;
+        }
+      }
+
+      return subtasksArray ? subtasksArray.slice(0, 10) : [];
     } catch {
       return [];
     }
