@@ -80,8 +80,14 @@ describe('TaskDecomposition', () => {
     });
 
     it('returns empty array on invalid JSON', () => {
-      const result = decomposer._parseSubtasks('[invalid json}', {});
+      const result = decomposer._parseSubtasks('[invalid json]', {});
       assert.deepEqual(result, []);
+    });
+
+    it('parses object-wrapped subtasks response', () => {
+      const result = decomposer._parseSubtasks('{"subtasks": [{"title": "Sub A", "type": "implement"}, {"title": "Sub B", "type": "test"}]}', {});
+      assert.equal(result.length, 2);
+      assert.equal(result[0].title, 'Sub A');
     });
 
     it('returns empty array when parsed value is not an array', () => {
