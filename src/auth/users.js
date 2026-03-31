@@ -37,7 +37,7 @@ export class UserStore {
    * Create a new user account.
    *
    * @param {{ username: string, email?: string, displayName?: string, role?: string, password: string }} opts
-   * @returns {Promise<object>} created user (without passwordHash)
+   * @returns {Promise<object>} created user (without password_hash)
    */
   async create({ username, email = null, displayName = null, role = 'viewer', password }) {
     if (!username) throw new Error('username is required');
