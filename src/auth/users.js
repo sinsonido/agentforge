@@ -26,14 +26,24 @@ function hashPassword(password) {
 /**
  * Verify a plaintext password against a stored "salt:hash" string.
  * Uses a timing-safe comparison to prevent timing attacks.
+ * Returns false (rather than throwing) on malformed stored values.
  * @param {string} password
  * @param {string} stored
  * @returns {boolean}
  */
 function verifyPassword(password, stored) {
-  const [salt, hash] = stored.split(':');
-  const derivedHash = crypto.scryptSync(password, salt, 64);
+  if (typeof stored !== 'string') return false;
+  const parts = stored.split(':');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return false;
+  const [salt, hash] = parts;
+  let derivedHash;
+  try {
+    derivedHash = crypto.scryptSync(password, salt, 64);
+  } catch {
+    return false;
+  }
   const storedHash = Buffer.from(hash, 'hex');
+  if (storedHash.length !== derivedHash.length) return false;
   return crypto.timingSafeEqual(derivedHash, storedHash);
 }
 
