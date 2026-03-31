@@ -20,8 +20,8 @@ export class InvitationStore {
   /**
    * Create a new invitation.
    *
-   * @param {{ email: string, role?: string, teamId?: string, invitedBy: string, expiresInHours?: number }} opts
-   * @returns {{ id: string, email: string, role: string, teamId: string|null, token: string, invitedBy: string, createdAt: number, expiresAt: number, usedAt: null, status: string }}
+   * @param {{ email: string, role?: string, teamId?: string, invitedBy?: string|null, expiresInHours?: number }} opts
+   * @returns {{ id: string, email: string, role: string, teamId: string|null, token: string, invitedBy: string|null, createdAt: number, expiresAt: number, usedAt: null, status: string }}
    */
   createInvitation({ email, role = 'viewer', teamId = null, invitedBy = null, expiresInHours = 168 }) {
     if (!email) throw new Error('email is required');
