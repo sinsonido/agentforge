@@ -64,7 +64,7 @@ export default function AcceptInviteView() {
     setSubmitting(true)
     try {
       await api.acceptInvitation({ token, username, password })
-      navigate('/', { replace: true })
+      navigate('/login', { replace: true })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Failed to create account.')
     } finally {
