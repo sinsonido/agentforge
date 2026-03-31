@@ -206,7 +206,7 @@ function buildAuthRouter(forge) {
 
       const ok = await verifyPassword(currentPassword, user.password_hash);
       if (!ok) {
-        return res.status(400).json({ ok: false, error: 'Current password is incorrect' });
+        return res.status(401).json({ ok: false, error: 'Current password is incorrect' });
       }
 
       const newHash = await hashPassword(newPassword);
