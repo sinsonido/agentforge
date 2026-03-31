@@ -20,7 +20,7 @@ const TEAMS_DDL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     description TEXT DEFAULT '',
-    created_at INTEGER DEFAULT (unixepoch())
+    created_at INTEGER DEFAULT (unixepoch() * 1000)
   );
 
   CREATE TABLE IF NOT EXISTS team_members (
