@@ -9,6 +9,7 @@ const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
   ({ className, onCheckedChange, onChange, ...props }, ref) => {
     return (
       <input
+        {...props}
         type="checkbox"
         className={cn(
           "h-4 w-4 rounded border border-input bg-transparent shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
@@ -19,7 +20,6 @@ const Checkbox = React.forwardRef<HTMLInputElement, CheckboxProps>(
           onChange?.(e)
           onCheckedChange?.(e.target.checked)
         }}
-        {...props}
       />
     )
   }
