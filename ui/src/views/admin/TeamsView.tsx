@@ -196,6 +196,7 @@ function TeamRow({ team, isAdmin, onRefresh }: TeamRowProps) {
       onRefresh()
     } catch (err) {
       alert(err instanceof Error ? err.message : String(err))
+    } finally {
       setDeleting(false)
     }
   }
