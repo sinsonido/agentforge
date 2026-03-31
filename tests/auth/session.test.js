@@ -1,5 +1,6 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { unlinkSync } from 'node:fs';
 import { AgentForgeDB } from '../../src/persistence/db.js';
 import { getJwtSecret, signToken, verifyToken, revokeToken } from '../../src/auth/session.js';
 
@@ -12,6 +13,9 @@ before(() => {
 
 after(() => {
   db.close();
+  for (const suffix of ['', '-wal', '-shm']) {
+    try { unlinkSync(DB_PATH + suffix); } catch { /* ignore */ }
+  }
 });
 
 describe('session helpers', () => {

@@ -70,8 +70,7 @@ function buildAuthRouter(forge) {
   router.post('/setup', async (req, res) => {
     try {
       if (!db) return res.status(503).json({ ok: false, error: 'Database not available' });
-      const existingUsers = db.listUsers();
-      if (existingUsers.length > 0) {
+      if (db.hasUsers()) {
         return res.status(409).json({ ok: false, error: 'Setup already complete. Users already exist.' });
       }
       const { username, password, displayName } = req.body ?? {};
@@ -702,9 +701,14 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   app.use('/api', generalLimiter);
   app.post('/api/*splat', mutationLimiter);
 
-  // Auth middleware (optional — only enforced when auth.secret is configured or DB is present)
+  // Auth middleware — only enforced when a static secret is configured or at
+  // least one user account exists.  Before first-run setup (no users yet)
+  // the server must be reachable without credentials so the admin can POST
+  // /api/auth/setup.  The middleware itself also bypasses in NODE_ENV=test.
   const authConfig = forge.config?.auth ?? {};
-  const authMiddleware = createAuthMiddleware(authConfig, forge.db ?? null);
+  const hasUsers = !!(forge.db?.hasUsers?.());
+  const dbForAuth = (authConfig.secret || hasUsers) ? (forge.db ?? null) : null;
+  const authMiddleware = createAuthMiddleware(authConfig, dbForAuth);
   // Apply auth to all /api routes except /api/auth/* (login, setup)
   app.use('/api', (req, res, next) => {
     if (req.path.startsWith('/auth/')) return next();
@@ -738,8 +742,7 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
     console.log('[agentforge:api] WebSocket endpoint: ws://%s:%d/ws', host, port);
 
     // First-run detection: prompt admin to create an account if none exist
-    const userCount = forge.db?.listUsers?.()?.length ?? 1;
-    if (userCount === 0) {
+    if (forge.db && !forge.db.hasUsers()) {
       console.log('[agentforge:setup] No admin account found.');
       console.log(`[agentforge:setup] Visit http://${host}:${port}/setup to create one.`);
     }

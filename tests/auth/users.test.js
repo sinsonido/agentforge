@@ -1,5 +1,6 @@
 import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { unlinkSync } from 'node:fs';
 import { AgentForgeDB } from '../../src/persistence/db.js';
 import { UserStore } from '../../src/auth/users.js';
 
@@ -14,6 +15,9 @@ before(() => {
 
 after(() => {
   db.close();
+  for (const suffix of ['', '-wal', '-shm']) {
+    try { unlinkSync(DB_PATH + suffix); } catch { /* ignore */ }
+  }
 });
 
 beforeEach(() => {

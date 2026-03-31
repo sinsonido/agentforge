@@ -14,18 +14,29 @@ const JWT_EXPIRY = '24h';
 const JWT_EXPIRY_SECONDS = 24 * 60 * 60;
 
 /**
+ * Per-DB in-process cache so we hit SQLite once per DB instance, not per
+ * request.  WeakMap ensures the entry is released when the DB instance is GC'd
+ * (important for test isolation where each test suite creates its own DB).
+ * @type {WeakMap<object, string>}
+ */
+const _secretCache = new WeakMap();
+
+/**
  * Return the JWT secret from the database, generating and persisting one if
- * it does not yet exist.
+ * it does not yet exist.  Result is cached in module scope after the first
+ * read to avoid a SQLite round-trip on every authenticated request.
  *
  * @param {import('../persistence/db.js').AgentForgeDB} db
  * @returns {string}
  */
 export function getJwtSecret(db) {
+  if (_secretCache.has(db)) return _secretCache.get(db);
   let secret = db.getSetting('jwt_secret');
   if (!secret) {
     secret = randomBytes(32).toString('hex');
     db.setSetting('jwt_secret', secret);
   }
+  _secretCache.set(db, secret);
   return secret;
 }
 
@@ -41,6 +52,7 @@ export function signToken(db, { userId, username, role }) {
   const jti = randomUUID();
   return jwt.sign({ sub: userId, username, role, jti }, secret, {
     expiresIn: JWT_EXPIRY,
+    algorithm: 'HS256',
   });
 }
 
@@ -54,7 +66,7 @@ export function signToken(db, { userId, username, role }) {
 export function verifyToken(db, token) {
   try {
     const secret = getJwtSecret(db);
-    const decoded = jwt.verify(token, secret);
+    const decoded = jwt.verify(token, secret, { algorithms: ['HS256'] });
     const jti = decoded.jti;
     if (!jti) return null;
     if (db.isTokenRevoked(jti)) return null;

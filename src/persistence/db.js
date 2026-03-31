@@ -133,6 +133,7 @@ export class AgentForgeDB {
       updateUserRole: this.db.prepare('UPDATE users SET role = ? WHERE id = ?'),
       updateUserPasswordHash: this.db.prepare('UPDATE users SET password_hash = ? WHERE id = ?'),
       listUsers: this.db.prepare('SELECT * FROM users ORDER BY created_at ASC'),
+      hasUsers: this.db.prepare('SELECT 1 FROM users LIMIT 1'),
       // ── Settings ───────────────────────────────────────────────────────────
       getSetting: this.db.prepare('SELECT value FROM db_settings WHERE key = ?'),
       setSetting: this.db.prepare(`
@@ -294,6 +295,15 @@ export class AgentForgeDB {
   /** @returns {object[]} */
   listUsers() {
     return this._stmts.listUsers.all();
+  }
+
+  /**
+   * Returns true if at least one user account exists. More efficient than
+   * calling listUsers().length because it uses SELECT 1 LIMIT 1.
+   * @returns {boolean}
+   */
+  hasUsers() {
+    return !!this._stmts.hasUsers.get();
   }
 
   // ─── Settings operations ─────────────────────────────
