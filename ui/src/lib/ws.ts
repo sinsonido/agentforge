@@ -37,6 +37,7 @@ class WebSocketManager {
     this.ws.onopen = () => this._setStatus('connected')
     this.ws.onclose = (evt) => {
       if (evt.code === 4401) {
+        this._setStatus('disconnected')
         onUnauthorized?.()
         return
       }

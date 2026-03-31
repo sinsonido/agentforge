@@ -132,14 +132,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             localStorage.removeItem('agentforge_token')
             sessionStorage.removeItem('agentforge_token')
           } else {
-            // Other error — keep token, assume authenticated for now
-            _token = token
-            setIsAuthenticated(true)
+            // Other error — clear auth, force re-login rather than assuming authenticated
+            _token = null
+            setToken(null)
+            localStorage.removeItem('agentforge_token')
+            sessionStorage.removeItem('agentforge_token')
           }
         } catch {
-          // Network error — keep token, assume authenticated
-          _token = token
-          setIsAuthenticated(true)
+          // Network error — clear auth so the user can re-login when the server recovers
+          _token = null
+          setToken(null)
+          localStorage.removeItem('agentforge_token')
+          sessionStorage.removeItem('agentforge_token')
         }
       }
       setChecking(false)

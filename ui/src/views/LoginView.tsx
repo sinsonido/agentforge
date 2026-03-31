@@ -32,7 +32,7 @@ export default function LoginView() {
     setError(null)
     setLoading(true)
     try {
-      await login(username, password, remember)
+      await login(username.trim(), password, remember)
       navigate(redirect, { replace: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Sign in failed'
@@ -98,7 +98,7 @@ export default function LoginView() {
               </Label>
             </div>
 
-            <Button type="submit" className="w-full" disabled={loading || !username || !password}>
+            <Button type="submit" className="w-full" disabled={loading || !username.trim() || !password}>
               {loading ? 'Signing in…' : 'Sign in'}
             </Button>
           </form>

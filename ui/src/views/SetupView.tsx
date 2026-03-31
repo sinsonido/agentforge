@@ -32,7 +32,7 @@ export default function SetupView() {
     setLoading(true)
     try {
       const body: { username: string; password: string; displayName?: string } = {
-        username,
+        username: username.trim(),
         password,
       }
       if (displayName.trim()) {
@@ -75,9 +75,9 @@ export default function SetupView() {
             <p className="mb-4 text-sm text-muted-foreground">
               This instance has already been configured. Please sign in with your existing credentials.
             </p>
-            <Link to="/login">
-              <Button className="w-full">Go to sign in</Button>
-            </Link>
+            <Button asChild className="w-full">
+              <Link to="/login">Go to sign in</Link>
+            </Button>
           </CardContent>
         </Card>
       </div>
@@ -156,7 +156,7 @@ export default function SetupView() {
             <Button
               type="submit"
               className="w-full"
-              disabled={loading || !username || !password || !confirmPassword}
+              disabled={loading || !username.trim() || !password || !confirmPassword}
             >
               {loading ? 'Creating account…' : 'Create account'}
             </Button>
