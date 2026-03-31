@@ -217,6 +217,30 @@ describe('InterAgentComm', () => {
 
       assert.equal(capturedTimers.length, 0);
     });
+
+    it('calls unref on the timeout handle when provided', async () => {
+      let unrefCalled = false;
+      const originalSetTimeout = global.setTimeout;
+      global.setTimeout = (fn, delay) => {
+        return {
+          _fakeTimeout: true,
+          unref() { unrefCalled = true; },
+        };
+      };
+      global.clearTimeout = () => {};
+
+      try {
+        const promise = comm.ask('agent-a', 'agent-b', 'test unref');
+        const taskId = `task-${taskIdCounter}`;
+        setImmediate(() => {
+          eventBus.emit('task.completed', { task: { id: taskId, result: 'ok' } });
+        });
+        await promise;
+        assert.ok(unrefCalled, '.unref() should have been called on the timeout handle');
+      } finally {
+        global.setTimeout = originalSetTimeout;
+      }
+    });
   });
 
   describe('getToolDefinition()', () => {
