@@ -2,10 +2,11 @@
  * @file tests/api/admin.test.js
  * @description Tests for admin user management API endpoints.
  *
- * GET  /api/admin/users
- * POST /api/admin/users
- * PATCH /api/admin/users/:id
- * POST /api/admin/users/:id/reset-password
+ * GET    /api/admin/users
+ * POST   /api/admin/users
+ * PATCH  /api/admin/users/:id
+ * POST   /api/admin/users/:id/reset-password
+ * DELETE /api/admin/users/:id
  *
  * GitHub issue #98
  */
