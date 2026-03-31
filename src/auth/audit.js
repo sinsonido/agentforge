@@ -15,23 +15,51 @@ const SENSITIVE_FIELDS = new Set([
   'newPassword',
 ]);
 
+const MAX_SANITIZE_DEPTH = 5;
+const MAX_SANITIZE_KEYS = 1000;
+
 /**
- * Strip sensitive fields from a request body object.
- * Returns a shallow copy of `body` with sensitive keys removed.
+ * Recursively redact sensitive fields from a value.
+ * Handles nested objects and arrays up to MAX_SANITIZE_DEPTH levels deep.
+ * Stops recursing into object keys once MAX_SANITIZE_KEYS total keys have
+ * been processed, leaving remaining values as-is.
+ *
+ * @param {unknown} value
+ * @param {number} depth
+ * @param {{ count: number }} state
+ * @returns {unknown}
+ */
+function sanitizeValue(value, depth, state) {
+  if (depth > MAX_SANITIZE_DEPTH) return value;
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeValue(item, depth + 1, state));
+  }
+  const cleaned = {};
+  for (const [key, val] of Object.entries(value)) {
+    if (SENSITIVE_FIELDS.has(key)) continue;
+    state.count += 1;
+    if (state.count > MAX_SANITIZE_KEYS) {
+      cleaned[key] = val;
+      continue;
+    }
+    cleaned[key] = sanitizeValue(val, depth + 1, state);
+  }
+  return cleaned;
+}
+
+/**
+ * Strip sensitive fields from a request body object, recursively.
  * Non-object values (null, undefined, arrays) are returned as-is.
  *
  * @param {unknown} body
  * @returns {unknown}
  */
 export function sanitizePayload(body) {
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
-  const cleaned = {};
-  for (const [key, value] of Object.entries(body)) {
-    if (!SENSITIVE_FIELDS.has(key)) {
-      cleaned[key] = value;
-    }
-  }
-  return cleaned;
+  if (!body || typeof body !== 'object') return body;
+  if (Array.isArray(body)) return body;
+  const state = { count: 0 };
+  return sanitizeValue(body, 0, state);
 }
 
 /**
