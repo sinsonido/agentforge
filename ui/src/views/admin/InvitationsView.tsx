@@ -145,7 +145,7 @@ function CreateInviteDialog({ open, onClose, onCreated }: CreateDialogProps) {
 }
 
 export default function InvitationsView() {
-  const { data, loading, refresh } = useApi(() => api.listInvitations(), [])
+  const { data, loading, error, refresh } = useApi(() => api.listInvitations(), [])
   const invitations = data?.invitations ?? []
   const [showCreate, setShowCreate] = useState(false)
   const [revoking, setRevoking] = useState<string | null>(null)
@@ -177,6 +177,10 @@ export default function InvitationsView() {
           {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-12 w-full" />
           ))}
+        </div>
+      ) : error ? (
+        <div className="text-red-500 text-sm p-4">
+          Failed to load invitations: {error.message ?? String(error)}
         </div>
       ) : invitations.length === 0 ? (
         <div className="flex h-48 items-center justify-center rounded-xl border border-dashed">
