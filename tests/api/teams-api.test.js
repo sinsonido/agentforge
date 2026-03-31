@@ -29,7 +29,7 @@ const TEAMS_DDL = `
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
     description TEXT DEFAULT '',
-    created_at INTEGER DEFAULT (unixepoch())
+    created_at INTEGER DEFAULT (unixepoch() * 1000)
   );
 
   CREATE TABLE IF NOT EXISTS team_members (
@@ -75,7 +75,7 @@ function makeForge() {
     // server.js accesses forge.db.db to get the raw better-sqlite3 handle for TeamStore.
     // The outer `db` key matches AgentForgeDB's position in the forge object; the inner
     // `.db` matches the property AgentForgeDB stores on itself (this.db = new Database(...)).
-    db: { db: rawDb },
+    db: { db: rawDb, _rawDb: rawDb },
   };
 }
 
@@ -113,13 +113,18 @@ function req(server, method, path, body) {
 
 describe('GET /api/teams', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('returns empty list when no teams exist', async () => {
     const { status, body } = await req(server, 'GET', '/api/teams');
@@ -131,13 +136,18 @@ describe('GET /api/teams', () => {
 
 describe('POST /api/teams — create team', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('creates a team and returns 201', async () => {
     const { status, body } = await req(server, 'POST', '/api/teams', { name: 'Alpha', description: 'First' });
@@ -166,13 +176,18 @@ describe('POST /api/teams — create team', () => {
 
 describe('GET /api/teams/:id', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('returns the team with members and projects', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Beta' });
@@ -195,13 +210,18 @@ describe('GET /api/teams/:id', () => {
 
 describe('PUT /api/teams/:id — update team', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('updates team name and description', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Gamma', description: 'Old' });
@@ -223,13 +243,18 @@ describe('PUT /api/teams/:id — update team', () => {
 
 describe('DELETE /api/teams/:id', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('deletes an existing team', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Delta' });
@@ -252,13 +277,18 @@ describe('DELETE /api/teams/:id', () => {
 
 describe('POST /api/teams/:id/members — add member', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('adds a member with default role', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Epsilon' });
@@ -324,13 +354,18 @@ describe('POST /api/teams/:id/members — add member', () => {
 
 describe('DELETE /api/teams/:id/members/:uid — remove member', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('removes a member', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Zeta' });
@@ -353,13 +388,18 @@ describe('DELETE /api/teams/:id/members/:uid — remove member', () => {
 
 describe('PUT /api/teams/:id/members/:uid — set role', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('updates a member role', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Eta' });
@@ -406,13 +446,18 @@ describe('PUT /api/teams/:id/members/:uid — set role', () => {
 
 describe('POST /api/teams/:id/projects — add project', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('adds a project association and returns 201', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Theta' });
@@ -444,13 +489,18 @@ describe('POST /api/teams/:id/projects — add project', () => {
 
 describe('DELETE /api/teams/:id/projects/:pid — remove project', () => {
   let server;
+  let forge;
 
   before(async () => {
-    server = startServer(makeForge(), 0);
+    forge = makeForge();
+    server = startServer(forge, 0);
     await new Promise(r => server.once('listening', r));
   });
 
-  after(async () => new Promise(r => server.close(r)));
+  after(async () => {
+    await new Promise(r => server.close(r));
+    forge.db._rawDb.close();
+  });
 
   it('removes a project association', async () => {
     const { body: created } = await req(server, 'POST', '/api/teams', { name: 'Iota' });
