@@ -38,16 +38,6 @@ export function hasPermission(role, permission) {
 /**
  * Express middleware factory.
  *
- * In test mode (NODE_ENV === 'test'), permission checks are bypassed so
- * tests can run without a full auth stack. In all other environments,
- * the request must have an authenticated user and the required permission.
- *
- * @param {string} permission
- * @returns {import('express').RequestHandler}
- */
-/**
- * Express middleware factory.
- *
  * In test mode (NODE_ENV === 'test') permission checks are bypassed unless
  * `enforce` is explicitly set to true, so that tests can run without a full
  * auth stack while still allowing RBAC-enforcement tests to opt in.
