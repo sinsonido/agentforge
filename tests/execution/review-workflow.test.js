@@ -99,26 +99,32 @@ describe('ReviewWorkflow', () => {
     });
 
     it('emits review.submitted event', async () => {
-      const eventPromise = new Promise(resolve => eventBus.once('review.submitted', resolve));
+      let submittedEvent = null;
+      eventBus.once('review.submitted', (event) => {
+        submittedEvent = event;
+      });
 
       const task = { id: 't7', agent_id: 'developer', title: 'T', type: 'test', model_used: 'claude', result: '' };
       await workflow.submitForReview(task);
 
-      const event = await eventPromise;
-      assert.equal(event.task_id, 't7');
-      assert.equal(event.reviewer, 'reviewer');
+      assert.ok(submittedEvent, 'review.submitted event was not emitted');
+      assert.equal(submittedEvent.task_id, 't7');
+      assert.equal(submittedEvent.reviewer, 'reviewer');
     });
 
     it('emits review.completed event with approved status', async () => {
-      const eventPromise = new Promise(resolve => eventBus.once('review.completed', resolve));
+      let completedEvent = null;
+      eventBus.once('review.completed', (event) => {
+        completedEvent = event;
+      });
 
       mockComm._response = 'APPROVE';
       const task = { id: 't8', agent_id: 'developer', title: 'T', type: 'test', model_used: 'claude', result: '' };
       await workflow.submitForReview(task);
 
-      const event = await eventPromise;
-      assert.equal(event.task_id, 't8');
-      assert.equal(event.approved, true);
+      assert.ok(completedEvent, 'review.completed event was not emitted');
+      assert.equal(completedEvent.task_id, 't8');
+      assert.equal(completedEvent.approved, true);
     });
   });
 
