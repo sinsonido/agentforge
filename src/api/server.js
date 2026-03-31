@@ -37,7 +37,7 @@ function corsMiddleware(req, res, next) {
   const origin = req.headers.origin || '';
   if (!origin || /^https?:\/\/localhost(:\d+)?$/.test(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin || '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization');
   }
   if (req.method === 'OPTIONS') {
@@ -544,7 +544,7 @@ const generalLimiter = rateLimit({
   legacyHeaders: false,
 });
 
-/** Strict mutation limiter: 30 req / 1 min per IP on POST /api/* (bypassed in test) */
+/** Strict mutation limiter: 30 req / 1 min per IP on mutating methods /api/* (bypassed in test) */
 const mutationLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -605,7 +605,12 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
 
   // Rate limiting — scoped to API routes only (not static files)
   app.use('/api', generalLimiter);
-  app.post('/api/*splat', mutationLimiter);
+  app.use('/api', (req, res, next) => {
+    if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+      return mutationLimiter(req, res, next);
+    }
+    next();
+  });
 
   // Authentication middleware — applied to all /api routes.
   // /api/auth/login and /api/status are exempt (they don't need a token to reach).
