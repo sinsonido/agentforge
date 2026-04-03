@@ -1,6 +1,7 @@
 node_modules/
 .env
 agentforge.yml
+.claude/
 *.db
 *.sqlite
 dist/
