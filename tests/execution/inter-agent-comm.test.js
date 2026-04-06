@@ -7,9 +7,13 @@
  *
  * NOTE: inter-agent-comm.js imports the eventBus singleton directly, so we
  * emit events on the same singleton to drive the tests.
+ *
+ * Every test that calls ask() ensures the returned promise is fully resolved
+ * or rejected before the test ends, preventing the 5-minute internal setTimeout
+ * from keeping the Node test runner alive after the suite completes.
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import eventBus from '../../src/core/event-bus.js';
@@ -21,10 +25,28 @@ import { InterAgentComm } from '../../src/execution/inter-agent-comm.js';
 
 function makeComm() {
   const taskQueue = new TaskQueue();
-  // Minimal orchestrator stub — not used by InterAgentComm directly
   const orchestrator = {};
   const comm = new InterAgentComm({ taskQueue, orchestrator });
   return { comm, taskQueue };
+}
+
+/**
+ * Resolve a pending ask() by emitting task.completed for the last task in the queue.
+ * Returns the resolved promise so the test can await full cleanup.
+ */
+function resolveLastTask(taskQueue, result = 'done') {
+  const tasks = taskQueue.getAll();
+  const task = tasks[tasks.length - 1];
+  eventBus.emit('task.completed', { task: { ...task, result } });
+}
+
+/**
+ * Reject a pending ask() by emitting task.failed for the last task in the queue.
+ */
+function failLastTask(taskQueue, error = 'test cleanup') {
+  const tasks = taskQueue.getAll();
+  const task = tasks[tasks.length - 1];
+  eventBus.emit('task.failed', { task, error });
 }
 
 // ---------------------------------------------------------------------------
@@ -50,22 +72,26 @@ describe('InterAgentComm — pendingCount()', () => {
     assert.equal(comm.pendingCount(), 0);
   });
 
-  it('increments when ask() is called', () => {
-    const { comm } = makeComm();
-    // Don't await — let it hang so we can check the count
-    comm.ask('agent-a', 'agent-b', 'do something').catch(() => {});
+  it('increments to 1 when ask() is called, then returns to 0 after resolution', async () => {
+    const { comm, taskQueue } = makeComm();
+    const p = comm.ask('agent-a', 'agent-b', 'do something');
+    p.catch(() => {});
     assert.equal(comm.pendingCount(), 1);
+    // Resolve to clean up the internal timer and listener
+    resolveLastTask(taskQueue);
+    await p;
+    assert.equal(comm.pendingCount(), 0);
   });
 });
 
 describe('InterAgentComm — ask() task creation', () => {
-  it('adds a task to the queue with correct fields', () => {
+  it('adds a task to the queue with correct fields', async () => {
     const { comm, taskQueue } = makeComm();
-    comm.ask('agent-a', 'agent-b', 'Write unit tests', {
+    const p = comm.ask('agent-a', 'agent-b', 'Write unit tests', {
       type: 'test',
       priority: 'high',
       project_id: 'proj-1',
-    }).catch(() => {});
+    });
 
     const tasks = taskQueue.getAll();
     assert.equal(tasks.length, 1);
@@ -74,31 +100,29 @@ describe('InterAgentComm — ask() task creation', () => {
     assert.equal(tasks[0].priority, 'high');
     assert.equal(tasks[0].agent_id, 'agent-b');
     assert.equal(tasks[0].project_id, 'proj-1');
+
+    resolveLastTask(taskQueue);
+    await p;
   });
 
-  it('uses default type=implement and priority=high when omitted', () => {
+  it('uses default type=implement and priority=high when omitted', async () => {
     const { comm, taskQueue } = makeComm();
-    comm.ask('agent-a', 'agent-b', 'Do the thing').catch(() => {});
+    const p = comm.ask('agent-a', 'agent-b', 'Do the thing');
     const tasks = taskQueue.getAll();
     assert.equal(tasks[0].type, 'implement');
     assert.equal(tasks[0].priority, 'high');
+    resolveLastTask(taskQueue);
+    await p;
   });
 });
 
 describe('InterAgentComm — ask() resolution', () => {
-  beforeEach(() => {
-    // Remove all listeners between tests to avoid cross-test pollution
-    eventBus.removeAllListeners('task.completed');
-    eventBus.removeAllListeners('task.failed');
-  });
-
   it('resolves with task.result when task.completed is emitted', async () => {
     const { comm, taskQueue } = makeComm();
     const promise = comm.ask('agent-a', 'agent-b', 'Summarise');
     const tasks = taskQueue.getAll();
     const task = tasks[tasks.length - 1];
 
-    // Simulate the orchestrator completing the task
     setImmediate(() => {
       eventBus.emit('task.completed', { task: { ...task, result: 'Summary done' } });
     });
@@ -156,8 +180,8 @@ describe('InterAgentComm — ask() resolution', () => {
     const tasks = taskQueue.getAll();
     const myTask = tasks[tasks.length - 1];
 
-    // Emit completed for a different task first, then for ours
     setImmediate(() => {
+      // Unrelated task first, then ours
       eventBus.emit('task.completed', { task: { id: 'unrelated-id', result: 'nope' } });
       setTimeout(() => {
         eventBus.emit('task.completed', { task: { ...myTask, result: 'mine' } });
