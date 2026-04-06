@@ -19,10 +19,12 @@ import { startWebSocketServer } from '../../src/api/ws.js';
 
 /**
  * Build a minimal eventBus stub with a fixed replay history.
+ * Uses slice(-n) to mirror the real AgentForgeEventBus implementation,
+ * which returns the LAST n entries.
  */
 function makeEventBus(recentEvents = []) {
   const bus = new EventEmitter();
-  bus.getRecentEvents = (n) => recentEvents.slice(0, n);
+  bus.getRecentEvents = (n) => recentEvents.slice(-n);
   bus.clearRecent = () => {};
   return bus;
 }
@@ -63,8 +65,33 @@ function collectMessages(ws, n) {
       if (msgs.length >= n) resolve(msgs);
     });
     ws.once('error', reject);
-    // Resolve early if connection closes with fewer messages
     ws.once('close', () => resolve(msgs));
+  });
+}
+
+/**
+ * Wait for a WebSocket to close, with a timeout and error handler so the
+ * test fails fast instead of hanging if the close never arrives.
+ */
+function waitForClose(ws, timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      ws.off('close', onClose);
+      ws.off('error', onError);
+      reject(new Error(`Timed out after ${timeoutMs}ms waiting for WebSocket close`));
+    }, timeoutMs);
+    const onClose = (code) => {
+      clearTimeout(timer);
+      ws.off('error', onError);
+      resolve(code);
+    };
+    const onError = (err) => {
+      clearTimeout(timer);
+      ws.off('close', onClose);
+      reject(err);
+    };
+    ws.once('close', onClose);
+    ws.once('error', onError);
   });
 }
 
@@ -92,9 +119,10 @@ describe('WebSocket server — basic connection', () => {
   });
 
   it('server tracks connected clients', async () => {
+    // Wait for the server-side 'connection' event before checking clients
+    const serverConnected = new Promise(r => wss.once('connection', r));
     const ws = await connect(httpServer);
-    // Give the server a tick to register the connection
-    await new Promise(r => setTimeout(r, 20));
+    await serverConnected;
     assert.ok(wss.clients.size >= 1);
     ws.close();
   });
@@ -107,7 +135,7 @@ describe('WebSocket server — basic connection', () => {
 describe('WebSocket server — event replay on connect', () => {
   let httpServer, wss, eventBus;
   const REPLAY_EVENTS = [
-    { event: 'task.queued', data: { id: 't1' }, timestamp: 1000 },
+    { event: 'task.queued',    data: { id: 't1' }, timestamp: 1000 },
     { event: 'task.completed', data: { id: 't1' }, timestamp: 2000 },
   ];
 
@@ -161,7 +189,6 @@ describe('WebSocket server — event broadcasting', () => {
 
   it('broadcasts task.queued to connected clients', async () => {
     const ws = await connect(httpServer);
-    // Collect one message that arrives after connection (not replay)
     const incoming = new Promise(resolve => {
       ws.once('message', raw => resolve(JSON.parse(raw.toString())));
     });
@@ -223,14 +250,14 @@ describe('WebSocket server — token auth (auth enabled, non-test env)', () => {
   it('closes connection with code 4401 when token is wrong', async () => {
     const { port } = httpServer.address();
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?token=wrong`);
-    const code = await new Promise(r => ws.once('close', r));
+    const code = await waitForClose(ws);
     assert.equal(code, 4401);
   });
 
   it('closes connection with code 4401 when token is missing', async () => {
     const { port } = httpServer.address();
     const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
-    const code = await new Promise(r => ws.once('close', r));
+    const code = await waitForClose(ws);
     assert.equal(code, 4401);
   });
 });
