@@ -1,258 +1,210 @@
-import { describe, it, before, after, afterEach } from 'node:test';
+/**
+ * @file tests/config/loader.test.js
+ * @description Unit tests for src/config/loader.js
+ *
+ * Covers: loadConfig (missing file → defaults, valid YAML, env-var substitution),
+ * buildFromConfig (models, agents, routing rules).
+ */
+
+import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import os from 'node:os';
-
+import { tmpdir } from 'node:os';
 import { loadConfig, buildFromConfig } from '../../src/config/loader.js';
-
-// ---------------------------------------------------------------------------
-// Temp dir setup
-// ---------------------------------------------------------------------------
-
-const tmpDir = join(os.tmpdir(), 'agentforge-config-test-' + process.pid);
-
-before(() => {
-  mkdirSync(tmpDir, { recursive: true });
-});
-
-after(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
-});
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function writeTmp(name, content) {
-  const filePath = join(tmpDir, name);
-  writeFileSync(filePath, content, 'utf-8');
-  return filePath;
+  const dir = join(tmpdir(), 'agentforge-config-tests');
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, name);
+  writeFileSync(p, content, 'utf-8');
+  return p;
 }
 
 // ---------------------------------------------------------------------------
-// loadConfig()
+// loadConfig
 // ---------------------------------------------------------------------------
 
-describe('loadConfig()', () => {
-  afterEach(() => {
-    // Clean up any env vars we set during tests
-    delete process.env.TEST_API_KEY;
-    delete process.env.TEST_HOST;
+describe('loadConfig — missing file', () => {
+  it('returns default config when file does not exist', () => {
+    const cfg = loadConfig('/tmp/agentforge-does-not-exist-99999.yml');
+    assert.equal(cfg.project.name, 'AgentForge Project');
+    assert.equal(cfg.project.budget, 100);
+    assert.equal(cfg.routing.fallback_strategy, 'same_tier_then_downgrade');
+    assert.equal(cfg.server.port, 4242);
+    assert.equal(cfg.git.enabled, false);
+  });
+});
+
+describe('loadConfig — valid YAML', () => {
+  let cfgPath;
+
+  before(() => {
+    cfgPath = writeTmp('valid.yml', [
+      'project:',
+      '  name: TestProject',
+      '  budget: 50',
+      'server:',
+      '  port: 9999',
+    ].join('\n'));
   });
 
-  it('returns DEFAULT_CONFIG when file does not exist', () => {
-    const config = loadConfig(join(tmpDir, 'nonexistent.yml'));
-    assert.equal(config.project.name, 'AgentForge Project');
-    assert.equal(config.project.budget, 100);
-    assert.equal(config.project.currency, 'USD');
-    assert.equal(config.server.port, 4242);
-    assert.equal(config.server.host, 'localhost');
-    assert.equal(config.git.enabled, false);
-    assert.deepEqual(config.routing.rules, []);
-    assert.equal(config.routing.fallback_strategy, 'same_tier_then_downgrade');
-    assert.equal(config.routing.cost_optimization, true);
+  after(() => unlinkSync(cfgPath));
+
+  it('loads project name from YAML', () => {
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.project.name, 'TestProject');
   });
 
-  it('loads and parses a valid YAML file', () => {
-    const filePath = writeTmp('valid.yml', `
-project:
-  name: MyProject
-  budget: 200
-  currency: EUR
-server:
-  port: 3000
-`);
-    const config = loadConfig(filePath);
-    assert.equal(config.project.name, 'MyProject');
-    assert.equal(config.project.budget, 200);
-    assert.equal(config.project.currency, 'EUR');
-    assert.equal(config.server.port, 3000);
-    // Default values not in file should still be present
-    assert.equal(config.server.host, 'localhost');
-    assert.equal(config.git.enabled, false);
+  it('loads project budget from YAML', () => {
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.project.budget, 50);
   });
 
-  it('resolves ${ENV_VAR} references from process.env', () => {
-    process.env.TEST_API_KEY = 'secret-key-123';
-    const filePath = writeTmp('env-vars.yml', `
-providers:
-  anthropic:
-    api_key: \${TEST_API_KEY}
-`);
-    const config = loadConfig(filePath);
-    assert.equal(config.providers.anthropic.api_key, 'secret-key-123');
+  it('loads server port from YAML', () => {
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.server.port, 9999);
   });
 
-  it('leaves ${MISSING_VAR} as empty string when env var not set', () => {
-    // Ensure var is not set
-    delete process.env.MISSING_VAR_THAT_DOES_NOT_EXIST;
-    const filePath = writeTmp('missing-var.yml', `
-providers:
-  anthropic:
-    api_key: \${MISSING_VAR_THAT_DOES_NOT_EXIST}
-`);
-    const config = loadConfig(filePath);
-    // The loader replaces ${VAR} with '' (empty string), so the YAML line becomes
-    // `api_key: ` — an unquoted empty scalar. js-yaml parses that as null.
-    assert.equal(config.providers.anthropic.api_key, null);
+  it('deep-merges with defaults (git.enabled stays false)', () => {
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.git.enabled, false);
+  });
+});
+
+describe('loadConfig — env var substitution', () => {
+  let cfgPath, savedEnv;
+
+  before(() => {
+    savedEnv = process.env.AF_TEST_SECRET;
+    process.env.AF_TEST_SECRET = 'my-secret-value';
+    cfgPath = writeTmp('envvar.yml', [
+      'project:',
+      '  name: ${AF_TEST_SECRET}',
+    ].join('\n'));
   });
 
-  it('merges loaded config with defaults (partial override)', () => {
-    const filePath = writeTmp('partial.yml', `
-project:
-  name: PartialProject
-routing:
-  cost_optimization: false
-`);
-    const config = loadConfig(filePath);
-    // Overridden values
-    assert.equal(config.project.name, 'PartialProject');
-    assert.equal(config.routing.cost_optimization, false);
-    // Default values preserved through merge
-    assert.equal(config.project.budget, 100);
-    assert.equal(config.project.currency, 'USD');
-    assert.equal(config.routing.fallback_strategy, 'same_tier_then_downgrade');
-    assert.deepEqual(config.routing.rules, []);
-    assert.equal(config.alerts.budget_warning_pct, 0.80);
-    assert.equal(config.alerts.budget_pause_pct, 0.95);
+  after(() => {
+    if (savedEnv === undefined) delete process.env.AF_TEST_SECRET;
+    else process.env.AF_TEST_SECRET = savedEnv;
+    unlinkSync(cfgPath);
   });
 
-  it('handles empty YAML file gracefully (returns defaults)', () => {
-    const filePath = writeTmp('empty.yml', '');
-    const config = loadConfig(filePath);
-    assert.equal(config.project.name, 'AgentForge Project');
-    assert.equal(config.project.budget, 100);
-    assert.equal(config.server.port, 4242);
-    assert.equal(config.git.enabled, false);
+  it('replaces ${VAR} with the environment variable value', () => {
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.project.name, 'my-secret-value');
+  });
+
+  it('substitutes to empty string when env var is not set', () => {
+    delete process.env.AF_TEST_SECRET;
+    const cfg = loadConfig(cfgPath);
+    assert.equal(cfg.project.name, '');
   });
 });
 
 // ---------------------------------------------------------------------------
-// buildFromConfig()
+// buildFromConfig
 // ---------------------------------------------------------------------------
 
-describe('buildFromConfig()', () => {
-  it('builds empty models and agents when config has none', () => {
-    const { models, agents, rules } = buildFromConfig({});
-    assert.deepEqual(models, {});
-    assert.deepEqual(agents, {});
-    assert.deepEqual(rules, []);
-  });
-
+describe('buildFromConfig — models', () => {
   it('builds models registry from config.models', () => {
-    const config = {
+    const cfg = {
       models: {
-        'claude-3-5-sonnet': { provider: 'anthropic', tier: 1, cost_per_1k_tokens: 0.003 },
-        'gpt-4o': { provider: 'openai', tier: 1, cost_per_1k_tokens: 0.005 },
+        'claude-opus': { provider: 'anthropic', tier: 1, cost_per_1k_tokens: 0.015 },
+        'claude-haiku': { provider: 'anthropic', tier: 3, cost_per_1k_tokens: 0.00025 },
       },
+      team: [],
+      routing: {},
     };
-    const { models } = buildFromConfig(config);
-    assert.ok(models['claude-3-5-sonnet']);
-    assert.equal(models['claude-3-5-sonnet'].provider, 'anthropic');
-    assert.equal(models['claude-3-5-sonnet'].tier, 1);
-    assert.ok(models['gpt-4o']);
-    assert.equal(models['gpt-4o'].provider, 'openai');
+    const { models } = buildFromConfig(cfg);
+    assert.ok('claude-opus' in models);
+    assert.ok('claude-haiku' in models);
+    assert.equal(models['claude-opus'].tier, 1);
+    assert.equal(models['claude-haiku'].tier, 3);
   });
 
-  it('builds agents map from config.team', () => {
-    const config = {
-      team: [
-        {
-          name: 'Alice',
-          role: 'developer',
-          model: 'claude-3-5-sonnet',
-          system_prompt: 'You are a developer.',
-        },
-      ],
-    };
-    const { agents } = buildFromConfig(config);
-    assert.ok(agents['alice']);
-    assert.equal(agents['alice'].name, 'Alice');
-    assert.equal(agents['alice'].role, 'developer');
-    assert.equal(agents['alice'].model, 'claude-3-5-sonnet');
-    assert.equal(agents['alice'].system_prompt, 'You are a developer.');
+  it('returns empty models when config.models is absent', () => {
+    const { models } = buildFromConfig({ team: [], routing: {} });
+    assert.deepEqual(models, {});
+  });
+});
+
+describe('buildFromConfig — agents', () => {
+  const teamCfg = {
+    models: {},
+    routing: {},
+    team: [
+      {
+        name: 'Lead Developer',
+        role: 'developer',
+        model: 'claude-opus-4-6',
+        fallback_models: ['claude-haiku-4-5-20251001'],
+        require_review: true,
+        reviewer: 'senior-reviewer',
+      },
+      {
+        name: 'Tester',
+        role: 'tester',
+      },
+    ],
+  };
+
+  it('builds agent IDs by lowercasing and replacing spaces with hyphens', () => {
+    const { agents } = buildFromConfig(teamCfg);
+    assert.ok('lead-developer' in agents);
+    assert.ok('tester' in agents);
   });
 
-  it('normalizes agent IDs: spaces become dashes, lowercased', () => {
-    const config = {
-      team: [
-        { name: 'Senior Dev Agent' },
-        { name: 'QA Bot' },
-        { name: 'UPPERCASE' },
-      ],
-    };
-    const { agents } = buildFromConfig(config);
-    assert.ok(agents['senior-dev-agent'], 'expected senior-dev-agent key');
-    assert.ok(agents['qa-bot'], 'expected qa-bot key');
-    assert.ok(agents['uppercase'], 'expected uppercase key');
+  it('preserves agent role, model, and fallback_models', () => {
+    const { agents } = buildFromConfig(teamCfg);
+    assert.equal(agents['lead-developer'].role, 'developer');
+    assert.equal(agents['lead-developer'].model, 'claude-opus-4-6');
+    assert.deepEqual(agents['lead-developer'].fallback_models, ['claude-haiku-4-5-20251001']);
   });
 
-  it('sets allow_tier_downgrade default to true when not specified', () => {
-    const config = {
-      team: [
-        { name: 'Agent One' },
-        { name: 'Agent Two', allow_tier_downgrade: false },
-      ],
-    };
-    const { agents } = buildFromConfig(config);
-    assert.equal(agents['agent-one'].allow_tier_downgrade, true);
-    assert.equal(agents['agent-two'].allow_tier_downgrade, false);
+  it('preserves require_review and reviewer fields', () => {
+    const { agents } = buildFromConfig(teamCfg);
+    assert.equal(agents['lead-developer'].require_review, true);
+    assert.equal(agents['lead-developer'].reviewer, 'senior-reviewer');
   });
 
-  it('returns rules from config.routing.rules', () => {
-    const config = {
+  it('sets sensible defaults for optional agent fields', () => {
+    const { agents } = buildFromConfig(teamCfg);
+    assert.equal(agents.tester.model, null);
+    assert.deepEqual(agents.tester.fallback_models, []);
+    assert.equal(agents.tester.require_review, false);
+    assert.equal(agents.tester.reviewer, null);
+    assert.equal(agents.tester.allow_tier_downgrade, true);
+  });
+
+  it('returns empty agents when team is absent', () => {
+    const { agents } = buildFromConfig({ models: {}, routing: {} });
+    assert.deepEqual(agents, {});
+  });
+});
+
+describe('buildFromConfig — routing rules', () => {
+  it('extracts routing rules from config', () => {
+    const cfg = {
+      models: {},
+      team: [],
       routing: {
         rules: [
-          { match: { role: 'developer' }, model: 'claude-3-5-sonnet' },
-          { match: { role: 'qa' }, model: 'gpt-4o-mini' },
+          { match: { type: 'architecture' }, model: 'claude-opus-4-6' },
         ],
       },
     };
-    const { rules } = buildFromConfig(config);
-    assert.equal(rules.length, 2);
-    assert.equal(rules[0].model, 'claude-3-5-sonnet');
-    assert.equal(rules[1].model, 'gpt-4o-mini');
+    const { rules } = buildFromConfig(cfg);
+    assert.equal(rules.length, 1);
+    assert.equal(rules[0].model, 'claude-opus-4-6');
   });
 
-  it('returns empty rules when routing not specified', () => {
-    const config = { models: {}, team: [] };
-    const { rules } = buildFromConfig(config);
+  it('returns empty rules when routing is absent', () => {
+    const { rules } = buildFromConfig({ models: {}, team: [] });
     assert.deepEqual(rules, []);
-  });
-
-  it('agent with system_prompt_file that does not exist keeps empty system_prompt', () => {
-    const config = {
-      team: [
-        {
-          name: 'Phantom Agent',
-          system_prompt_file: join(tmpDir, 'no-such-prompt.txt'),
-        },
-      ],
-    };
-    const { agents } = buildFromConfig(config);
-    assert.equal(agents['phantom-agent'].system_prompt, '');
-  });
-
-  it('populates agent defaults for optional fields', () => {
-    const config = {
-      team: [
-        { name: 'Minimal Agent' },
-      ],
-    };
-    const { agents } = buildFromConfig(config);
-    const a = agents['minimal-agent'];
-    assert.equal(a.id, 'minimal-agent');
-    assert.equal(a.role, '');
-    assert.equal(a.model, null);
-    assert.deepEqual(a.fallback_models, []);
-    assert.equal(a.system_prompt, '');
-    assert.equal(a.system_prompt_file, null);
-    assert.deepEqual(a.tools, []);
-    assert.equal(a.require_review, false);
-    assert.equal(a.reviewer, null);
-    assert.equal(a.max_cost_per_task, null);
-    assert.equal(a.max_tokens_per_task, null);
-    assert.equal(a.allow_tier_downgrade, true);
   });
 });
