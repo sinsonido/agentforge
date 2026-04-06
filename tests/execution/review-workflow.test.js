@@ -93,9 +93,18 @@ describe('ReviewWorkflow — needsReview()', () => {
 // ---------------------------------------------------------------------------
 
 describe('ReviewWorkflow — submitForReview() approval', () => {
+  // Track only the handlers we register so we remove only those in afterEach,
+  // avoiding interference with other listeners on the global eventBus singleton.
+  let onSubmit, onComplete;
+
   beforeEach(() => {
-    eventBus.removeAllListeners('review.submitted');
-    eventBus.removeAllListeners('review.completed');
+    onSubmit = null;
+    onComplete = null;
+  });
+
+  afterEach(() => {
+    if (onSubmit)   eventBus.off('review.submitted',  onSubmit);
+    if (onComplete) eventBus.off('review.completed', onComplete);
   });
 
   it('returns approved:true when feedback does not contain "reject"', async () => {
@@ -107,18 +116,23 @@ describe('ReviewWorkflow — submitForReview() approval', () => {
 
   it('emits review.submitted with task_id and reviewer', async () => {
     let emittedSubmit = null;
-    eventBus.once('review.submitted', d => { emittedSubmit = d; });
+    onSubmit = (d) => { emittedSubmit = d; };
+    eventBus.once('review.submitted', onSubmit);
     const w = makeWorkflow('APPROVE');
     await w.submitForReview(COMPLETED_TASK);
+    // once() self-cleans after firing; clear the ref so afterEach doesn't double-remove
+    onSubmit = null;
     assert.equal(emittedSubmit?.task_id, COMPLETED_TASK.id);
     assert.equal(emittedSubmit?.reviewer, 'senior-reviewer');
   });
 
   it('emits review.completed with approved:true', async () => {
     let emittedComplete = null;
-    eventBus.once('review.completed', d => { emittedComplete = d; });
+    onComplete = (d) => { emittedComplete = d; };
+    eventBus.once('review.completed', onComplete);
     const w = makeWorkflow('APPROVE');
     await w.submitForReview(COMPLETED_TASK);
+    onComplete = null;
     assert.equal(emittedComplete?.approved, true);
     assert.equal(emittedComplete?.task_id, COMPLETED_TASK.id);
   });
@@ -129,9 +143,16 @@ describe('ReviewWorkflow — submitForReview() approval', () => {
 // ---------------------------------------------------------------------------
 
 describe('ReviewWorkflow — submitForReview() rejection', () => {
+  let onSubmit, onComplete;
+
   beforeEach(() => {
-    eventBus.removeAllListeners('review.submitted');
-    eventBus.removeAllListeners('review.completed');
+    onSubmit = null;
+    onComplete = null;
+  });
+
+  afterEach(() => {
+    if (onSubmit)   eventBus.off('review.submitted',  onSubmit);
+    if (onComplete) eventBus.off('review.completed', onComplete);
   });
 
   it('returns approved:false when feedback contains "reject"', async () => {
@@ -149,9 +170,11 @@ describe('ReviewWorkflow — submitForReview() rejection', () => {
 
   it('emits review.completed with approved:false on rejection', async () => {
     let emitted = null;
-    eventBus.once('review.completed', d => { emitted = d; });
+    onComplete = (d) => { emitted = d; };
+    eventBus.once('review.completed', onComplete);
     const w = makeWorkflow('REJECT');
     await w.submitForReview(COMPLETED_TASK);
+    onComplete = null;
     assert.equal(emitted?.approved, false);
   });
 });
@@ -175,9 +198,16 @@ describe('ReviewWorkflow — submitForReview() no reviewer', () => {
 // ---------------------------------------------------------------------------
 
 describe('ReviewWorkflow — submitForReview() error path', () => {
+  let onSubmit, onComplete;
+
   beforeEach(() => {
-    eventBus.removeAllListeners('review.submitted');
-    eventBus.removeAllListeners('review.completed');
+    onSubmit = null;
+    onComplete = null;
+  });
+
+  afterEach(() => {
+    if (onSubmit)   eventBus.off('review.submitted',  onSubmit);
+    if (onComplete) eventBus.off('review.completed', onComplete);
   });
 
   it('returns approved:false and the error message when comm.ask throws', async () => {
@@ -189,9 +219,11 @@ describe('ReviewWorkflow — submitForReview() error path', () => {
 
   it('emits review.completed with approved:false on error', async () => {
     let emitted = null;
-    eventBus.once('review.completed', d => { emitted = d; });
+    onComplete = (d) => { emitted = d; };
+    eventBus.once('review.completed', onComplete);
     const w = makeWorkflow(new Error('Network failure'));
     await w.submitForReview(COMPLETED_TASK);
+    onComplete = null;
     assert.equal(emitted?.approved, false);
     assert.ok(emitted?.error);
   });
