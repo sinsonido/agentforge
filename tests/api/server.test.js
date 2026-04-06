@@ -4,7 +4,8 @@
  *
  * Covers: GET /api/status, GET|POST /api/tasks, GET /api/tasks/:id,
  * GET /api/agents, GET /api/quotas, GET /api/costs, GET /api/events,
- * POST /api/control/start|stop, POST /api/review/:pr/approve|reject.
+ * POST /api/control/start|stop, POST /api/review/:pr/approve|reject,
+ * and server-level auth middleware integration.
  *
  * Endpoints already covered by tests/api.test.js (not duplicated here):
  *   POST /api/tasks/:id/status, POST /api/agents/:id, POST /api/providers/test
@@ -38,7 +39,7 @@ function makeForge({ orchestratorRunning = false } = {}) {
     getAllStatuses() {
       return { agent1: { agentId: 'agent1', status: 'idle', model: 'claude-opus-4-6' } };
     },
-    updateAgentConfig(id, cfg) {
+    updateAgentConfig(id) {
       return id === 'agent1' ? true : false;
     },
   };
@@ -58,28 +59,31 @@ function makeForge({ orchestratorRunning = false } = {}) {
     }),
   };
 
-  const providerRegistry = {
-    get: () => null,
-  };
+  const providerRegistry = { get: () => null };
 
   return { taskQueue, quotaManager, eventBus, agentPool, orchestrator,
     costTracker, providerRegistry, db: null, config: {} };
 }
 
-function apiReq(server, method, path, body) {
+/**
+ * Make an HTTP request to the test server.
+ * Tolerates empty bodies and non-JSON responses by returning raw text as body
+ * when JSON.parse fails, preventing SyntaxErrors from hiding the real status.
+ */
+function apiReq(server, method, path, body, authHeader) {
   return new Promise((resolve, reject) => {
     const { port } = server.address();
-    const opts = {
-      hostname: '127.0.0.1',
-      port,
-      path,
-      method,
-      headers: { 'Content-Type': 'application/json' },
-    };
+    const headers = { 'Content-Type': 'application/json' };
+    if (authHeader) headers['Authorization'] = authHeader;
+    const opts = { hostname: '127.0.0.1', port, path, method, headers };
     const r = http.request(opts, res => {
       let data = '';
       res.on('data', c => { data += c; });
-      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(data) }));
+      res.on('end', () => {
+        let parsed;
+        try { parsed = data ? JSON.parse(data) : null; } catch { parsed = data; }
+        resolve({ status: res.statusCode, body: parsed });
+      });
     });
     r.on('error', reject);
     if (body !== undefined) r.write(JSON.stringify(body));
@@ -155,8 +159,8 @@ describe('GET /api/tasks', () => {
 // ---------------------------------------------------------------------------
 
 describe('POST /api/tasks', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
+  let server;
+  before(async () => ({ server } = await makeServer()));
   after(async () => new Promise(r => server.close(r)));
 
   it('creates a task and returns 201', async () => {
@@ -299,22 +303,24 @@ describe('GET /api/events', () => {
 
 // ---------------------------------------------------------------------------
 // POST /api/control/start
+// Each test explicitly sets orchestrator state to avoid order-dependency.
 // ---------------------------------------------------------------------------
 
 describe('POST /api/control/start', () => {
   let server, forge;
-  before(async () => ({ server, forge } = await makeServer({ orchestratorRunning: false })));
+  before(async () => ({ server, forge } = await makeServer()));
   after(async () => new Promise(r => server.close(r)));
 
-  it('starts the orchestrator', async () => {
+  it('starts the orchestrator when it is stopped', async () => {
+    forge.orchestrator._running = false;
     const { status, body } = await apiReq(server, 'POST', '/api/control/start');
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(forge.orchestrator._running, true);
   });
 
-  it('returns 409 when orchestrator already running', async () => {
-    // Already running from previous test
+  it('returns 409 when orchestrator is already running', async () => {
+    forge.orchestrator._running = true; // explicitly set — no order dependency
     const { status, body } = await apiReq(server, 'POST', '/api/control/start');
     assert.equal(status, 409);
     assert.equal(body.ok, false);
@@ -323,21 +329,24 @@ describe('POST /api/control/start', () => {
 
 // ---------------------------------------------------------------------------
 // POST /api/control/stop
+// Each test explicitly sets orchestrator state to avoid order-dependency.
 // ---------------------------------------------------------------------------
 
 describe('POST /api/control/stop', () => {
   let server, forge;
-  before(async () => ({ server, forge } = await makeServer({ orchestratorRunning: true })));
+  before(async () => ({ server, forge } = await makeServer()));
   after(async () => new Promise(r => server.close(r)));
 
-  it('stops the orchestrator', async () => {
+  it('stops the orchestrator when it is running', async () => {
+    forge.orchestrator._running = true;
     const { status, body } = await apiReq(server, 'POST', '/api/control/stop');
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(forge.orchestrator._running, false);
   });
 
-  it('returns 409 when orchestrator not running', async () => {
+  it('returns 409 when orchestrator is already stopped', async () => {
+    forge.orchestrator._running = false; // explicitly set — no order dependency
     const { status, body } = await apiReq(server, 'POST', '/api/control/stop');
     assert.equal(status, 409);
     assert.equal(body.ok, false);
@@ -403,5 +412,55 @@ describe('POST /api/review/:prNumber/reject', () => {
     const { status, body } = await apiReq(server, 'POST', '/api/review/0/reject', { reason: 'x' });
     assert.equal(status, 400);
     assert.equal(body.ok, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auth middleware — server-level integration
+// Starts the server with auth enabled (NODE_ENV=production) and verifies that
+// protected endpoints enforce the Bearer token, while GET /api/status remains
+// exempt as a health-check endpoint.
+// ---------------------------------------------------------------------------
+
+describe('Auth middleware — server-level', () => {
+  const SECRET = 'server-auth-test-secret';
+  let server, savedNodeEnv;
+
+  before(async () => {
+    savedNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production'; // disable test-bypass in auth middleware
+    const forge = makeForge();
+    forge.config = { server: { auth: { enabled: true, secret: SECRET } } };
+    server = startServer(forge, 0);
+    await new Promise(r => server.once('listening', r));
+  });
+
+  after(async () => {
+    process.env.NODE_ENV = savedNodeEnv;
+    return new Promise(r => server.close(r));
+  });
+
+  it('returns 401 on protected endpoint without Authorization header', async () => {
+    const { status, body } = await apiReq(server, 'GET', '/api/tasks');
+    assert.equal(status, 401);
+    assert.equal(body.ok, false);
+  });
+
+  it('returns 401 with wrong Bearer token', async () => {
+    const { status, body } = await apiReq(server, 'GET', '/api/tasks', undefined, 'Bearer wrong-token');
+    assert.equal(status, 401);
+    assert.equal(body.ok, false);
+  });
+
+  it('GET /api/status is accessible without token (health-check exemption)', async () => {
+    const { status, body } = await apiReq(server, 'GET', '/api/status');
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+  });
+
+  it('returns 200 with correct Bearer token', async () => {
+    const { status, body } = await apiReq(server, 'GET', '/api/tasks', undefined, `Bearer ${SECRET}`);
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
   });
 });
