@@ -112,8 +112,9 @@ describe('TaskDecomposition — _parseSubtasks()', () => {
     assert.deepEqual(result, []);
   });
 
-  it('returns empty array for invalid JSON', () => {
-    const result = decomposer._parseSubtasks('[not valid json', PARENT_TASK);
+  it('returns empty array for invalid JSON (exercises JSON.parse catch path)', () => {
+    // Use closing bracket so the regex matches, but JSON.parse throws
+    const result = decomposer._parseSubtasks('[not valid json]', PARENT_TASK);
     assert.deepEqual(result, []);
   });
 
