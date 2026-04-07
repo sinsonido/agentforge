@@ -46,21 +46,27 @@ export class InterAgentComm {
     return new Promise((resolve, reject) => {
       this._pending.set(task.id, { resolve, reject });
 
+      // Declared before handlers so closures can call clearTimeout(timeoutHandle)
+      let timeoutHandle;
+
+      const cleanup = () => {
+        clearTimeout(timeoutHandle);
+        eventBus.off('task.completed', onComplete);
+        eventBus.off('task.failed', onFailed);
+        this._pending.delete(task.id);
+      };
+
       // Listen for completion
       const onComplete = ({ task: t }) => {
         if (t.id === task.id) {
-          eventBus.off('task.completed', onComplete);
-          eventBus.off('task.failed', onFailed);
-          this._pending.delete(task.id);
+          cleanup();
           resolve(t.result || '');
         }
       };
 
       const onFailed = ({ task: t, error }) => {
         if (t.id === task.id) {
-          eventBus.off('task.completed', onComplete);
-          eventBus.off('task.failed', onFailed);
-          this._pending.delete(task.id);
+          cleanup();
           reject(new Error(error));
         }
       };
@@ -68,15 +74,14 @@ export class InterAgentComm {
       eventBus.on('task.completed', onComplete);
       eventBus.on('task.failed', onFailed);
 
-      // Timeout after 5 minutes
-      setTimeout(() => {
+      // Timeout after 5 minutes — unref so it doesn't block process exit
+      timeoutHandle = setTimeout(() => {
         if (this._pending.has(task.id)) {
-          eventBus.off('task.completed', onComplete);
-          eventBus.off('task.failed', onFailed);
-          this._pending.delete(task.id);
+          cleanup();
           reject(new Error(`ask_agent timeout: task ${task.id} did not complete in 5 minutes`));
         }
       }, 5 * 60 * 1000);
+      timeoutHandle.unref?.();
     });
   }
 

@@ -12,7 +12,7 @@
  *  - _buildReviewPrompt() includes task title, type, model, and result
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { ReviewWorkflow } from '../../src/execution/review-workflow.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
@@ -181,16 +181,23 @@ describe('ReviewWorkflow — event emission', () => {
     developer: { require_review: true, reviewer: 'reviewer-agent' },
   };
 
-  beforeEach(() => {
-    eventBus.removeAllListeners('review.submitted');
-    eventBus.removeAllListeners('review.completed');
+  let onSubmitted, onCompleted;
+  afterEach(() => {
+    if (onSubmitted) { eventBus.off('review.submitted', onSubmitted); onSubmitted = null; }
+    if (onCompleted) { eventBus.off('review.completed', onCompleted); onCompleted = null; }
   });
 
   it('emits review.submitted before calling the reviewer', async () => {
     let submittedPayload = null;
-    eventBus.once('review.submitted', (payload) => { submittedPayload = payload; });
+    onSubmitted = (payload) => { submittedPayload = payload; };
+    eventBus.once('review.submitted', onSubmitted);
 
-    const comm = { ask: async () => 'APPROVE' };
+    const comm = {
+      ask: async (_from, _to, _prompt, _opts) => {
+        assert.ok(submittedPayload !== null, 'review.submitted must be emitted before reviewer is called');
+        return 'APPROVE';
+      },
+    };
     const { workflow } = makeWorkflow(agents, comm);
 
     await workflow.submitForReview(makeTask());
@@ -202,7 +209,8 @@ describe('ReviewWorkflow — event emission', () => {
 
   it('emits review.completed with approved=true on approval', async () => {
     let completedPayload = null;
-    eventBus.once('review.completed', (payload) => { completedPayload = payload; });
+    onCompleted = (payload) => { completedPayload = payload; };
+    eventBus.once('review.completed', onCompleted);
 
     const comm = { ask: async () => 'APPROVE' };
     const { workflow } = makeWorkflow(agents, comm);
@@ -216,7 +224,8 @@ describe('ReviewWorkflow — event emission', () => {
 
   it('emits review.completed with approved=false on rejection', async () => {
     let completedPayload = null;
-    eventBus.once('review.completed', (payload) => { completedPayload = payload; });
+    onCompleted = (payload) => { completedPayload = payload; };
+    eventBus.once('review.completed', onCompleted);
 
     const comm = { ask: async () => 'REJECT not good enough' };
     const { workflow } = makeWorkflow(agents, comm);
@@ -229,7 +238,8 @@ describe('ReviewWorkflow — event emission', () => {
 
   it('emits review.completed with approved=false when comm throws', async () => {
     let completedPayload = null;
-    eventBus.once('review.completed', (payload) => { completedPayload = payload; });
+    onCompleted = (payload) => { completedPayload = payload; };
+    eventBus.once('review.completed', onCompleted);
 
     const comm = { ask: async () => { throw new Error('network error'); } };
     const { workflow } = makeWorkflow(agents, comm);
