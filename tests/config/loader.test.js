@@ -17,7 +17,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, unlinkSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { loadConfig, buildFromConfig } from '../../src/config/loader.js';
@@ -26,7 +26,10 @@ import { loadConfig, buildFromConfig } from '../../src/config/loader.js';
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Write a temporary YAML file and return its full path. */
+/**
+ * Write a temporary YAML file and return its full path.
+ * Caller is responsible for cleanup: rmSync(path.dirname(file), { recursive: true, force: true })
+ */
 function writeTmpYaml(content) {
   const dir = mkdtempSync(join(tmpdir(), 'agentforge-config-test-'));
   const file = join(dir, 'agentforge.yml');
@@ -34,28 +37,36 @@ function writeTmpYaml(content) {
   return file;
 }
 
+/** Remove the temp dir that writeTmpYaml() created for a given file path. */
+function cleanupTmpYaml(file) {
+  try { rmSync(join(file, '..'), { recursive: true, force: true }); } catch {}
+}
+
 // ---------------------------------------------------------------------------
 // loadConfig()
 // ---------------------------------------------------------------------------
 
 describe('loadConfig() — missing file', () => {
+  // Use a path that is guaranteed not to exist (random suffix, never created)
+  const missingPath = join(tmpdir(), `agentforge-no-exist-${Math.random().toString(36).slice(2)}.yml`);
+
   it('returns a config object when the file does not exist', () => {
-    const cfg = loadConfig('/tmp/does-not-exist-agentforge-test.yml');
+    const cfg = loadConfig(missingPath);
     assert.ok(typeof cfg === 'object' && cfg !== null);
   });
 
   it('default config has project.budget=100', () => {
-    const cfg = loadConfig('/tmp/does-not-exist-agentforge-test.yml');
+    const cfg = loadConfig(missingPath);
     assert.equal(cfg.project.budget, 100);
   });
 
   it('default config has server.port=4242', () => {
-    const cfg = loadConfig('/tmp/does-not-exist-agentforge-test.yml');
+    const cfg = loadConfig(missingPath);
     assert.equal(cfg.server.port, 4242);
   });
 
   it('default config has routing.cost_optimization=true', () => {
-    const cfg = loadConfig('/tmp/does-not-exist-agentforge-test.yml');
+    const cfg = loadConfig(missingPath);
     assert.equal(cfg.routing.cost_optimization, true);
   });
 });
@@ -73,7 +84,7 @@ server:
 `);
   });
 
-  after(() => { try { unlinkSync(tmpFile); } catch {} });
+  after(() => cleanupTmpYaml(tmpFile));
 
   it('reads project.name from YAML', () => {
     const cfg = loadConfig(tmpFile);
@@ -114,7 +125,7 @@ providers:
   after(() => {
     if (SAVED === undefined) delete process.env.AF_TEST_SECRET;
     else process.env.AF_TEST_SECRET = SAVED;
-    try { unlinkSync(tmpFile); } catch {}
+    cleanupTmpYaml(tmpFile);
   });
 
   it('substitutes ${ENV_VAR} with the environment variable value', () => {
@@ -123,13 +134,19 @@ providers:
   });
 
   it('substitutes undefined env vars with empty string (YAML null for bare empty)', () => {
-    delete process.env.AF_UNDEFINED_VAR;
-    // ${AF_UNDEFINED_VAR} → '' → YAML parses bare empty value as null
-    const f = writeTmpYaml(`project:\n  name: \${AF_UNDEFINED_VAR}\n`);
-    const cfg = loadConfig(f);
-    // yaml.load treats `name: ` as null; the substitution still happened
-    assert.ok(cfg.project.name === '' || cfg.project.name === null);
-    try { unlinkSync(f); } catch {}
+    const savedUndefined = process.env.AF_UNDEFINED_VAR;
+    try {
+      delete process.env.AF_UNDEFINED_VAR;
+      // ${AF_UNDEFINED_VAR} → '' → YAML parses bare empty value as null
+      const f = writeTmpYaml(`project:\n  name: \${AF_UNDEFINED_VAR}\n`);
+      const cfg = loadConfig(f);
+      // yaml.load treats `name: ` as null; the substitution still happened
+      assert.ok(cfg.project.name === '' || cfg.project.name === null);
+      cleanupTmpYaml(f);
+    } finally {
+      if (savedUndefined === undefined) delete process.env.AF_UNDEFINED_VAR;
+      else process.env.AF_UNDEFINED_VAR = savedUndefined;
+    }
   });
 });
 
