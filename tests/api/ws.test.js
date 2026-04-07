@@ -92,6 +92,19 @@ function waitClose(ws) {
   });
 }
 
+/** Poll until the server-side clients Set reaches the expected size. */
+function waitForClientCount(wss, n, timeout = 500) {
+  return new Promise((resolve, reject) => {
+    const interval = setInterval(() => {
+      if (wss.clients.size === n) { clearInterval(interval); clearTimeout(timer); resolve(); }
+    }, 10);
+    const timer = setTimeout(() => {
+      clearInterval(interval);
+      reject(new Error(`Timed out waiting for wss.clients.size === ${n}; got ${wss.clients.size}`));
+    }, timeout);
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Tests — event broadcast
 // ---------------------------------------------------------------------------
@@ -264,6 +277,51 @@ describe('startWebSocketServer — auth (NODE_ENV=test bypass)', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Tests — auth enforced (enabled=true, NODE_ENV != test)
+// ---------------------------------------------------------------------------
+
+describe('startWebSocketServer — auth enforced', () => {
+  let savedEnv;
+  beforeEach(() => { savedEnv = process.env.NODE_ENV; process.env.NODE_ENV = 'production'; });
+  afterEach(() => { process.env.NODE_ENV = savedEnv; });
+
+  it('closes with code 4401 when no token is provided', async () => {
+    const ctx = await makeServer([], { enabled: true, secret: 'supersecret' });
+    try {
+      const wsUrl = ctx.url; // no ?token=
+      const ws = new WebSocket(wsUrl);
+      const { code } = await waitClose(ws);
+      assert.equal(code, 4401);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it('closes with code 4401 when the wrong token is provided', async () => {
+    const ctx = await makeServer([], { enabled: true, secret: 'supersecret' });
+    try {
+      const ws = new WebSocket(`${ctx.url}?token=wrongtoken`);
+      const { code } = await waitClose(ws);
+      assert.equal(code, 4401);
+    } finally {
+      await ctx.close();
+    }
+  });
+
+  it('accepts connection when the correct token is provided', async () => {
+    const ctx = await makeServer([], { enabled: true, secret: 'supersecret' });
+    try {
+      const { ws } = await connectWithMessages(ctx.url, 'supersecret');
+      assert.equal(ws.readyState, WebSocket.OPEN);
+      ws.close();
+      await waitClose(ws);
+    } finally {
+      await ctx.close();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Tests — wss.clients tracking
 // ---------------------------------------------------------------------------
 
@@ -287,8 +345,7 @@ describe('startWebSocketServer — clients set', () => {
 
       ws.close();
       await waitClose(ws);
-      // Allow the server-side close event to fire
-      await new Promise((r) => setTimeout(r, 50));
+      await waitForClientCount(ctx.wss, 0);
       assert.equal(ctx.wss.clients.size, 0);
     } finally {
       await ctx.close();
