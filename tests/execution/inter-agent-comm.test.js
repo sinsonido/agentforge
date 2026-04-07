@@ -38,11 +38,10 @@ function makeComm() {
 describe('InterAgentComm — ask()', () => {
   let comm, taskQueue;
 
+  // Fresh comm + queue per test; ask() cleans up its own eventBus listeners
+  // on resolve/reject so no broad removeAllListeners needed.
   beforeEach(() => {
     ({ comm, taskQueue } = makeComm());
-    // Remove all task listeners set up by previous tests
-    eventBus.removeAllListeners('task.completed');
-    eventBus.removeAllListeners('task.failed');
   });
 
   it('adds a task to the queue with the supplied fields', async () => {
@@ -134,10 +133,6 @@ describe('InterAgentComm — ask()', () => {
 });
 
 describe('InterAgentComm — pendingCount()', () => {
-  beforeEach(() => {
-    eventBus.removeAllListeners('task.completed');
-    eventBus.removeAllListeners('task.failed');
-  });
 
   it('is 0 initially', () => {
     const { comm } = makeComm();
