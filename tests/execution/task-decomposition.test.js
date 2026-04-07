@@ -15,7 +15,7 @@
  *  - decompose() propagates project_id to subtasks
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { TaskDecomposition } from '../../src/execution/task-decomposition.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
@@ -25,7 +25,6 @@ import { TaskQueue } from '../../src/core/task-queue.js';
 // ---------------------------------------------------------------------------
 
 function makeDecomposer({
-  routerAction = 'execute',
   routerResult = { action: 'execute', provider: 'anthropic', model: 'claude-opus-4-6' },
   providerContent = '[{"title":"Sub 1","type":"implement","priority":"high","agent_id":"developer"}]',
 } = {}) {
@@ -95,8 +94,6 @@ describe('TaskDecomposition — _parseSubtasks()', () => {
   beforeEach(() => {
     ({ decomposer } = makeDecomposer());
   });
-
-  function beforeEach(fn) { fn(); }
 
   it('parses a plain JSON array', () => {
     const content = '[{"title":"A","type":"implement"},{"title":"B","type":"test"}]';
