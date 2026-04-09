@@ -2,107 +2,138 @@
  * @file tests/config/loader.test.js
  * @description Unit tests for src/config/loader.js
  *
- * Covers: loadConfig (missing file → defaults, valid YAML, env-var substitution),
- * buildFromConfig (models, agents, routing rules).
+ * Covers:
+ *  - loadConfig(): defaults when file missing, YAML parsing, deep-merge,
+ *    ${ENV_VAR} interpolation, unset vars → empty string
+ *  - buildFromConfig(): models registry, agent ID normalisation, agent
+ *    defaults, routing rules, empty config
  */
 
-import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { writeFileSync, rmSync } from 'node:fs';
 import { loadConfig, buildFromConfig } from '../../src/config/loader.js';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function writeTmp(name, content) {
-  const dir = join(tmpdir(), 'agentforge-config-tests');
-  mkdirSync(dir, { recursive: true });
-  const p = join(dir, name);
-  writeFileSync(p, content, 'utf-8');
-  return p;
+const TMP = '/tmp/agentforge-loader-test.yml';
+
+function writeTmp(content) {
+  writeFileSync(TMP, content, 'utf-8');
+}
+
+function cleanTmp() {
+  try { rmSync(TMP); } catch { /* already gone */ }
 }
 
 // ---------------------------------------------------------------------------
 // loadConfig
 // ---------------------------------------------------------------------------
 
-describe('loadConfig — missing file', () => {
-  it('returns default config when file does not exist', () => {
-    const cfg = loadConfig('/tmp/agentforge-does-not-exist-99999.yml');
+describe('loadConfig', () => {
+  afterEach(cleanTmp);
+
+  it('returns DEFAULT_CONFIG when the file does not exist', () => {
+    const cfg = loadConfig('/nonexistent/path/agentforge.yml');
     assert.equal(cfg.project.name, 'AgentForge Project');
     assert.equal(cfg.project.budget, 100);
-    assert.equal(cfg.routing.fallback_strategy, 'same_tier_then_downgrade');
+    assert.equal(cfg.project.currency, 'USD');
     assert.equal(cfg.server.port, 4242);
+    assert.equal(cfg.server.host, 'localhost');
+    assert.equal(cfg.routing.fallback_strategy, 'same_tier_then_downgrade');
+    assert.equal(cfg.routing.cost_optimization, true);
     assert.equal(cfg.git.enabled, false);
-  });
-});
-
-describe('loadConfig — valid YAML', () => {
-  let cfgPath;
-
-  before(() => {
-    cfgPath = writeTmp('valid.yml', [
-      'project:',
-      '  name: TestProject',
-      '  budget: 50',
-      'server:',
-      '  port: 9999',
-    ].join('\n'));
+    assert.equal(cfg.alerts.budget_warning_pct, 0.80);
+    assert.equal(cfg.alerts.budget_pause_pct, 0.95);
   });
 
-  after(() => unlinkSync(cfgPath));
-
-  it('loads project name from YAML', () => {
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.project.name, 'TestProject');
+  it('loads a valid YAML file and overrides defaults', () => {
+    writeTmp(`
+project:
+  name: My Forge
+  budget: 250
+server:
+  port: 9090
+`);
+    const cfg = loadConfig(TMP);
+    assert.equal(cfg.project.name, 'My Forge');
+    assert.equal(cfg.project.budget, 250);
+    assert.equal(cfg.server.port, 9090);
   });
 
-  it('loads project budget from YAML', () => {
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.project.budget, 50);
+  it('deep-merges: missing keys fall back to defaults', () => {
+    writeTmp(`
+project:
+  name: Partial Config
+`);
+    const cfg = loadConfig(TMP);
+    assert.equal(cfg.project.name, 'Partial Config');
+    assert.equal(cfg.project.budget, 100);        // default preserved
+    assert.equal(cfg.server.port, 4242);          // default preserved
+    assert.equal(cfg.routing.fallback_strategy, 'same_tier_then_downgrade');
   });
 
-  it('loads server port from YAML', () => {
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.server.port, 9999);
+  it('arrays in config are NOT deep-merged (overwrite)', () => {
+    writeTmp(`
+team:
+  - name: Developer
+routing:
+  rules:
+    - { type: implement, tier: 2 }
+`);
+    const cfg = loadConfig(TMP);
+    // Arrays replace, not merge
+    assert.equal(cfg.team.length, 1);
+    assert.equal(cfg.routing.rules.length, 1);
   });
 
-  it('deep-merges with defaults (git.enabled stays false)', () => {
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.git.enabled, false);
-  });
-});
-
-describe('loadConfig — env var substitution', () => {
-  let cfgPath, savedEnv;
-
-  before(() => {
-    savedEnv = process.env.AF_TEST_SECRET;
-    process.env.AF_TEST_SECRET = 'my-secret-value';
-    cfgPath = writeTmp('envvar.yml', [
-      'project:',
-      '  name: ${AF_TEST_SECRET}',
-    ].join('\n'));
+  it('resolves ${ENV_VAR} references to environment variables', () => {
+    process.env._FORGE_TEST_KEY = 'sk-abc-123';
+    writeTmp(`
+providers:
+  anthropic:
+    api_key: \${_FORGE_TEST_KEY}
+`);
+    const cfg = loadConfig(TMP);
+    assert.equal(cfg.providers.anthropic.api_key, 'sk-abc-123');
+    delete process.env._FORGE_TEST_KEY;
   });
 
-  after(() => {
-    if (savedEnv === undefined) delete process.env.AF_TEST_SECRET;
-    else process.env.AF_TEST_SECRET = savedEnv;
-    unlinkSync(cfgPath);
+  it('replaces unset ${ENV_VAR} references (YAML parses empty as null)', () => {
+    writeTmp(`
+providers:
+  test:
+    key: "\${DEFINITELY_NOT_SET_AGENTFORGE_VAR}"
+`);
+    const cfg = loadConfig(TMP);
+    // The env var is substituted to '' and the quoted YAML empty string is ''
+    assert.equal(cfg.providers.test.key, '');
   });
 
-  it('replaces ${VAR} with the environment variable value', () => {
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.project.name, 'my-secret-value');
+  it('resolves multiple env var references in the same file', () => {
+    process.env._FORGE_A = 'alice';
+    process.env._FORGE_B = 'bob';
+    writeTmp(`
+providers:
+  a:
+    user: \${_FORGE_A}
+  b:
+    user: \${_FORGE_B}
+`);
+    const cfg = loadConfig(TMP);
+    assert.equal(cfg.providers.a.user, 'alice');
+    assert.equal(cfg.providers.b.user, 'bob');
+    delete process.env._FORGE_A;
+    delete process.env._FORGE_B;
   });
 
-  it('substitutes to empty string when env var is not set', () => {
-    delete process.env.AF_TEST_SECRET;
-    const cfg = loadConfig(cfgPath);
-    assert.equal(cfg.project.name, '');
+  it('handles an empty YAML file gracefully (returns defaults)', () => {
+    writeTmp('');
+    const cfg = loadConfig(TMP);
+    assert.equal(cfg.project.name, 'AgentForge Project');
+    assert.equal(cfg.server.port, 4242);
   });
 });
 
@@ -110,101 +141,124 @@ describe('loadConfig — env var substitution', () => {
 // buildFromConfig
 // ---------------------------------------------------------------------------
 
-describe('buildFromConfig — models', () => {
-  it('builds models registry from config.models', () => {
+describe('buildFromConfig', () => {
+  it('returns empty models, agents, rules for a minimal config', () => {
+    const { models, agents, rules } = buildFromConfig({});
+    assert.deepEqual(models, {});
+    assert.deepEqual(agents, {});
+    assert.deepEqual(rules, []);
+  });
+
+  it('builds the models registry from config.models', () => {
     const cfg = {
       models: {
-        'claude-opus': { provider: 'anthropic', tier: 1, cost_per_1k_tokens: 0.015 },
-        'claude-haiku': { provider: 'anthropic', tier: 3, cost_per_1k_tokens: 0.00025 },
+        'claude-opus': { provider: 'anthropic', tier: 1, cost_per_1k_in: 0.015 },
+        'gemini-pro': { provider: 'google', tier: 2 },
       },
-      team: [],
-      routing: {},
     };
     const { models } = buildFromConfig(cfg);
-    assert.ok('claude-opus' in models);
-    assert.ok('claude-haiku' in models);
+    assert.ok(models['claude-opus'], 'claude-opus model missing');
+    assert.equal(models['claude-opus'].provider, 'anthropic');
     assert.equal(models['claude-opus'].tier, 1);
-    assert.equal(models['claude-haiku'].tier, 3);
+    assert.ok(models['gemini-pro'], 'gemini-pro model missing');
   });
 
-  it('returns empty models when config.models is absent', () => {
-    const { models } = buildFromConfig({ team: [], routing: {} });
-    assert.deepEqual(models, {});
-  });
-});
-
-describe('buildFromConfig — agents', () => {
-  const teamCfg = {
-    models: {},
-    routing: {},
-    team: [
-      {
-        name: 'Lead Developer',
-        role: 'developer',
-        model: 'claude-opus-4-6',
-        fallback_models: ['claude-haiku-4-5-20251001'],
-        require_review: true,
-        reviewer: 'senior-reviewer',
-      },
-      {
-        name: 'Tester',
-        role: 'tester',
-      },
-    ],
-  };
-
-  it('builds agent IDs by lowercasing and replacing spaces with hyphens', () => {
-    const { agents } = buildFromConfig(teamCfg);
-    assert.ok('lead-developer' in agents);
-    assert.ok('tester' in agents);
-  });
-
-  it('preserves agent role, model, and fallback_models', () => {
-    const { agents } = buildFromConfig(teamCfg);
-    assert.equal(agents['lead-developer'].role, 'developer');
-    assert.equal(agents['lead-developer'].model, 'claude-opus-4-6');
-    assert.deepEqual(agents['lead-developer'].fallback_models, ['claude-haiku-4-5-20251001']);
-  });
-
-  it('preserves require_review and reviewer fields', () => {
-    const { agents } = buildFromConfig(teamCfg);
-    assert.equal(agents['lead-developer'].require_review, true);
-    assert.equal(agents['lead-developer'].reviewer, 'senior-reviewer');
-  });
-
-  it('sets sensible defaults for optional agent fields', () => {
-    const { agents } = buildFromConfig(teamCfg);
-    assert.equal(agents.tester.model, null);
-    assert.deepEqual(agents.tester.fallback_models, []);
-    assert.equal(agents.tester.require_review, false);
-    assert.equal(agents.tester.reviewer, null);
-    assert.equal(agents.tester.allow_tier_downgrade, true);
-  });
-
-  it('returns empty agents when team is absent', () => {
-    const { agents } = buildFromConfig({ models: {}, routing: {} });
-    assert.deepEqual(agents, {});
-  });
-});
-
-describe('buildFromConfig — routing rules', () => {
-  it('extracts routing rules from config', () => {
+  it('normalises agent IDs: lowercase + spaces to dashes', () => {
     const cfg = {
-      models: {},
-      team: [],
+      team: [
+        { name: 'Senior Developer' },
+        { name: 'QA Tester' },
+        { name: 'singleword' },
+      ],
+    };
+    const { agents } = buildFromConfig(cfg);
+    assert.ok(agents['senior-developer'], 'senior-developer missing');
+    assert.ok(agents['qa-tester'], 'qa-tester missing');
+    assert.ok(agents['singleword'], 'singleword missing');
+  });
+
+  it('maps agent fields correctly from config', () => {
+    const cfg = {
+      team: [{
+        name: 'Coder',
+        role: 'implementation',
+        model: 'claude-opus',
+        fallback_models: ['gemini-pro'],
+        system_prompt: 'You are a coder.',
+        require_review: true,
+        reviewer: 'reviewer-agent',
+        max_cost_per_task: 0.50,
+        max_tokens_per_task: 8000,
+        allow_tier_downgrade: false,
+        tools: ['read_file', 'write_file'],
+      }],
+    };
+    const { agents } = buildFromConfig(cfg);
+    const agent = agents['coder'];
+    assert.equal(agent.id, 'coder');
+    assert.equal(agent.name, 'Coder');
+    assert.equal(agent.role, 'implementation');
+    assert.equal(agent.model, 'claude-opus');
+    assert.deepEqual(agent.fallback_models, ['gemini-pro']);
+    assert.equal(agent.system_prompt, 'You are a coder.');
+    assert.equal(agent.require_review, true);
+    assert.equal(agent.reviewer, 'reviewer-agent');
+    assert.equal(agent.max_cost_per_task, 0.50);
+    assert.equal(agent.max_tokens_per_task, 8000);
+    assert.equal(agent.allow_tier_downgrade, false);
+    assert.deepEqual(agent.tools, ['read_file', 'write_file']);
+  });
+
+  it('applies correct defaults for unspecified agent fields', () => {
+    const cfg = { team: [{ name: 'Minimal' }] };
+    const { agents } = buildFromConfig(cfg);
+    const agent = agents['minimal'];
+    assert.equal(agent.role, '');
+    assert.equal(agent.model, null);
+    assert.deepEqual(agent.fallback_models, []);
+    assert.equal(agent.system_prompt, '');
+    assert.equal(agent.system_prompt_file, null);
+    assert.deepEqual(agent.tools, []);
+    assert.equal(agent.require_review, false);
+    assert.equal(agent.reviewer, null);
+    assert.equal(agent.max_cost_per_task, null);
+    assert.equal(agent.max_tokens_per_task, null);
+    assert.equal(agent.allow_tier_downgrade, true);
+  });
+
+  it('returns routing rules from config.routing.rules', () => {
+    const cfg = {
       routing: {
         rules: [
-          { match: { type: 'architecture' }, model: 'claude-opus-4-6' },
+          { type: 'architecture', tier: 1 },
+          { type: 'implement', tier: 2 },
+          { type: 'test', tier: 3 },
         ],
       },
     };
     const { rules } = buildFromConfig(cfg);
-    assert.equal(rules.length, 1);
-    assert.equal(rules[0].model, 'claude-opus-4-6');
+    assert.equal(rules.length, 3);
+    assert.equal(rules[0].type, 'architecture');
+    assert.equal(rules[2].type, 'test');
   });
 
-  it('returns empty rules when routing is absent', () => {
-    const { rules } = buildFromConfig({ models: {}, team: [] });
+  it('returns empty rules when routing section is absent', () => {
+    const { rules } = buildFromConfig({ team: [] });
     assert.deepEqual(rules, []);
+  });
+
+  it('handles multiple agents without collision', () => {
+    const cfg = {
+      team: [
+        { name: 'Agent One', role: 'r1' },
+        { name: 'Agent Two', role: 'r2' },
+        { name: 'Agent Three', role: 'r3' },
+      ],
+    };
+    const { agents } = buildFromConfig(cfg);
+    assert.equal(Object.keys(agents).length, 3);
+    assert.equal(agents['agent-one'].role, 'r1');
+    assert.equal(agents['agent-two'].role, 'r2');
+    assert.equal(agents['agent-three'].role, 'r3');
   });
 });
