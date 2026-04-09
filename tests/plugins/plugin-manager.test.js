@@ -13,9 +13,9 @@
  *  - BasePlugin: registerProvider, on, emit helpers
  */
 
-import { describe, it, beforeEach } from 'node:test';
+import { describe, it, before, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -49,17 +49,20 @@ function makeForge(eventBus = makeEventBus()) {
 
 /**
  * Write a temporary ES module plugin file and return its file:// URL.
- * The factory receives forge and returns an object with { name, version, init?, destroy? }.
+ * Uses a unique per-run directory (mkdtempSync) to avoid filename collisions
+ * when multiple test processes run on the same host simultaneously.
  */
-const TMP_DIR = join(tmpdir(), 'agentforge-plugin-tests');
-mkdirSync(TMP_DIR, { recursive: true });
+const TMP_DIR = mkdtempSync(join(tmpdir(), 'agentforge-plugin-tests-'));
 
 let _fileCounter = 0;
 function writeTmpPlugin(body) {
-  const file = join(TMP_DIR, `plugin-${_fileCounter++}.mjs`);
+  const file = join(TMP_DIR, `plugin-${process.pid}-${_fileCounter++}.mjs`);
   writeFileSync(file, body, 'utf-8');
   return pathToFileURL(file).href;
 }
+
+// Clean up the temp directory after all tests complete.
+after(() => { try { rmSync(TMP_DIR, { recursive: true, force: true }); } catch { /* ignore */ } });
 
 // ---------------------------------------------------------------------------
 // PluginManager.load()
@@ -97,20 +100,24 @@ export default function() {
     assert.equal(entry.manifest.version, '0.1.0');
   });
 
-  it('calls init() on the plugin instance after instantiation', async () => {
-    let initCalled = false;
+  it('calls async init() on the plugin instance after instantiation', async () => {
+    const initFlag = `_initCalled_${_fileCounter}`;
     const url = writeTmpPlugin(`
 export default function() {
   return {
     name: 'init-test',
     version: '1.0.0',
-    async init() { globalThis._initCalled_${_fileCounter} = true; },
+    async init() { globalThis.${initFlag} = true; },
   };
 }
 `);
-    // Use a synchronous init tracker via shared state
-    let initWasCalled = false;
-    const url2 = writeTmpPlugin(`
+    await manager.load(url);
+    assert.equal(globalThis[initFlag], true);
+    delete globalThis[initFlag];
+  });
+
+  it('calls synchronous init() on the plugin instance', async () => {
+    const url = writeTmpPlugin(`
 export default function() {
   return {
     name: 'init-tracker',
@@ -120,7 +127,7 @@ export default function() {
   };
 }
 `);
-    await manager.load(url2);
+    await manager.load(url);
     const entry = manager.get('init-tracker');
     assert.equal(entry.instance._ran, true);
   });
