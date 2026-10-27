@@ -103,21 +103,21 @@ routing:
   rules:
     - match: { type: [architecture, planning] }
       tier: 1
-      prefer: claude-opus-4
+      prefer: claude-opus-5-5
     - match: { type: [implement, refactor] }
       tier: 2
-      prefer: claude-sonnet-4
+      prefer: claude-sonnet-5-5
     - match: { type: [test, script, bulk] }
       tier: 3
-      prefer: ollama/codestral:22b
+      prefer: codestral:22b
 
 team:
   - name: Architect
-    model: claude-opus-4
+    model: claude-opus-5-5
     system_prompt_file: prompts/architect.md
     tools: [file_read, ask_agent]
   - name: Developer
-    model: claude-sonnet-4
+    model: claude-sonnet-5-5
     tools: [file_read, file_write, git_commit, run_tests]
     reviewer: Architect
 ```

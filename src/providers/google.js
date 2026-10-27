@@ -80,10 +80,9 @@ export class GoogleProvider extends BaseProvider {
 
   async listModels() {
     return [
-      'gemini-2.5-pro',
-      'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-pro',
+      'gemini-4-argon',
+      'gemini-3.8-flash',
+      'gemini-3.5-flash-lite',
     ];
   }
 
@@ -91,7 +90,7 @@ export class GoogleProvider extends BaseProvider {
     if (!this.apiKey) return false;
     try {
       const client = this._getClient();
-      const model = client.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      const model = client.getGenerativeModel({ model: 'gemini-3.5-flash-lite' });
       await model.generateContent('hi');
       return true;
     } catch {

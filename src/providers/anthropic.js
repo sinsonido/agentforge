@@ -29,10 +29,9 @@ export class AnthropicProvider extends BaseProvider {
    * @param {Array} params.messages - [{ role, content }]
    * @param {Array} [params.tools]
    * @param {number} [params.max_tokens]
-   * @param {number} [params.temperature]
    * @returns {Promise<{ content, tokens_in, tokens_out, tool_calls, finish_reason }>}
    */
-  async execute({ model, messages, tools, max_tokens = 4096, temperature = 0.7 }) {
+  async execute({ model, messages, tools, max_tokens = 4096 }) {
     const client = this._getClient();
 
     // Extract system message if present
@@ -42,7 +41,6 @@ export class AnthropicProvider extends BaseProvider {
     const params = {
       model,
       max_tokens,
-      temperature,
       messages: userMessages,
     };
 
@@ -86,10 +84,9 @@ export class AnthropicProvider extends BaseProvider {
 
   async listModels() {
     return [
-      'claude-opus-4-5',
-      'claude-sonnet-4-5',
-      'claude-haiku-4-5',
-      'claude-opus-4-5-20251101',
+      'claude-opus-5-5',
+      'claude-sonnet-5-5',
+      'claude-haiku-5-5',
     ];
   }
 
@@ -98,7 +95,7 @@ export class AnthropicProvider extends BaseProvider {
     try {
       const client = this._getClient();
       await client.messages.create({
-        model: 'claude-haiku-4-5',
+        model: 'claude-haiku-5-5',
         max_tokens: 1,
         messages: [{ role: 'user', content: 'hi' }],
       });

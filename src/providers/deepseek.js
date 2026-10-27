@@ -74,7 +74,7 @@ export class DeepSeekProvider extends BaseProvider {
   }
 
   async listModels() {
-    return ['deepseek-chat', 'deepseek-reasoner'];
+    return ['deepseek-v4-pro', 'deepseek-flash'];
   }
 
   async healthCheck() {

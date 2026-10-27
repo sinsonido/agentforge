@@ -62,57 +62,60 @@ providers:
 
 # ─── MODELS ────────────────────────────────────────────
 # Model registry with tier classification and pricing.
-# Pricing is per 1M tokens (input / output).
+# Each key is the model ID sent to the provider API.
+# Pricing is USD per 1M tokens (input / output), standard tier, checked 2026-10-27.
+# Sources: platform.claude.com/docs/en/about-claude/pricing,
+# ai.google.dev/gemini-api/docs/pricing, api-docs.deepseek.com/quick_start/pricing
 
 models:
-  claude-opus-4:
+  claude-opus-5-5:
     provider: anthropic
     tier: 1
-    cost_in: 15.00
-    cost_out: 75.00
-    context: 200000
-
-  claude-sonnet-4:
-    provider: anthropic
-    tier: 2
-    cost_in: 3.00
-    cost_out: 15.00
-    context: 200000
-
-  claude-haiku-4:
-    provider: anthropic
-    tier: 3
-    cost_in: 0.25
-    cost_out: 1.25
-    context: 200000
-
-  gemini-2.5-pro:
-    provider: google
-    tier: 1
-    cost_in: 1.25
-    cost_out: 10.00
-    context: 1000000         # 1M context window
-
-  gemini-2.5-flash:
-    provider: google
-    tier: 2
-    cost_in: 0.15
-    cost_out: 0.60
+    cost_in: 4.00
+    cost_out: 20.00
     context: 1000000
 
-  deepseek-v3:
-    provider: deepseek
-    tier: 3
-    cost_in: 0.27
-    cost_out: 1.10
-    context: 128000
+  claude-sonnet-5-5:
+    provider: anthropic
+    tier: 2
+    cost_in: 2.00
+    cost_out: 10.00
+    context: 1000000
 
-  deepseek-r1:
+  claude-haiku-5-5:
+    provider: anthropic
+    tier: 3
+    cost_in: 0.10            # Prompts up to 100K tokens; $0.50 / $2.50 above
+    cost_out: 0.50
+    context: 1000000
+
+  gemini-4-argon:
+    provider: google
+    tier: 1
+    cost_in: 2.00            # Google lists $4.00 / $20.00 from 2026-12-01
+    cost_out: 10.00
+    context: 1000000
+
+  gemini-3.8-flash:
+    provider: google
+    tier: 2
+    cost_in: 0.75            # Google lists $1.50 / $7.50 from 2027-01-01
+    cost_out: 3.75
+    context: 1000000
+
+  deepseek-v4-pro:
     provider: deepseek
     tier: 2
-    cost_in: 0.55
-    cost_out: 2.19
-    context: 128000
+    cost_in: 1.32            # Peak rate (cache miss); off-peak is half
+    cost_out: 3.96
+    context: 1000000
+
+  deepseek-flash:
+    provider: deepseek
+    tier: 3
+    cost_in: 0.30            # Peak rate (cache miss); off-peak is half
+    cost_out: 1.20
+    context: 1000000
 
   codestral:22b:
     provider: ollama
@@ -126,17 +129,19 @@ models:
     tier: 3
     cost_in: 0
     cost_out: 0
-    context: 64000
+    context: 128000
 
 # ─── ROUTING ───────────────────────────────────────────
 # Rules are evaluated in order. First match wins.
 # Available matchers: type, context_tokens_gt, budget_remaining_lt
+# Every model named here or under team: must be listed under models:,
+# and its provider must be listed under providers:. Startup fails otherwise.
 
 routing:
   rules:
-    # Large context → Gemini (only 1M window model)
+    # Large context → Gemini
     - match: { context_tokens_gt: 200000 }
-      force: gemini-2.5-pro
+      force: gemini-4-argon
 
     # Low budget → local only
     - match: { budget_remaining_lt: 0.10 }
@@ -146,20 +151,20 @@ routing:
     # Strategy tasks → Tier 1
     - match: { type: [architecture, planning, review, security_audit] }
       tier: 1
-      prefer: claude-opus-4
-      fallback: [gemini-2.5-pro]
+      prefer: claude-opus-5-5
+      fallback: [gemini-4-argon]
 
     # Development tasks → Tier 2
     - match: { type: [implement, refactor, code_review, debug] }
       tier: 2
-      prefer: claude-sonnet-4
-      fallback: [gpt-4o, deepseek-r1]
+      prefer: claude-sonnet-5-5
+      fallback: [gemini-3.8-flash, deepseek-v4-pro]
 
     # Execution tasks → Tier 3 (prefer local)
     - match: { type: [test, script, bulk, migration, format] }
       tier: 3
       prefer: codestral:22b           # Local first
-      fallback: [deepseek-v3, claude-haiku-4]
+      fallback: [deepseek-flash, claude-haiku-5-5]
 
   fallback_strategy: same_tier_then_downgrade
   cost_optimization: true
@@ -170,15 +175,15 @@ routing:
 team:
   - name: Architect
     role: Lead Architect
-    model: claude-opus-4
+    model: claude-opus-5-5
     system_prompt_file: prompts/architect.md
     tools: [file_read, ask_agent]
     require_review: false
 
   - name: Developer
     role: Backend Developer
-    model: claude-sonnet-4
-    fallback_models: [gpt-4o, deepseek-r1]
+    model: claude-sonnet-5-5
+    fallback_models: [gemini-3.8-flash, deepseek-v4-pro]
     system_prompt_file: prompts/developer.md
     tools: [file_read, file_write, git_commit, run_tests, ask_agent]
     require_review: true
@@ -187,7 +192,7 @@ team:
 
   - name: Tester
     role: QA Engineer
-    model: deepseek-v3
+    model: deepseek-flash
     fallback_models: [codestral:22b]
     system_prompt_file: prompts/tester.md
     tools: [file_read, file_write, run_tests]

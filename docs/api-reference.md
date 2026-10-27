@@ -67,7 +67,7 @@ System overview: orchestrator state, task stats, quota states, agent count.
     "anthropic": { "state": "available", "tokensUsed": 12000, "tokensLimit": 400000 }
   },
   "agents": {
-    "Developer": { "agentId": "Developer", "status": "executing", "model": "claude-sonnet-4-6" }
+    "Developer": { "agentId": "Developer", "status": "executing", "model": "claude-sonnet-5-5" }
   }
 }
 ```
@@ -210,7 +210,7 @@ List all agents and their current lifecycle state.
     {
       "agentId": "Developer",
       "status": "executing",
-      "model": "claude-sonnet-4-6",
+      "model": "claude-sonnet-5-5",
       "tasksCompleted": 5,
       "tokensIn": 42000,
       "tokensOut": 18000,
@@ -230,14 +230,14 @@ Changes take effect on the next task dispatched to that agent.
 **Body**
 ```json
 {
-  "model": "claude-haiku-4-5-20251001",
+  "model": "claude-haiku-5-5",
   "systemPrompt": "You are a concise QA engineer."
 }
 ```
 
 **Response `200`**
 ```json
-{ "ok": true, "agentId": "Developer", "model": "claude-haiku-4-5-20251001" }
+{ "ok": true, "agentId": "Developer", "model": "claude-haiku-5-5" }
 ```
 
 **Response `404`** — agent not registered
@@ -293,18 +293,18 @@ Cost stats: budgets, spend by agent, spend by model, transaction log.
       "default": { "spentUSD": 3.42, "limitUSD": 50.00 }
     },
     "byAgent": {
-      "Developer": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 2.16 }
+      "Developer": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 0.48 }
     },
     "byModel": {
-      "claude-sonnet-4-6": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 2.16 }
+      "claude-sonnet-5-5": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 0.48 }
     },
     "transactions": [
       {
         "agentId": "Developer",
-        "model": "claude-sonnet-4-6",
+        "model": "claude-sonnet-5-5",
         "tokensIn": 1200,
         "tokensOut": 480,
-        "costUSD": 0.0108,
+        "costUSD": 0.0072,
         "timestamp": 1740000000000
       }
     ]
