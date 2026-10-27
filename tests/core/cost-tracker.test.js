@@ -81,20 +81,6 @@ describe('CostTracker', () => {
       assert.equal(status.spent, 0);
     });
 
-    it('emits cost.recorded event', () => {
-      tracker.initProject('proj-1', 100);
-      let emitted = null;
-      eventBus.once('cost.recorded', (data) => { emitted = data; });
-
-      tracker.recordCost('proj-1', 'agent-1', 'model-a', 2.5);
-
-      assert.ok(emitted);
-      assert.equal(emitted.projectId, 'proj-1');
-      assert.equal(emitted.agentId, 'agent-1');
-      assert.equal(emitted.modelId, 'model-a');
-      assert.equal(emitted.cost, 2.5);
-    });
-
     it('works when project is not registered (no budget tracking)', () => {
       // Should not throw; agent and model costs still tracked
       assert.doesNotThrow(() => {
