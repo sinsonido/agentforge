@@ -62,7 +62,7 @@ describe('TaskQueue', () => {
 
     it('emits task.queued event on add', () => {
       let emittedTask = null;
-      const handler = (t) => { emittedTask = t; };
+      const handler = ({ task: t }) => { emittedTask = t; };
       eventBus.once('task.queued', handler);
 
       const task = q.add({ title: 'Event test task' });
