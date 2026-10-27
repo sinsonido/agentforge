@@ -11,7 +11,8 @@ permissions: read-all
 jobs:
   e2e:
     name: E2E (Playwright)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
     permissions:
       contents: read
 
@@ -31,8 +32,25 @@ jobs:
       - name: Install UI dependencies
         run: npm run ui:install
 
+      - name: Read Playwright version
+        id: playwright
+        run: echo "version=$(npx playwright --version | awk '{print $2}')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium
+
+      - name: Install Playwright system dependencies
+        timeout-minutes: 5
+        run: npx playwright install-deps chromium
+
       - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        timeout-minutes: 5
+        run: npx playwright install chromium
 
       - name: Build UI
         run: npm run ui:build
