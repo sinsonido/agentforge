@@ -9,6 +9,15 @@ issue or task → isolated worktree → coding harness runs → pull request
   → CI watched → fix round if red → operator approves → merge → cleanup
 ```
 
+## Foundation: poteto-mode
+
+How AgentForge works a task is inherited from poteto-mode, the methodology in [pstack](https://github.com/cursor/plugins) (MIT, Lauren Tan): playbooks, principles and gates. The two split the work this way:
+
+- Inside the worktree, the coding harness runs with pstack loaded at a pinned version and follows a poteto-mode playbook (bug fix, feature, refactoring, investigation and so on).
+- Around it, AgentForge enforces as code what poteto-mode states as text. A task's state is its playbook step, and a step closes only on evidence. Merge needs a verification verdict at the exact head SHA. The Autonomy policy decides what proceeds and what waits for the operator. Every task keeps a decision trail.
+
+Playbooks are read from pstack as data, not rewritten in code. This follows poteto-mode's own rule, Encode Lessons in Structure: text an agent can skip becomes a check it cannot.
+
 Tracking lives on GitHub. Each version is a milestone, each issue is one PR, and the [AgentForge Roadmap project](https://github.com/users/sinsonido/projects/4) shows the board.
 
 ## Why the direction changed
@@ -33,11 +42,11 @@ Delete the unwired modules and the duplicate vanilla UI. Make the task queue sur
 
 ### v0.9.0. A real coding agent
 
-A spike chooses the executor with measurements: the Agent SDK or `claude -p --output-format stream-json`. Then come task model v2, a worktree per task, the executor with streamed events, a PR on success, and a live task view.
+A spike measures two things: which executor to use (the Agent SDK or `claude -p --output-format stream-json`), and whether poteto-mode completes a playbook headless. If it cannot, the direction is reconsidered here. Then come task model v2 with a playbook and step, playbook steps as a state machine that advances on evidence, a worktree per task, the executor with streamed events, a decision trail, a PR on success, and a live task view.
 
-### v0.10.0. Closed loop
+### v0.10.0. Gates
 
-GitHub issues come in as tasks, idempotent per issue. This version also adds CI watch with fix rounds, an approval gate before merge, and a budget per task and per repo.
+poteto-mode's gates enforced as code. GitHub issues come in as tasks, idempotent per issue, with the playbook chosen by label. Babysit watches CI and runs fix rounds. Merge needs a verification verdict at the exact head SHA (Shipping). The Autonomy policy is the approval gate. Budgets cover build and verification separately.
 
 ### v0.11.0. Phone first
 
@@ -45,7 +54,7 @@ An installable PWA, push notifications, one-tap approve, reject and retry, and a
 
 ### v1.0.0. Stable
 
-Subscription usage windows, a versioned config schema, and a getting-started guide on a real repo.
+Subscription usage windows, a versioned config schema, pstack pinned and upgraded behind a compatibility check, and a getting-started guide on a real repo.
 
 ### Later
 
@@ -66,3 +75,4 @@ v0.1 to v0.7 delivered the queue, router, quota and cost tracking, the provider 
 3. Subtract before adding.
 4. Config-driven. Anything an operator would tune lives in `agentforge.yml`.
 5. Intake is idempotent. The same issue never yields two tasks or two PRs.
+6. When poteto-mode states a rule that code can check, AgentForge checks it.
