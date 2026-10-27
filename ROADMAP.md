@@ -36,17 +36,19 @@ Multi-user accounts, RBAC and teams are out of scope.
 
 The repo says what the code does, CI is green and trustworthy, dependencies are safe, and releases are automated. This covers the retroactive v0.7.0 release, the changelog, release-please, the queued-task and duplicate cost-event bugs, E2E and Node 24 in CI, the npm audit findings, test-PR triage, model IDs and prices, and docs that match the code.
 
-### v0.8.0. Subtract
+### v0.8.0. Self-hosting MVP
 
-Delete the unwired modules and the duplicate vanilla UI. Make the task queue survive restarts.
+The first goal is that AgentForge develops itself. An issue on this repository labelled `agentforge` becomes exactly one task. A coding harness with pstack loaded works it in an isolated worktree, following a poteto-mode playbook, and a PR is opened. The operator still merges by hand.
 
-### v0.9.0. A real coding agent
+It starts with a spike that measures two things: which executor to use (the Agent SDK or `claude -p --output-format stream-json`), and whether poteto-mode completes a playbook headless. If it cannot, the direction is reconsidered here. Then come a restart-safe queue, task model v2 with a playbook and step, a worktree per task, the executor, the final evidence gate, a PR on success, idempotent intake from issues, and a runner that never runs from the tree it edits.
 
-A spike measures two things: which executor to use (the Agent SDK or `claude -p --output-format stream-json`), and whether poteto-mode completes a playbook headless. If it cannot, the direction is reconsidered here. Then come task model v2 with a playbook and step, playbook steps as a state machine that advances on evidence, a worktree per task, the executor with streamed events, a decision trail, a PR on success, and a live task view.
+### v0.9.0. Subtract and observe
+
+Delete the unwired modules and the duplicate vanilla UI. Then make task work visible with a live transcript and a decision trail per task.
 
 ### v0.10.0. Gates
 
-poteto-mode's gates enforced as code. GitHub issues come in as tasks, idempotent per issue, with the playbook chosen by label. Babysit watches CI and runs fix rounds. Merge needs a verification verdict at the exact head SHA (Shipping). The Autonomy policy is the approval gate. Budgets cover build and verification separately.
+poteto-mode's gates enforced as code. Babysit watches CI and runs fix rounds. Merge needs a verification verdict at the exact head SHA (Shipping). The Autonomy policy is the approval gate. Budgets cover build and verification separately.
 
 ### v0.11.0. Phone first
 
