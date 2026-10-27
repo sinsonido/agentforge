@@ -37,7 +37,7 @@ export class TaskQueue {
       model_used: null,
     };
     this._tasks.set(task.id, task);
-    eventBus.emit('task.queued', task);
+    eventBus.emit('task.queued', { task });
     return task;
   }
 
