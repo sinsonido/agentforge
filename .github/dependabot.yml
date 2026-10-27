@@ -12,6 +12,18 @@ updates:
       production-dependencies:
         dependency-type: production
 
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      ui-dev-dependencies:
+        dependency-type: development
+      ui-production-dependencies:
+        dependency-type: production
+
   - package-ecosystem: github-actions
     directory: /
     schedule:
