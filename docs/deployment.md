@@ -2,11 +2,21 @@
 
 ---
 
-## Docker (recommended)
+## Docker
 
-AgentForge ships with a multi-stage Dockerfile and a docker-compose setup.
+AgentForge ships with a multi-stage Dockerfile (Node 24 Alpine, non-root `node` user) and a `docker-compose.yml`.
 
 ### Quick start
+
+The image's default command is `node src/cli.js start`, which binds `127.0.0.1` inside the container. The host cannot reach that address through the published port, so override the command with `--host 0.0.0.0`. Create `docker-compose.override.yml` next to `docker-compose.yml`. Docker Compose reads the override file automatically:
+
+```yaml
+services:
+  agentforge:
+    command: ["node", "src/cli.js", "start", "--host", "0.0.0.0"]
+```
+
+Then start the stack:
 
 ```bash
 git clone https://github.com/sinsonido/agentforge.git
@@ -15,10 +25,11 @@ cd agentforge
 # Copy and edit config
 cp agentforge.example.yml agentforge.yml
 
-# Start (with optional Ollama for local models)
-docker-compose --profile ollama up
-# or without Ollama:
-docker-compose up
+# Start AgentForge
+docker compose up -d
+
+# Optional: also start Ollama for local models
+docker compose --profile local up -d
 ```
 
 The server is available at `http://localhost:4242`.
@@ -30,15 +41,15 @@ Pass API keys via environment:
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... \
 GOOGLE_AI_KEY=AIza... \
-docker-compose up
+docker compose up -d
 ```
 
-Or create a `.env` file (docker-compose loads it automatically):
+Or create a `.env` file. The compose file loads it if it exists:
 
 ```
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_AI_KEY=AIza...
-GITHUB_TOKEN=ghp_...
+AGENTFORGE_SECRET=change-me
 ```
 
 ### docker-compose.yml overview
@@ -51,20 +62,24 @@ services:
       - "4242:4242"
     volumes:
       - ./agentforge.yml:/app/agentforge.yml:ro
-      - agentforge-data:/app/data        # SQLite persistence
-    env_file: .env
+      - ./.agentforge:/app/.agentforge      # SQLite persistence
+    env_file:
+      - path: .env
+        required: false
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4242/api/status"]
 
   ollama:
     image: ollama/ollama:latest
-    profiles: [ollama]                   # Only started with --profile ollama
-    volumes:
-      - ollama-models:/root/.ollama
+    profiles: [local]                       # Only started with --profile local
     ports:
       - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
 ```
 
-When using the `ollama` profile, set:
+When you use the `local` profile, set:
 
 ```yaml
 providers:
@@ -84,17 +99,16 @@ cd agentforge
 npm ci --omit=dev
 ```
 
+To serve the React dashboard, also run `npm run ui:install` and `npm run ui:build`. Without `ui/dist/`, the server serves the vanilla UI in `src/ui/`.
+
 ### 2. Configure
 
 ```bash
 cp agentforge.example.yml agentforge.yml
 # Edit agentforge.yml
-
-# Bind to all interfaces
-# server:
-#   host: 0.0.0.0
-#   port: 4242
 ```
+
+The `start` command ignores `server.host` and `server.port`. Set the bind address with `--host` and `--port` in the service command below.
 
 ### 3. Environment
 
@@ -104,7 +118,7 @@ Store secrets in the environment, not in agentforge.yml:
 # /etc/agentforge.env (read by systemd, not committed to git)
 ANTHROPIC_API_KEY=sk-ant-...
 GOOGLE_AI_KEY=AIza...
-GITHUB_TOKEN=ghp_...
+AGENTFORGE_SECRET=change-me
 ```
 
 ### 4. Systemd service
@@ -120,7 +134,7 @@ Type=simple
 User=agentforge
 WorkingDirectory=/opt/agentforge
 EnvironmentFile=/etc/agentforge.env
-ExecStart=/usr/bin/node src/cli.js start
+ExecStart=/usr/bin/node src/cli.js start --host 127.0.0.1 --port 4242
 Restart=on-failure
 RestartSec=10
 
@@ -136,7 +150,7 @@ journalctl -u agentforge -f
 
 ### 5. Reverse proxy (nginx)
 
-Place AgentForge behind nginx to handle TLS and authentication:
+Place AgentForge behind nginx to handle TLS. Turn on `server.auth` as well, because nginx in this example passes every request through:
 
 ```nginx
 server {
@@ -173,28 +187,30 @@ server {
 
 ## Data persistence
 
-AgentForge stores task history, cost logs, and agent metrics in a SQLite database
-(`better-sqlite3`, WAL mode) at:
+AgentForge stores executed tasks, cost records, events, and agent activity in a
+SQLite database (`better-sqlite3`, WAL mode) at:
 
-- Default: `./agentforge.db` (relative to `agentforge.yml`)
-- Docker: `/app/data/agentforge.db` (bind-mounted volume)
+- Default: `.agentforge/data.db`, relative to the working directory. Change it with `database.path`.
+- Docker: `/app/.agentforge/data.db`, bind-mounted from `./.agentforge` on the host.
+
+The task queue and the budget spend live in memory. A restart drops queued tasks and resets spend to zero. The database keeps the history, and `GET /api/tasks` still lists it.
 
 ### Backup
 
 ```bash
-# Hot backup (WAL mode — no lock required)
-sqlite3 agentforge.db ".backup agentforge-backup-$(date +%Y%m%d).db"
+# Hot backup with the sqlite3 CLI
+sqlite3 .agentforge/data.db ".backup agentforge-backup-$(date +%Y%m%d).db"
 
-# Or just copy the file when the server is stopped
-cp agentforge.db agentforge-backup.db
+# Or copy the file when the server is stopped
+cp .agentforge/data.db agentforge-backup.db
 ```
 
 ---
 
 ## Cloudflare Tunnel (quick public access)
 
-For temporary public exposure — demos, webhook testing, mobile access — without
-configuring a reverse proxy or opening firewall ports:
+Use a quick tunnel for temporary public access, such as a demo or access from a phone, without a reverse proxy or open firewall ports.
+The tunnel exposes the whole API to the internet, and auth is off by default. Turn on `server.auth` first.
 
 ```bash
 bash scripts/start.sh --tunnel
@@ -235,26 +251,22 @@ TUNNEL_URL=$(bash scripts/start.sh --tunnel)
 
 ### API exposure
 
-By default the server binds to `127.0.0.1` only. Override with `--host`:
+By default the server binds to `127.0.0.1` only. Override with `--host`.
+The `start` command ignores `server.host` in `agentforge.yml`.
 
 ```bash
 # Default — localhost only (recommended)
-agentforge start
+node src/cli.js start
 
-# Behind a reverse proxy — listen on all interfaces
-agentforge start --host 0.0.0.0
-
-# Or via agentforge.yml
-# server:
-#   host: 0.0.0.0
-#   port: 4242
+# Listen on all interfaces
+node src/cli.js start --host 0.0.0.0
 ```
 
 When exposing to a network:
 
-1. Bind to `0.0.0.0` only behind a reverse proxy.
-2. Add HTTP basic auth or an API token header in nginx.
-3. Restrict `/api/control/start` and `/api/control/stop` to trusted origins.
+1. Turn on `server.auth` with a long random secret. See [Configuration Reference → server](configuration.md#server).
+2. Put TLS in front, with nginx or a tunnel.
+3. Remember that `GET /api/status` stays open without a token, for health checks.
 
 ### HTTP security headers
 
@@ -281,13 +293,7 @@ when the limit is exceeded.
 
 ### GitHub token
 
-The GitHub integration needs a PAT with `repo` scope (classic) or a GitHub App
-token. Grant only the minimum scopes required:
-
-- `repo` (branch creation, PR creation)
-- `read:org` (if using org repos)
-
-Revoke tokens if they are no longer needed.
+AgentForge needs no GitHub token. The git integration in `src/git/` is present but not wired.
 
 ### Docker non-root
 
@@ -304,12 +310,11 @@ git pull origin master
 npm ci --omit=dev
 
 # Docker
-docker-compose pull
-docker-compose up --build -d
+git pull origin master
+docker compose up --build -d
 ```
 
-The SQLite schema is backward-compatible across patch versions.
-Major version upgrades will document any migration steps in the release notes.
+There is no migration system. On startup, `AgentForgeDB` creates missing tables with `CREATE TABLE IF NOT EXISTS` and never alters existing ones.
 
 ---
 
@@ -319,11 +324,13 @@ Major version upgrades will document any migration steps in the release notes.
 # REST — system status
 curl http://localhost:4242/api/status
 
-# Process — Node.js health (for container orchestrators)
-# docker-compose.yml already defines:
+# Container — the Dockerfile and docker-compose.yml already define:
 #   healthcheck:
-#     test: ["CMD", "curl", "-f", "http://localhost:4242/api/status"]
+#     test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4242/api/status"]
 #     interval: 30s
 #     timeout: 10s
+#     start_period: 15s
 #     retries: 3
 ```
+
+`GET /api/status` needs no token, even with `server.auth` on. The container health check runs inside the container, so it passes even when the server binds `127.0.0.1` and the host cannot reach it.

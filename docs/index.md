@@ -12,7 +12,7 @@ Multi-agent orchestration platform with cost control, quota management, and inte
 | [Configuration Reference](configuration.md) | Every field in `agentforge.yml`, with defaults and examples |
 | [Provider Setup](providers.md) | API keys, endpoints, and quota settings for each provider |
 | [API Reference](api-reference.md) | REST endpoints and WebSocket event catalogue |
-| [Plugin System](plugins.md) | Custom providers, tools, and routing rules |
+| [Plugin System](plugins.md) | Status of the unwired plugin code |
 | [Deployment](deployment.md) | Docker, production hardening, environment variables |
 | [Architecture](architecture.md) | System design, data model, component internals |
 
@@ -21,21 +21,31 @@ Multi-agent orchestration platform with cost control, quota management, and inte
 ## What AgentForge Does
 
 ```
-You define:       projects, agent teams, budgets, routing rules
-Orchestrator:     decides which model, when, how much
-Agents execute:   code, reviews, tests, commits
-System manages:   quotas, costs, git branches, auto-PRs
+You define:       providers, models, agents, budget, routing rules
+Router:           picks a model for each task
+Provider:         answers one prompt per task with text
+System records:   tokens, cost, quota usage, events
 ```
+
+AgentForge is being reoriented toward a control panel for coding agents.
+See [ROADMAP.md](../ROADMAP.md) and the
+[AgentForge Roadmap project](https://github.com/users/sinsonido/projects/4).
 
 ### Key features
 
 - **Deterministic routing** — rules in YAML, not prompts. First match wins.
-- **Cost budgets** — per-project USD limits. Auto-pause when budget runs out.
-- **Quota management** — sliding-window rate limiter per provider. Auto-pause/resume.
-- **Fallback chains** — quota exhausted? Try next model in tier. All tiers exhausted? Local Ollama.
-- **Git integration** — agents commit to branches, open PRs, wait for review before merge.
-- **Web dashboard** — live Kanban, quota bars, cost charts, agent status.
-- **Plugin system** — add providers, tools, or routing rules without forking.
+- **Cost budgets** — per-project USD limit. Queued tasks pause at 95% of the budget.
+- **Quota management** — sliding-window rate limiter per provider. Tasks wait while no model is available and return to the queue on `quota.reset`.
+- **Fallback chains** — if a model is unavailable, the router tries its fallbacks, then the cheapest model in the tier, then lower tiers.
+- **Web dashboard** — Kanban, quota bars, cost charts, agent list.
+
+### Not wired today
+
+Agents have no tools: they cannot read or write files, run commands, or commit.
+The git integration (`src/git/`), the plugin system (`src/plugins/`), and the
+inter-agent, parallel, review, and decomposition modules in `src/execution/` exist
+in code, but nothing starts them. They are scheduled for removal in v0.9 (see
+[#190](https://github.com/sinsonido/agentforge/issues/190)).
 
 ---
 
@@ -44,6 +54,5 @@ System manages:   quotas, costs, git branches, auto-PRs
 ```
 Getting started fast?  →  getting-started.md
 Configuring providers? →  providers.md
-Building a plugin?     →  plugins.md
 Understanding internals? → architecture.md
 ```

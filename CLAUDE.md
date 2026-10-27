@@ -10,39 +10,58 @@ management, and SQLite persistence. Node.js ES modules only (no transpilation, *
 
 ## Architecture
 
+What runs today: a task enters the queue, the router picks a model, the provider
+makes one call, and the result text is stored. There is no tool use: `_resolveTools()`
+in `orchestrator.js` returns `[]`, so agents never edit files, run commands, or use git.
+See `ROADMAP.md` for the reorientation.
+
+`src/` and `ui/` are siblings at the repository root. Modules marked
+**not wired** exist in code, but nothing in `createAgentForge()` or the CLI imports them.
+They are scheduled for removal in v0.9 (see #190).
+
 ```
-src/
-  cli.js                   # Commander.js CLI — entry point
-  index.js                 # createAgentForge() — boots all subsystems
-  config/loader.js         # Loads agentforge.yml, resolves ${ENV_VAR} refs
-  core/
-    event-bus.js           # EventEmitter singleton (import as default)
-    task-queue.js          # Priority queue with status tracking
-    orchestrator.js        # Main tick loop — consumes queue, calls providers
-    quota-tracker.js       # Sliding-window rate limiter (QuotaManager)
-    cost-tracker.js        # Budget enforcement (CostTracker)
-    agent-lifecycle.js     # State machine AgentLifecycle + AgentPool
-    dependency-graph.js    # Task DAG with topological sort
-  execution/
-    context-builder.js     # Assembles provider payloads from tasks
-    output-collector.js    # Parses and normalises provider responses
-  providers/
-    interface.js           # BaseProvider abstract class + ProviderRegistry
-    anthropic.js / google.js / deepseek.js / openrouter.js
-  routing/router.js        # Model selection: tier rules → fallback chain
-  git/                     # GitManager, BranchStrategy, AutoPR, ReviewGate, GitHub API
-  persistence/db.js        # AgentForgeDB — better-sqlite3 (WAL mode)
-  api/server.js            # Express REST + WebSocket (port 4242)
-  ui/                      # Vanilla JS dashboard (fallback if ui/dist absent)
-ui/                        # React 19 SPA (Vite 6, Tailwind v4, shadcn/ui new-york)
-  src/
-    types/api.ts           # Shared types: Task, AgentStatus, CostData, etc.
-    lib/api.ts             # Typed fetch client against /api/*
-    lib/ws.ts              # WebSocketManager (wss:// auto-detection)
-    contexts/WebSocketContext.tsx
-    views/                 # DashboardView KanbanView AgentsView ProvidersView CostsView
-    components/{dashboard,kanban,agents,providers,costs,layout,ui}/
-tests/                     # Mirrors src/ structure — Node.js built-in runner
+agentforge/
+├── src/
+│   ├── cli.js                   # Commander.js CLI — entry point
+│   ├── index.js                 # createAgentForge() — boots all subsystems
+│   ├── config/loader.js         # Loads agentforge.yml, resolves ${ENV_VAR} refs
+│   ├── core/
+│   │   ├── event-bus.js         # EventEmitter singleton (import as default)
+│   │   ├── task-queue.js        # In-memory priority queue, honours depends_on
+│   │   ├── orchestrator.js      # Main tick loop — consumes queue, calls providers
+│   │   ├── quota-tracker.js     # Sliding-window rate limiter (QuotaManager)
+│   │   ├── cost-tracker.js      # Budget enforcement (CostTracker, created by Orchestrator)
+│   │   ├── agent-lifecycle.js   # AgentLifecycle + AgentPool (agents registered, transitions never driven)
+│   │   └── dependency-graph.js  # Task DAG with topological sort (tested, not wired)
+│   ├── execution/
+│   │   ├── context-builder.js   # Assembles provider messages from tasks
+│   │   ├── output-collector.js  # Parses and normalises provider responses
+│   │   ├── inter-agent-comm.js  # not wired
+│   │   ├── parallel-execution.js # not wired
+│   │   ├── review-workflow.js   # not wired
+│   │   └── task-decomposition.js # not wired
+│   ├── providers/
+│   │   ├── interface.js         # BaseProvider, OllamaProvider, ProviderRegistry
+│   │   └── anthropic.js / google.js / deepseek.js / openrouter.js
+│   ├── routing/router.js        # Model selection: rules → tier → fallback chain
+│   ├── git/                     # not wired: GitManager, BranchStrategy, AutoCommit, AutoPR, ReviewGate, GitHubIntegration
+│   ├── plugins/                 # not wired: PluginManager is never instantiated
+│   ├── persistence/db.js        # AgentForgeDB — better-sqlite3 (WAL mode)
+│   ├── auth/auth.js             # Optional Bearer-token middleware (server.auth)
+│   ├── api/server.js            # Express REST API (port 4242)
+│   ├── api/ws.js                # WebSocket server on /ws
+│   └── ui/                      # Vanilla JS dashboard (served only if ui/dist is absent)
+├── ui/                          # React 19 SPA (Vite 6, Tailwind v4, shadcn/ui new-york)
+│   └── src/
+│       ├── index.css            # Tailwind v4 entry and @theme tokens
+│       ├── types/api.ts         # Shared types: Task, AgentStatus, CostData, etc.
+│       ├── lib/api.ts           # Typed fetch client against /api/*
+│       ├── lib/ws.ts            # WebSocketManager (wss:// auto-detection)
+│       ├── contexts/            # AuthContext, WebSocketContext
+│       ├── hooks/               # useApi, useWebSocket
+│       ├── views/               # Dashboard, Kanban, Agents, Providers, Costs, Login
+│       └── components/{dashboard,kanban,agents,providers,costs,layout,ui}/
+└── tests/                       # Node.js built-in runner (core, execution, routing, persistence, api)
 ```
 
 ### `createAgentForge()` returns
@@ -61,17 +80,22 @@ tests/                     # Mirrors src/ structure — Node.js built-in runner
 { content, tokens_in, tokens_out, tool_calls, finish_reason }
 ```
 
-**EventBus events** (use `eventBus.emit / .on / .once`):
-```
-task.queued | task.executing | task.completed | task.failed
-agent.assigned | agent.executing | agent.completed | agent.failed | agent.paused
-quota.exhausted | quota.resumed
-budget.warning | budget.pause
-cost.recorded   → { projectId, agentId, model, tokensIn, tokensOut, cost }
-git.*
-```
+Providers receive `tools` as `undefined` or `[]` today, so `tool_calls` is always empty in practice.
 
-**AgentLifecycle states:**
+**EventBus events emitted by wired code** (use `eventBus.emit / .on / .once`):
+```
+task.queued | task.executing | task.completed | task.failed   → { task, ... }
+task.status_changed | agent.config_updated     (from the REST API)
+agent.paused | agent.resumed                   (from the orchestrator on quota events)
+quota.throttled | quota.exhausted | quota.reset
+budget.warning | budget.exceeded               → { projectId, spent, budget, spent_pct }
+cost.recorded    → { projectId, agentId, model, tokensIn, tokensOut, cost }  (Orchestrator only)
+review.approved | review.rejected              (from the REST API; nothing listens)
+```
+`git.*` and `review.pending` come only from the unwired `src/git/` modules.
+
+**AgentLifecycle states** (defined in `agent-lifecycle.js`; the orchestrator never calls
+the transitions, so registered agents stay `idle`):
 ```
 idle → assigned → executing → reviewing → completed → idle
                             ↘ failed → idle
@@ -127,8 +151,9 @@ node --test --test-reporter=spec          # verbose output
 node --test --experimental-test-coverage  # coverage report
 
 # Backend
-node src/cli.js start                     # port 4242 (reads agentforge.yml)
-node src/cli.js start --port 3000
+node src/cli.js start                     # 127.0.0.1:4242 (reads agentforge.yml)
+node src/cli.js start --port 3000 --host 0.0.0.0
+# --port and --host always win: server.port and server.host in the YAML are ignored by `start`
 
 # React frontend (two-terminal dev)
 npm run ui:install     # first time only
@@ -139,7 +164,9 @@ npm run ui:build       # → ui/dist/ (Express auto-detects and serves it)
 
 # Docker
 docker build -t agentforge .
-docker run -p 4242:4242 -v $(pwd)/agentforge.yml:/app/agentforge.yml agentforge
+docker run -p 4242:4242 -v $(pwd)/agentforge.yml:/app/agentforge.yml agentforge \
+  node src/cli.js start --host 0.0.0.0
+# The image's default CMD binds 127.0.0.1 inside the container, which the host cannot reach.
 ```
 
 ---
@@ -148,11 +175,11 @@ docker run -p 4242:4242 -v $(pwd)/agentforge.yml:/app/agentforge.yml agentforge
 
 - **ES modules only** — `import/export`, never `require()`.
 - **No external test framework** — `node:test` + `node:assert/strict`.
-- **One file per provider** — implement `BaseProvider`, register in `ProviderRegistry`.
+- **One file per provider** — implement `BaseProvider`, register it in `createAgentForge()` (`src/index.js`).
 - **Events over direct calls** — subsystems communicate via `eventBus`, not imports.
 - **DB through `AgentForgeDB`** — never query SQLite directly in other modules.
 - **React: `@/` imports** — alias points to `ui/src/`. Never use relative paths crossing feature boundaries.
-- **Tailwind v4** — config is in `ui/src/app.css` (`@theme`), not `tailwind.config.*`.
+- **Tailwind v4** — config is in `ui/src/index.css` (`@theme`), not `tailwind.config.*`.
 - **shadcn components** — run `npx shadcn@latest add <name>` from the `ui/` directory.
 
 ---
