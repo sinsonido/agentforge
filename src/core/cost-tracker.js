@@ -52,8 +52,6 @@ export class CostTracker {
     if (modelId) {
       this.modelCosts.set(modelId, (this.modelCosts.get(modelId) || 0) + cost);
     }
-
-    eventBus.emit('cost.recorded', { projectId, agentId, modelId, cost });
   }
 
   /**
