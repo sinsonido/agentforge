@@ -153,48 +153,48 @@ models:
 
 | Tier | Purpose | Typical models |
 |---|---|---|
-| 1 | Architecture, planning, security audits | Opus, Gemini Pro |
-| 2 | Implementation, code review, debugging | Sonnet, GPT-4o, DeepSeek-R1 |
-| 3 | Tests, scripts, bulk tasks | Haiku, DeepSeek-V3, local Ollama |
+| 1 | Architecture, planning, security audits | Opus, Gemini 4 Argon |
+| 2 | Implementation, code review, debugging | Sonnet, Gemini Flash, DeepSeek V4 Pro |
+| 3 | Tests, scripts, bulk tasks | Haiku, DeepSeek Flash, local Ollama |
 
 **Example:**
 
 ```yaml
 models:
-  claude-opus-4-6:
+  claude-opus-5-5:
     provider: anthropic
     tier: 1
-    cost_in: 15.00
-    cost_out: 75.00
-    context: 200000
+    cost_in: 4.00
+    cost_out: 20.00
+    context: 1000000
 
-  claude-sonnet-4-6:
+  claude-sonnet-5-5:
     provider: anthropic
     tier: 2
-    cost_in: 3.00
-    cost_out: 15.00
-    context: 200000
-
-  claude-haiku-4-5-20251001:
-    provider: anthropic
-    tier: 3
-    cost_in: 0.25
-    cost_out: 1.25
-    context: 200000
-
-  gemini-2.5-pro:
-    provider: google
-    tier: 1
-    cost_in: 1.25
+    cost_in: 2.00
     cost_out: 10.00
     context: 1000000
 
-  deepseek-v3:
+  claude-haiku-5-5:
+    provider: anthropic
+    tier: 3
+    cost_in: 0.10
+    cost_out: 0.50
+    context: 1000000
+
+  gemini-4-argon:
+    provider: google
+    tier: 1
+    cost_in: 2.00
+    cost_out: 10.00
+    context: 1000000
+
+  deepseek-flash:
     provider: deepseek
     tier: 3
-    cost_in: 0.27
-    cost_out: 1.10
-    context: 128000
+    cost_in: 0.30
+    cost_out: 1.20
+    context: 1000000
 
   codestral:22b:          # Ollama local model
     provider: ollama
@@ -246,7 +246,7 @@ routing:
   rules:
     # Large contexts need Gemini's 1M window
     - match: { context_tokens_gt: 200000 }
-      force: gemini-2.5-pro
+      force: gemini-4-argon
 
     # When nearly out of budget, use free local models only
     - match: { budget_remaining_lt: 0.10 }
@@ -256,20 +256,20 @@ routing:
     # Strategy tasks → Tier 1
     - match: { type: [architecture, planning, review, security_audit] }
       tier: 1
-      prefer: claude-opus-4-6
-      fallback: [gemini-2.5-pro]
+      prefer: claude-opus-5-5
+      fallback: [gemini-4-argon]
 
     # Development tasks → Tier 2
     - match: { type: [implement, refactor, code_review, debug] }
       tier: 2
-      prefer: claude-sonnet-4-6
-      fallback: [deepseek-r1]
+      prefer: claude-sonnet-5-5
+      fallback: [deepseek-v4-pro]
 
     # Execution tasks → Tier 3 (prefer local/cheap)
     - match: { type: [test, script, bulk, migration, format] }
       tier: 3
       prefer: codestral:22b
-      fallback: [deepseek-v3, claude-haiku-4-5-20251001]
+      fallback: [deepseek-flash, claude-haiku-5-5]
 
   fallback_strategy: same_tier_then_downgrade
   cost_optimization: true

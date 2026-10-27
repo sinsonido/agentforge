@@ -151,14 +151,14 @@ The real power comes from a multi-agent team. Edit `agentforge.yml`:
 team:
   - name: Architect
     role: Lead Architect
-    model: claude-opus-4-6           # T1: strategic thinking
+    model: claude-opus-5-5           # T1: strategic thinking
     tools: [file_read, ask_agent]
     require_review: false
 
   - name: Developer
     role: Backend Developer
-    model: claude-sonnet-4-6         # T2: implementation
-    fallback_models: [deepseek-r1]
+    model: claude-sonnet-5-5         # T2: implementation
+    fallback_models: [deepseek-v4-pro]
     tools: [file_read, file_write, git_commit, run_tests, ask_agent]
     require_review: true
     reviewer: Architect              # All Developer output reviewed by Architect
@@ -166,7 +166,7 @@ team:
 
   - name: Tester
     role: QA Engineer
-    model: deepseek-v3               # T3: cheaper model for test writing
+    model: deepseek-flash            # T3: cheaper model for test writing
     fallback_models: [codestral:22b] # Local fallback
     tools: [file_read, file_write, run_tests]
     allow_tier_downgrade: true

@@ -32,7 +32,7 @@ export class OpenRouterProvider extends BaseProvider {
   /**
    * Execute a model call through OpenRouter.
    * @param {Object} params
-   * @param {string} params.model - Full model ID e.g. 'anthropic/claude-opus-4'
+   * @param {string} params.model - Full model ID e.g. 'anthropic/claude-opus-5.5'
    * @param {Array} params.messages
    * @param {Array} [params.tools]
    * @param {number} [params.max_tokens]
@@ -83,11 +83,12 @@ export class OpenRouterProvider extends BaseProvider {
   async listModels() {
     // Curated list of popular OpenRouter models
     return [
-      'anthropic/claude-opus-4-5',
-      'anthropic/claude-sonnet-4-5',
-      'google/gemini-2.5-pro',
-      'google/gemini-2.5-flash',
-      'deepseek/deepseek-chat',
+      'anthropic/claude-opus-5.5',
+      'anthropic/claude-sonnet-5.5',
+      'google/gemini-4-argon',
+      'google/gemini-3.8-flash',
+      'deepseek/deepseek-v4-pro',
+      'deepseek/deepseek-v4.1-flash',
       'meta-llama/llama-3.3-70b-instruct',
       'mistralai/mistral-large',
       'qwen/qwen-2.5-72b-instruct',

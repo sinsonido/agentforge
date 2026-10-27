@@ -7,7 +7,7 @@ This guide covers obtaining credentials and recommended settings for each provid
 
 ## Anthropic (Claude)
 
-**Models:** claude-opus-4-6, claude-sonnet-4-6, claude-haiku-4-5-20251001
+**Models:** claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5
 
 ### Get an API key
 
@@ -56,7 +56,7 @@ providers:
 
 ## Google (Gemini)
 
-**Models:** gemini-2.5-pro, gemini-2.5-flash
+**Models:** gemini-4-argon, gemini-3.8-flash
 
 ### Get an API key
 
@@ -83,7 +83,7 @@ export GOOGLE_AI_KEY=AIza...
 
 ### Why use Gemini?
 
-Gemini 2.5 Pro has a **1 million token context window** — the only model in the
+Gemini 4 Argon has a **1 million token context window** — the only model in the
 default registry that can handle prompts exceeding 200K tokens. The router
 automatically routes large-context tasks to Gemini:
 
@@ -91,7 +91,7 @@ automatically routes large-context tasks to Gemini:
 routing:
   rules:
     - match: { context_tokens_gt: 200000 }
-      force: gemini-2.5-pro
+      force: gemini-4-argon
 ```
 
 ### Quota tiers
@@ -105,7 +105,7 @@ routing:
 
 ## DeepSeek
 
-**Models:** deepseek-v3, deepseek-r1
+**Models:** deepseek-flash, deepseek-v4-pro
 
 DeepSeek uses an OpenAI-compatible API, making it easy to integrate.
 
@@ -136,8 +136,8 @@ export DEEPSEEK_API_KEY=sk-...
 
 | Model | Use for | Notes |
 |---|---|---|
-| `deepseek-v3` | Bulk/T3 tasks | Very cheap ($0.27/$1.10 per 1M), fast |
-| `deepseek-r1` | Complex reasoning / T2 fallback | Chain-of-thought, slower |
+| `deepseek-flash` | Bulk/T3 tasks | Very cheap ($0.30/$1.20 per 1M at peak, half off-peak), fast |
+| `deepseek-v4-pro` | Complex reasoning / T2 fallback | Chain-of-thought, slower |
 
 ---
 
@@ -187,7 +187,7 @@ models:
     tier: 3
     cost_in: 0
     cost_out: 0
-    context: 64000
+    context: 128000
 ```
 
 ### Docker + Ollama
@@ -239,26 +239,26 @@ Register models via OpenRouter using their `<provider>/<model>` naming:
 
 ```yaml
 models:
-  openai/gpt-4o:
+  openai/gpt-6.1-sol:
     provider: openrouter
     tier: 2
-    cost_in: 2.50
+    cost_in: 2.00
     cost_out: 10.00
-    context: 128000
+    context: 1050000
 
   meta-llama/llama-3.3-70b-instruct:
     provider: openrouter
     tier: 3
     cost_in: 0.10
-    cost_out: 0.30
-    context: 128000
+    cost_out: 0.32
+    context: 131072
 ```
 
 ---
 
 ## OpenAI
 
-**Models:** gpt-4o, gpt-4o-mini, o1, o3-mini
+**Models:** gpt-6-astra, gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna
 
 ### Get an API key
 

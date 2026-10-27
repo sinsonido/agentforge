@@ -158,7 +158,7 @@ export default class MyRoutingPlugin extends BasePlugin {
     // Prepend a custom rule that routes security tasks to a specific model
     this.forge.router?.prependRule({
       match: { type: 'security_audit' },
-      force: 'claude-opus-4-6',
+      force: 'claude-opus-5-5',
     });
   }
 }
