@@ -57,3 +57,11 @@ ollama pull deepseek-r1:32b  # Reasoning model
 npm test              # Run all tests
 npm run test:watch    # Watch mode
 ```
+
+## Releases
+
+- Every merge to `master` updates one open release PR from release-please. It bumps `package.json` and writes the next `CHANGELOG.md` section from the Conventional Commit titles.
+- Before 1.0, `fix:` and `feat:` bump the patch version and a breaking change bumps the minor version. `docs:`, `chore:`, `ci:`, `test:` and `refactor:` stay out of the changelog.
+- To cut a minor release such as 0.8.0, merge a commit with a `Release-As: 0.8.0` footer.
+- Merging the release PR creates the `vX.Y.Z` tag and the GitHub Release. `release.yml` then tests that tag and attaches `agentforge-vX.Y.Z.tgz`.
+- Do not push version tags or edit the version by hand.
