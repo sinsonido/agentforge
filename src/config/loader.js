@@ -32,8 +32,47 @@ export function loadConfig(configPath = 'agentforge.yml') {
     return process.env[varName] || '';
   });
 
-  const config = yaml.load(raw);
-  return mergeDeep(DEFAULT_CONFIG, config || {});
+  const config = mergeDeep(DEFAULT_CONFIG, yaml.load(raw) || {});
+  validateModelReferences(config);
+  return config;
+}
+
+/**
+ * Throw when a model referenced by the team or routing rules is not in `models`,
+ * or a model names a provider missing from `providers`.
+ * A disabled provider still counts as configured.
+ */
+export function validateModelReferences(config) {
+  const models = config.models || {};
+  const providers = config.providers || {};
+  const errors = [];
+
+  for (const [id, m] of Object.entries(models)) {
+    if (!m?.provider) {
+      errors.push(`model "${id}" has no provider`);
+    } else if (!providers[m.provider]) {
+      errors.push(`model "${id}" uses provider "${m.provider}", which is not under providers:`);
+    }
+  }
+
+  const refs = [];
+  for (const a of config.team || []) {
+    if (a.model) refs.push([a.model, `team "${a.name}" model`]);
+    for (const fb of a.fallback_models || []) refs.push([fb, `team "${a.name}" fallback_models`]);
+  }
+  (config.routing?.rules || []).forEach((rule, i) => {
+    if (rule.force) refs.push([rule.force, `routing rule #${i + 1} force`]);
+    if (rule.prefer) refs.push([rule.prefer, `routing rule #${i + 1} prefer`]);
+    for (const fb of rule.fallback || []) refs.push([fb, `routing rule #${i + 1} fallback`]);
+  });
+
+  for (const [id, where] of refs) {
+    if (!models[id]) errors.push(`${where} references "${id}", which is not under models:`);
+  }
+
+  if (errors.length) {
+    throw new Error(`Invalid model configuration:\n  - ${errors.join('\n  - ')}`);
+  }
 }
 
 /**
