@@ -5,12 +5,10 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
-
-### Security
-
-- Bump path-to-regexp to 8.4.0 (#112) and picomatch in `ui/` to 4.0.4
-  (#107). Both merged after #103, so they are not in the `v0.7.0` tag.
+From 0.7.1 on, release-please writes each version section from the
+Conventional Commits merged since the last release. There is no Unreleased
+section: the open release PR shows the next entry. Do not add entries by
+hand.
 
 ## [0.7.0] - 2026-03-30
 
