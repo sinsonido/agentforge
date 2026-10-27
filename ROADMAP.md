@@ -1,124 +1,68 @@
 # AgentForge Roadmap
 
-Strategy: **vertical slices**. Each milestone delivers something runnable end-to-end, not layers in isolation. Ship fast, iterate.
+AgentForge is a self-hosted control plane, for one operator, that runs coding agents on real repositories and can be driven from a phone.
 
----
+The core loop:
 
-## v0.1 — "One Agent Works" (MVP) ✅
+```
+issue or task → isolated worktree → coding harness runs → pull request
+  → CI watched → fix round if red → operator approves → merge → cleanup
+```
 
-**Goal:** A single agent can receive a task, route it to the right model, execute it, track cost and quota, and pause/resume automatically.
+Tracking lives on GitHub. Each version is a milestone, each issue is one PR, and the [AgentForge Roadmap project](https://github.com/users/sinsonido/projects/4) shows the board.
 
-### Issues
+## Why the direction changed
 
-#### Core Engine
-- [x] `#1` **TaskQueue** — Priority queue with FIFO fallback. Tasks have: id, type, priority, agent_id, status, context_tokens_estimate. Statuses: queued → assigned → executing → completed/failed/waiting_quota.
-- [x] `#2` **Orchestrator** — Main loop. Pulls from queue, calls router, dispatches to execution layer, handles results. Single-threaded event loop (Node.js native).
-- [x] `#3` **EventBus** — Simple pub/sub. Events: task.queued, task.assigned, task.completed, task.failed, quota.exhausted, quota.reset, agent.paused, agent.resumed. Use EventEmitter, nothing fancy.
+Through v0.7 the design assumed that an agent's work is one model call: pick the cheapest model, send a prompt, store the text. That path works today, with quotas and budgets enforced.
 
-#### Router
-- [x] `#4` **RuleEngine** — Evaluate rules from config. Input: task metadata. Output: { model, provider, tier }. Rules are ordered, first match wins.
-- [x] `#5` **TierResolver** — Map task.type → tier. Configurable mapping with sensible defaults.
-- [x] `#6` **ModelSelector** — Given a tier and constraints, pick the cheapest available model. Filter by: provider enabled, quota available, context window sufficient.
-- [x] `#7` **FallbackChain** — When selected model is unavailable (quota), try next in chain. Chain is: same-tier-other-provider → tier-downgrade-if-allowed → local → queue-and-wait.
+Everything that would have made agents do real work was never wired. There is no tool loop (`_resolveTools` returns `[]`), and nothing in `createAgentForge()` uses `src/git`, task decomposition, `ask_agent`, review workflow or plugins. Earlier versions of this file marked those as done.
 
-#### Quota Management
-- [x] `#8` **QuotaTracker** — Per-provider sliding window. Track requests/min and tokens/min. Methods: canExecute(estimated_tokens), recordUsage(tokens_in, tokens_out), getState(). States: available, throttled, exhausted.
-- [x] `#9` **QuotaWatcher** — Timer that prunes sliding window every second. When exhausted provider becomes available → emit quota.reset → resume paused agents.
-- [x] `#10` **AutoPause/Resume** — On quota.exhausted: find all agents using that provider → set status to waiting_quota → return tasks to queue. On quota.reset: reverse the process.
+In 2026 code is written by coding harnesses (Claude Code, the Agent SDK and others) that read the repo, edit, run tests and commit. Rebuilding one is the whole product, and it already exists. AgentForge keeps what is useful around such a harness: the queue, events, live UI, cost and quota control, git and CI plumbing, and approvals.
 
-#### Provider Adapters
-- [x] `#11` **ProviderInterface** — Unified interface: `execute(model, messages, tools, options) → { content, tokens_in, tokens_out, cost }`. All providers implement this.
-- [x] `#12` **AnthropicProvider** — Messages API. Handle streaming. Map errors to standard format.
-- [x] `#13` **GoogleProvider** — Gemini API. Handle the different request format.
-- [x] `#14` **OllamaProvider** — Local. HTTP to localhost:11434. No auth, no quota.
-- [x] `#15` **DeepSeekProvider** — OpenAI-compatible API with DeepSeek endpoint.
+Multi-user accounts, RBAC and teams are out of scope.
 
-#### Execution
-- [x] `#16` **ContextBuilder** — Build the full prompt: system_prompt + knowledge files + task description + conversation history. Estimate token count before sending.
-- [x] `#17` **CostTracker** — After each execution, calculate cost from tokens × model pricing. Update project budget. Emit alerts.
-- [x] `#18` **OutputCollector** — Parse model response. Extract code blocks, file operations, tool calls. Store result.
+## Versions
 
-#### Config
-- [x] `#19` **ConfigLoader** — Parse agentforge.yml. Validate schema. Resolve env vars (${VAR} syntax). Watch for changes.
-- [x] `#20` **CLI entry point** — `agentforge start` loads config, initializes all components, starts orchestrator loop. `agentforge task add "Write tests"` adds a task.
+### v0.7.1. Honest baseline
 
----
+The repo says what the code does, CI is green and trustworthy, dependencies are safe, and releases are automated. This covers the retroactive v0.7.0 release, the changelog, release-please, the queued-task and duplicate cost-event bugs, E2E and Node 24 in CI, the npm audit findings, test-PR triage, model IDs and prices, and docs that match the code.
 
-## v0.2 — "Team Works" ✅
+### v0.8.0. Subtract
 
-**Goal:** Multiple agents collaborate. Task dependencies. Inter-agent communication. Review workflow.
+Delete the unwired modules and the duplicate vanilla UI. Make the task queue survive restarts.
 
-### Issues
+### v0.9.0. A real coding agent
 
-- [x] `#21` **AgentLifecycle** — State machine: idle → assigned → executing → reviewing → idle. Track per-agent state.
-- [x] `#22` **DependencyGraph** — DAG of tasks. Task t5 depends on t3 and t4. Topological sort for execution order. Parallelize independent tasks.
-- [x] `#23` **InterAgentComm** — `ask_agent(target, question)` tool. Creates micro-task for target agent, blocks caller until response. Orchestrator manages the round-trip.
-- [x] `#24` **ReviewWorkflow** — When agent.require_review = true, completed task goes to reviewer agent before marking as done. Reviewer can approve or request changes (re-queue).
-- [x] `#25` **ParallelExecution** — Multiple agents execute simultaneously. Respect per-provider concurrency limits. Orchestrator manages execution slots.
-- [x] `#26` **TaskDecomposition** — T1 agent can break a high-level task into subtasks. Orchestrator adds them to queue with dependencies.
+A spike chooses the executor with measurements: the Agent SDK or `claude -p --output-format stream-json`. Then come task model v2, a worktree per task, the executor with streamed events, a PR on success, and a live task view.
 
----
+### v0.10.0. Closed loop
 
-## v0.3 — "Git Works" ✅
+GitHub issues come in as tasks, idempotent per issue. This version also adds CI watch with fix rounds, an approval gate before merge, and a budget per task and per repo.
 
-**Goal:** Agents interact with a real git repo. Branches, commits, PRs, CI integration.
+### v0.11.0. Phone first
 
-### Issues
+An installable PWA, push notifications, one-tap approve, reject and retry, and auth required when the server is tunneled.
 
-- [x] `#27` **GitManager** — Wrapper around git CLI. Init, branch, commit, push, PR.
-- [x] `#28` **BranchStrategy** — Auto-create branch per agent+task: `agent/{name}/{task_id}`. Configurable pattern.
-- [x] `#29` **AutoCommit** — When agent uses file_write tool, stage and commit with formatted message: `[T2] Implement token vault (#t3)`.
-- [x] `#30` **AutoPR** — On task completion, create PR from agent branch to target branch. Include task description and agent output as PR body.
-- [x] `#31` **ReviewGate** — PR requires approval from T1 agent or human before merge. Integrate with GitHub API review system.
-- [x] `#32` **GitHubIntegration** — Connect via PAT or GitHub App. List repos, create branches, create PRs, read CI status.
+### v1.0.0. Stable
 
----
+Subscription usage windows, a versioned config schema, and a getting-started guide on a real repo.
 
-## v0.4 — "API & Real-time" ✅
+### Later
 
-**Goal:** REST API and WebSocket server backing the future dashboard. Parallel execution.
+More executors, such as the Codex CLI.
 
-### Issues
+## Stop rule
 
-- [x] `#33` **REST API** — Express server with 12 routes (tasks, agents, quotas, costs, events, control start/stop, review approve/reject).
-- [x] `#34` **WebSocket server** — Real-time event streaming, ping/pong liveness, replay last 20 events on connect, broadcasts 18 event types.
+If after v0.10.0 the operator does not use AgentForge weekly on their own repositories in place of their current agent workflow, the project is archived. The measure is tasks merged through AgentForge per month.
 
----
+## History
 
-## v0.5 — "Production Ready" ✅
-
-**Goal:** CLI polish, plugin system, Docker, tests, OpenRouter.
-
-### Issues
-
-- [x] `#40` **CLI complete** — `agentforge init`, `agentforge start`, `agentforge task`, `agentforge status`, `agentforge logs`.
-- [x] `#41` **Plugin system** — Custom providers, custom tools, custom routing rules. Load from npm packages or local files.
-- [x] `#42` **OpenRouter provider** — Single provider that proxies to any model. Useful as universal fallback.
-- [x] `#43` **Persistence** — SQLite for task history, cost logs, agent metrics (WAL mode).
-- [x] `#44` **Documentation** — Full docs site. Getting started, configuration reference, provider guides, architecture deep-dive.
-- [x] `#45` **Docker** — Multi-stage Dockerfile + docker-compose with Ollama profile. One-command setup.
-- [x] `#46` **Tests** — 280 tests across 84 suites. Unit: core, routing, execution. Integration: API endpoints. All passing.
-
----
-
-## v0.6 — "Dashboard Works" ✅
-
-**Goal:** Web UI for managing everything. Real-time updates via WebSocket (server already built in v0.4).
-
-### Issues
-
-- [x] `#35` **Dashboard UI** — KPIs, project overview, quota status, live activity feed (WebSocket), orchestrator control.
-- [x] `#36` **Kanban Board** — HTML5 drag-and-drop across queued/executing/completed/failed columns. Add-task modal.
-- [x] `#37` **Agent Config UI** — Agent cards with status, model, token stats, system-prompt preview, edit modal.
-- [x] `#38` **Provider Config UI** — Per-provider quota bars with colour-coded thresholds. Connection test button.
-- [x] `#39` **Cost Dashboard** — Budget bars by project, spend-by-agent/model tables, scrollable transaction log.
-
----
+v0.1 to v0.7 delivered the queue, router, quota and cost tracking, the provider adapters, the REST and WebSocket API, SQLite persistence, the React dashboard, E2E tests and API-key auth. See `CHANGELOG.md` once #177 lands, and the closed milestones.
 
 ## Principles
 
-1. **Each issue = 1 PR.** Small, focused, reviewable.
-2. **Tests with the code.** Not after. Each PR includes tests.
-3. **Config-driven from day 1.** No hardcoded values. Everything in agentforge.yml.
-4. **Run end-to-end ASAP.** v0.1 is ugly but works. Polish comes later.
-5. **Local-first development.** Ollama adapter lets you develop without burning API credits.
+1. Each issue is one PR, with tests in the same PR.
+2. Never mark something done unless master runs it.
+3. Subtract before adding.
+4. Config-driven. Anything an operator would tune lives in `agentforge.yml`.
+5. Intake is idempotent. The same issue never yields two tasks or two PRs.
