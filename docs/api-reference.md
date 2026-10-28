@@ -172,7 +172,7 @@ Add a new task to the queue.
 | `priority` | no | `critical`, `high`, `medium` (default), `low` |
 | `agent_id` | no | Agent ID: the agent's name in lowercase with spaces replaced by `-` |
 
-The endpoint ignores other fields. Task IDs are `t1`, `t2`, and so on. The counter starts again at `t1` when the server restarts.
+The endpoint ignores other fields. Task IDs are `t1`, `t2`, and so on. The counter continues after a restart, so new IDs never reuse a stored task.
 
 **Response `201`**
 ```json

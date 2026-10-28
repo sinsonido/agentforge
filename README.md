@@ -31,7 +31,7 @@ These modules are present but not wired. They are scheduled for removal in v0.9 
 - **Quota tracking.** Each provider with a `quota` block gets a sliding window for requests and input tokens. Above 70% usage the provider is `throttled`. Above 95% it is `exhausted` and the router skips it. Tasks that find no model wait in `waiting_quota` and return to the queue on the `quota.reset` event. See [docs/providers.md](docs/providers.md#provider-priority-and-fallback) for when that event fires.
 - **Budget control.** The orchestrator records the cost of every call. At 80% of the project budget it emits `budget.warning`. At 95% it moves queued tasks to `paused_budget`. The `alerts` section of the config sets both thresholds.
 - **Providers.** Anthropic, Google (Gemini), DeepSeek, OpenRouter, and Ollama for local models. Each call is a single request with no streaming and no tool use.
-- **Persistence.** SQLite (`better-sqlite3`, WAL mode) at `.agentforge/data.db` stores executed tasks, cost records, events, and agent activity. The task queue lives in memory, so a restart drops tasks that have not run.
+- **Persistence.** SQLite (`better-sqlite3`, WAL mode) at `.agentforge/data.db` stores executed tasks, cost records, events, and agent activity. The task queue is written to SQLite on every change and restored on boot. A task that was executing when the process stopped is marked `failed` with result `interrupted`.
 - **Dashboard and API.** An Express REST API and a WebSocket feed on port 4242, optional Bearer-token auth, and a React dashboard with dashboard, Kanban, agents, providers, and costs views.
 
 ## Quick Start
