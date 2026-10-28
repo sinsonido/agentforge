@@ -1,4 +1,5 @@
 import eventBus from './event-bus.js';
+import { TERMINAL_STATUSES, admissionKey } from './task-model.js';
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const VALID_STATUSES = ['queued', 'assigned', 'executing', 'completed', 'failed', 'waiting_quota', 'paused_budget'];
@@ -44,8 +45,22 @@ export class TaskQueue {
   }
 
   add(taskData) {
+    return this.admit(taskData).task;
+  }
+
+  /**
+   * Add a task unless a live coding task with the same (repo, issue, playbook)
+   * exists; then return that one. Safe to repeat for the same issue.
+   * @returns {{ task: object, created: boolean }}
+   */
+  admit(taskData) {
+    const key = admissionKey(taskData);
+    const existing = key && this.getAll().find(t => !TERMINAL_STATUSES.includes(t.status) && admissionKey(t) === key);
+    if (existing) return { task: existing, created: false };
+
     const task = {
       id: taskData.id || `t${++this._counter}`,
+      kind: taskData.kind || 'text',
       title: taskData.title,
       type: taskData.type || 'implement',
       priority: taskData.priority || 'medium',
@@ -64,11 +79,20 @@ export class TaskQueue {
       tokens_in: 0,
       tokens_out: 0,
       model_used: null,
+      ...(taskData.kind === 'coding' && {
+        repo: taskData.repo,
+        base: taskData.base,
+        instruction: taskData.instruction,
+        issue: taskData.issue ?? null,
+        playbook: taskData.playbook,
+        step: null,
+        budget: taskData.budget ?? null,
+      }),
     };
-    this._tasks.set(task.id, task);
     this._store?.saveTask(task);
+    this._tasks.set(task.id, task);
     eventBus.emit('task.queued', { task });
-    return task;
+    return { task, created: true };
   }
 
   /**

@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { CODING_FIELDS, TERMINAL_STATUSES } from '../core/task-model.js';
 
 // Schema upgrades, applied in order. PRAGMA user_version counts how many have run,
 // so an existing DB file gets only the ones it is missing.
@@ -10,9 +11,17 @@ const MIGRATIONS = [
    ALTER TABLE tasks ADD COLUMN force_model TEXT;
    ALTER TABLE tasks ADD COLUMN allow_tier_downgrade INTEGER NOT NULL DEFAULT 1;
    ALTER TABLE tasks ADD COLUMN context_tokens_estimate INTEGER NOT NULL DEFAULT 0;`,
+  `ALTER TABLE tasks ADD COLUMN kind TEXT NOT NULL DEFAULT 'text';
+   ALTER TABLE tasks ADD COLUMN repo TEXT;
+   ALTER TABLE tasks ADD COLUMN base TEXT;
+   ALTER TABLE tasks ADD COLUMN instruction TEXT;
+   ALTER TABLE tasks ADD COLUMN issue INTEGER;
+   ALTER TABLE tasks ADD COLUMN playbook TEXT;
+   ALTER TABLE tasks ADD COLUMN step TEXT;
+   ALTER TABLE tasks ADD COLUMN budget REAL;
+   CREATE UNIQUE INDEX idx_tasks_coding_admission ON tasks(repo, issue, playbook)
+     WHERE kind = 'coding' AND issue IS NOT NULL AND status NOT IN ('completed', 'failed');`,
 ];
-
-const TERMINAL_STATUSES = ['completed', 'failed'];
 
 /**
  * AgentForgeDB — SQLite persistence layer using better-sqlite3.
@@ -90,11 +99,13 @@ export class AgentForgeDB {
     this._stmts = {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
-                           priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate)
+                           priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
+                           kind, repo, base, instruction, issue, playbook, step, budget)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
-                @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate)
+                @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget)
         ON CONFLICT(id) DO UPDATE SET
-          status=excluded.status, model_used=excluded.model_used,
+          status=excluded.status, step=excluded.step, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
           cost=excluded.cost, result=excluded.result,
           assigned_at=excluded.assigned_at, completed_at=excluded.completed_at
@@ -159,6 +170,8 @@ export class AgentForgeDB {
       force_model: task.force_model || null,
       allow_tier_downgrade: task.allow_tier_downgrade === false ? 0 : 1,
       context_tokens_estimate: task.context_tokens_estimate || 0,
+      kind: task.kind || 'text',
+      ...Object.fromEntries(CODING_FIELDS.map(f => [f, task[f] ?? null])),
     });
   }
 
@@ -186,12 +199,12 @@ export class AgentForgeDB {
 
   /** Get tasks by status */
   getTasksByStatus(status) {
-    return this._stmts.getTasksByStatus.all(status);
+    return this._stmts.getTasksByStatus.all(status).map(rowToTask);
   }
 
   /** Get recent task history */
   getTaskHistory(limit = 100) {
-    return this._stmts.getTaskHistory.all(limit);
+    return this._stmts.getTaskHistory.all(limit).map(rowToTask);
   }
 
   // ─── Cost operations ─────────────────────────────────
@@ -253,11 +266,13 @@ export class AgentForgeDB {
 }
 
 function rowToTask(row) {
-  return {
+  const task = {
     ...row,
     depends_on: JSON.parse(row.depends_on),
     allow_tier_downgrade: row.allow_tier_downgrade === 1,
   };
+  if (task.kind !== 'coding') for (const f of CODING_FIELDS) delete task[f];
+  return task;
 }
 
 export default AgentForgeDB;
