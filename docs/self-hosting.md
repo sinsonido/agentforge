@@ -2,7 +2,7 @@
 
 AgentForge edits its own repository. The instance that does the work must not run from the tree it edits, or a task could change the code under the running process. `scripts/self-host.sh` runs AgentForge from an immutable release directory, built from a tag or SHA of `sinsonido/agentforge`, in a Docker container.
 
-Requirements on the host: `bash`, `git`, `curl`, Docker, `gh` logged in to GitHub, the `claude` binary with a login, and the pinned pstack plugin. Node is not needed. The build and the server run in the `node:24` image.
+Requirements on the host: `bash`, `git`, `curl`, Docker, a GitHub token for the instance (see [GitHub token](#github-token)), the `claude` binary with a login, and the pinned pstack plugin. Node and `gh` are not needed. The build and the server run in the `node:24` image.
 
 ## Commands
 
@@ -20,7 +20,7 @@ Every command converges to the same end state when you run it again:
 
 - `install` skips the build when `releases/<sha>` exists. A release directory appears only through an atomic rename at the end of a successful build, so a crashed build leaves only a `.staging-*` directory, which the next install deletes.
 - `install` switches `current` with an atomic symlink rename.
-- `start` does nothing when the container already runs the `current` SHA. Otherwise it replaces the container. It returns after `/api/status` answers, or fails with the `docker logs` command to run.
+- `start` does nothing when the container already runs the `current` SHA. Otherwise it checks its inputs and the GitHub token, then replaces the container. A failed check leaves the running container alone, and so does `upgrade`. It returns after `/api/status` answers, or fails with the `docker logs` command to run.
 - `upgrade` to the SHA that is already running does not restart anything.
 - `stop` does nothing when no container exists.
 
@@ -35,7 +35,7 @@ repo.git/          bare clone, the export source for releases
 releases/<sha>/    source from git archive, node_modules, ui/dist
 current            symlink to releases/<sha>
 data/              agentforge.db (the container's working directory)
-config/            agentforge.yml
+config/            agentforge.yml, gh-token (mode 600)
 state/             executor mirrors, per-task clones and per-task HOMEs
 tools/gh-<ver>/    static gh binary for the container
 ```
@@ -57,10 +57,43 @@ The executor starts one container per task through the host's Docker daemon. The
 | `AGENTFORGE_PSTACK_DIR` | same path, read-only | The pinned pstack plugin. AgentForge reads playbooks from it and task containers mount it. |
 | `AGENTFORGE_CLAUDE_CREDENTIALS` | same path, read-only | The harness login. Copied into a task HOME for one run, then removed. Not mounted when `CLAUDE_CODE_OAUTH_TOKEN` is set and the file is absent. |
 | `CLAUDE_CODE_OAUTH_TOKEN` | environment, by name | The harness login, preferred over the file. |
-| `gh auth token` of the host | `GH_TOKEN`, by name | Intake comments, `git push` and `gh pr create`. Only AgentForge holds it. Task containers never get it. |
+| the instance's GitHub token | `GH_TOKEN`, by name | Intake comments, `git push` and `gh pr create`. Only AgentForge holds it. Task containers never get it. See [GitHub token](#github-token). |
 | `tools/gh-<ver>/gh` | `/usr/local/bin/gh`, read-only | A static `gh`. A host `gh` from Homebrew needs the Homebrew loader, which the image lacks. |
 
 `git push` uses `gh auth git-credential` as its credential helper, set through `GIT_CONFIG_*` variables. Secrets reach the container by name (`-e GH_TOKEN`), so they never appear in the host process list. `docker inspect` still shows them to anyone who can reach the Docker socket.
+
+## GitHub token
+
+The instance uses its own GitHub token, never the operator's `gh auth token`. An operator login usually carries admin scopes such as `delete_repo`, and with it every agent PR looks like the operator opened it.
+
+`start` reads the token from `AGENTFORGE_GH_TOKEN`, or else from `config/gh-token`. The file must not be readable by group or others (mode 600). With neither, `start` stops and prints the steps below, with the intake repos filled in.
+
+Create a fine-grained personal access token at <https://github.com/settings/personal-access-tokens/new>:
+
+1. Resource owner: the owner of the intake repos.
+2. Repository access: Only select repositories, and pick each repo under `intake.repos`.
+3. Repository permissions: Contents, Issues and Pull requests set to Read and write. Metadata is Read-only, and GitHub adds it. Leave every other permission at No access.
+
+Then store it:
+
+```bash
+( umask 077; cat > ~/.agentforge-self/config/gh-token )   # paste the token, Enter, Ctrl-D
+scripts/self-host.sh start
+```
+
+Before it replaces the container, `start` checks the token once. It logs the account the token acts as and whether the token is fine-grained, and for any other token it logs the token's scopes as a warning. It then reads `intake.repos` with the release's own config loader and checks `GET /repos/<repo>` for each one. It stops when the token does not authenticate or cannot reach an intake repo.
+
+A task whose commits change `.github/workflows/` cannot be pushed, because the token has no Workflows permission. That is on purpose.
+
+`AGENTFORGE_ALLOW_OPERATOR_TOKEN=1` makes `start` fall back to the host's `gh auth token` when no instance token exists. It logs a warning box, and the scope check lists every scope that token has. Use it only to get going, and replace it with a scoped token.
+
+### How agent work shows up on GitHub
+
+- Commits carry the author `agentforge <agentforge@localhost>` (`executor.git_author`).
+- The PR body ends with `Opened by AgentForge for task <id>`.
+- With a personal access token, GitHub still shows the PR as opened by the token's owner.
+
+A GitHub App gives the instance a bot identity (`<app>[bot]`), so PRs no longer appear under a person's account, and its installation tokens expire after an hour. It needs a token-minting step that `self-host.sh` does not have yet. This is a later step.
 
 ## Network
 
@@ -82,6 +115,8 @@ The server binds `0.0.0.0` inside the container (`--host 0.0.0.0`), because a se
 | `AGENTFORGE_PSTACK_DIR` | `~/.claude/plugins/cache/cursor-plugins/pstack/0.15.30` | see Executor mounts |
 | `AGENTFORGE_CLAUDE_CREDENTIALS` | `~/.claude/.credentials.json` | see Executor mounts |
 | `AGENTFORGE_GH_VERSION` | `2.62.0` | `gh` release downloaded into `tools/` |
+| `AGENTFORGE_GH_TOKEN` | unset | the instance's GitHub token; else `config/gh-token` |
+| `AGENTFORGE_ALLOW_OPERATOR_TOKEN` | unset | `1` falls back to the host's `gh auth token`, with a warning |
 
 ## The dogfood loop
 

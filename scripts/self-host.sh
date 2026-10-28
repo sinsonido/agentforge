@@ -6,7 +6,8 @@
 #   releases/<sha>/     complete release (its existence means "installed")
 #   current             symlink to the active release
 #   data/               SQLite database (container working directory)
-#   config/             agentforge.yml, created once from the example
+#   config/             agentforge.yml, created once from the example;
+#                       gh-token, the instance's own GitHub token (mode 600)
 #   state/              executor state: mirrors, per-task clones and HOMEs
 #   tools/              gh release binary for the container
 set -euo pipefail
@@ -31,6 +32,7 @@ CURRENT="$AGENTFORGE_HOME/current"
 DATA_DIR="$AGENTFORGE_HOME/data"
 CONFIG_DIR="$AGENTFORGE_HOME/config"
 TOOLS_DIR="$AGENTFORGE_HOME/tools"
+GH_TOKEN_FILE="$CONFIG_DIR/gh-token"
 CONTAINER_PORT=4242
 
 log() { echo "[self-host] $*" >&2; }
@@ -61,6 +63,9 @@ Environment:
   AGENTFORGE_CLAUDE_CREDENTIALS $AGENTFORGE_CLAUDE_CREDENTIALS
   AGENTFORGE_GH_VERSION         $AGENTFORGE_GH_VERSION
   CLAUDE_CODE_OAUTH_TOKEN       (optional; preferred over the credentials file)
+  AGENTFORGE_GH_TOKEN           the instance's GitHub token; else the file
+                                $GH_TOKEN_FILE (mode 600)
+  AGENTFORGE_ALLOW_OPERATOR_TOKEN=1  use 'gh auth token' instead (not recommended)
 EOF
 }
 
@@ -179,28 +184,119 @@ check_executor_inputs() {
   [[ -d "$AGENTFORGE_PSTACK_DIR/skills/poteto-mode" ]] || die "no pstack at $AGENTFORGE_PSTACK_DIR; set AGENTFORGE_PSTACK_DIR"
   [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -f "$AGENTFORGE_CLAUDE_CREDENTIALS" ]] \
     || die "no harness credentials: set CLAUDE_CODE_OAUTH_TOKEN or AGENTFORGE_CLAUDE_CREDENTIALS"
-  command -v gh >/dev/null || die "gh is required on the host for its token"
 }
 
-cmd_start() {
-  local sha
-  sha="$(current_sha)"
-  [[ -n "$sha" ]] || die "nothing installed; run: $0 install <ref>"
-  if [[ "$(running_sha)" == "$sha" ]]; then
-    log "already running $sha"
-    return
+# The repos under intake.repos, one per line, read by the release's own config loader.
+intake_repos() {
+  docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    -v "$RELEASES/$1":/app:ro -v "$CONFIG_DIR":/config:ro -w /app "$AGENTFORGE_NODE_IMAGE" \
+    node --input-type=module -e '
+      const { loadConfig } = await import("/app/src/config/loader.js");
+      for (const { repo } of loadConfig("/config/agentforge.yml").intake.repos) console.log(repo);'
+}
+
+token_steps() {
+  local repos="${1:-<owner>/<repo>}"
+  cat >&2 <<EOF
+
+AgentForge needs its own GitHub token, limited to the intake repos.
+It does not use your 'gh auth token', which can do anything your account can.
+
+Create a fine-grained personal access token:
+  1. Open https://github.com/settings/personal-access-tokens/new
+  2. Token name: agentforge-self. Pick an expiration.
+  3. Resource owner: the owner of the intake repos.
+  4. Repository access: Only select repositories, then pick:
+$(sed 's/^/       /' <<<"$repos")
+  5. Repository permissions:
+       Contents       Read and write
+       Issues         Read and write
+       Pull requests  Read and write
+       Metadata       Read-only (GitHub adds it)
+     Leave every other permission at No access.
+  6. Generate the token and copy it.
+
+Store it in a file only you can read, then start again:
+  ( umask 077; cat > $GH_TOKEN_FILE )    # paste the token, Enter, Ctrl-D
+  $0 start
+Or set AGENTFORGE_GH_TOKEN in the environment of 'start'.
+
+Last resort: AGENTFORGE_ALLOW_OPERATOR_TOKEN=1 uses your own 'gh auth token'.
+EOF
+}
+
+# Set GH_TOKEN_VALUE from AGENTFORGE_GH_TOKEN, then the token file, then, only
+# when the operator opts in, the host's gh login.
+resolve_gh_token() {
+  local repos="$1" mode
+  if [[ -n "${AGENTFORGE_GH_TOKEN:-}" ]]; then
+    GH_TOKEN_VALUE="$AGENTFORGE_GH_TOKEN"
+    log "GitHub token: AGENTFORGE_GH_TOKEN"
+  elif [[ -f "$GH_TOKEN_FILE" ]]; then
+    mode="$(stat -c %a "$GH_TOKEN_FILE")"
+    (( (8#$mode & 8#077) == 0 )) || die "$GH_TOKEN_FILE has mode $mode; run: chmod 600 $GH_TOKEN_FILE"
+    GH_TOKEN_VALUE="$(tr -d '[:space:]' < "$GH_TOKEN_FILE")"
+    [[ -n "$GH_TOKEN_VALUE" ]] || die "$GH_TOKEN_FILE is empty"
+    log "GitHub token: $GH_TOKEN_FILE"
+  elif [[ "${AGENTFORGE_ALLOW_OPERATOR_TOKEN:-}" == 1 ]]; then
+    command -v gh >/dev/null || die "AGENTFORGE_ALLOW_OPERATOR_TOKEN=1 needs gh on the host"
+    GH_TOKEN_VALUE="$(gh auth token)"
+    log "WARNING: ******************************************************************"
+    log "WARNING: AGENTFORGE_ALLOW_OPERATOR_TOKEN=1: the instance gets YOUR gh token."
+    log "WARNING: It can do anything your account can, delete_repo included, and"
+    log "WARNING: agent PRs will look authored by you. Create a scoped token instead."
+    log "WARNING: ******************************************************************"
+  else
+    log "error: no GitHub token for the instance"
+    token_steps "$repos"
+    exit 1
   fi
+}
+
+# Show who the token is and check that it reaches every intake repo.
+probe_gh_token() {
+  local gh_bin="$1" repos="$2" out repo missing=()
+  out="$(GH_TOKEN="$GH_TOKEN_VALUE" "$gh_bin" api /user --jq .login 2>&1)" \
+    || die "the GitHub token does not authenticate: ${out##*gh: }"
+  case "$GH_TOKEN_VALUE" in
+    github_pat_*) log "GitHub token: fine-grained, acts as $out" ;;
+    *) log "WARNING: GitHub token is not fine-grained; it acts as $out with scopes:" \
+         "$(GH_TOKEN="$GH_TOKEN_VALUE" "$gh_bin" api -i /user 2>/dev/null | sed -n 's/^X-Oauth-Scopes: *//Ip' | tr -d '\r')" ;;
+  esac
+  [[ -n "$repos" ]] || log "WARNING: no intake.repos in $CONFIG_DIR/agentforge.yml; the coding loop is off"
+  for repo in $repos; do
+    if out="$(GH_TOKEN="$GH_TOKEN_VALUE" "$gh_bin" api "repos/$repo" --jq .full_name 2>&1)"; then
+      log "  reaches $repo"
+    else
+      log "  cannot reach $repo: ${out##*gh: }"
+      missing+=("$repo")
+    fi
+  done
+  (( ${#missing[@]} == 0 )) || die "the GitHub token cannot reach ${missing[*]}." \
+    "Add them to the token's Repository access, or fix intake.repos in $CONFIG_DIR/agentforge.yml"
+}
+
+# Everything start checks before it touches a running container, so a missing
+# input never takes the instance down. Sets GH_BIN and GH_TOKEN_VALUE.
+preflight() {
+  local sha="$1" repos
   check_executor_inputs
-  local gh_bin creds=()
-  gh_bin="$(ensure_gh)"
+  GH_BIN="$(ensure_gh)"
+  mkdir -p "$DATA_DIR" "$AGENTFORGE_STATE_DIR"
+  ensure_config
+  repos="$(intake_repos "$sha")"
+  resolve_gh_token "$repos"
+  probe_gh_token "$GH_BIN" "$repos"
+}
+
+launch() {
+  local sha="$1" creds=()
   if [[ -f "$AGENTFORGE_CLAUDE_CREDENTIALS" ]]; then
     creds=(-v "$AGENTFORGE_CLAUDE_CREDENTIALS:$AGENTFORGE_CLAUDE_CREDENTIALS:ro")
   fi
   docker rm -f "$AGENTFORGE_CONTAINER" >/dev/null 2>&1 || true
-  mkdir -p "$DATA_DIR" "$AGENTFORGE_STATE_DIR"
-  ensure_config
   # Secrets go by name (-e VAR), so they never appear in the host process list.
-  GH_TOKEN="$(gh auth token)" CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+  GH_TOKEN="$GH_TOKEN_VALUE" CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
   docker run -d --name "$AGENTFORGE_CONTAINER" --init --stop-signal SIGINT \
     --restart unless-stopped --label "agentforge.sha=$sha" \
     --user "$(id -u):$(id -g)" -e HOME=/tmp \
@@ -214,7 +310,7 @@ cmd_start() {
     -v "$RELEASES/$sha":/app:ro -v "$DATA_DIR":/data -v "$CONFIG_DIR":/config:ro \
     -v "$AGENTFORGE_DOCKER_SOCKET":/var/run/docker.sock \
     -v "$(command -v docker)":/usr/local/bin/docker:ro \
-    -v "$gh_bin":/usr/local/bin/gh:ro \
+    -v "$GH_BIN":/usr/local/bin/gh:ro \
     -v "$AGENTFORGE_STATE_DIR:$AGENTFORGE_STATE_DIR" \
     -v "$AGENTFORGE_CLAUDE_BIN:$AGENTFORGE_CLAUDE_BIN:ro" \
     -v "$AGENTFORGE_PSTACK_DIR:$AGENTFORGE_PSTACK_DIR:ro" \
@@ -224,6 +320,18 @@ cmd_start() {
   curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
     "$(status_url)" || die "no answer from $(status_url); see: docker logs $AGENTFORGE_CONTAINER"
   log "started $sha on http://$AGENTFORGE_BIND:$AGENTFORGE_PORT"
+}
+
+cmd_start() {
+  local sha
+  sha="$(current_sha)"
+  [[ -n "$sha" ]] || die "nothing installed; run: $0 install <ref>"
+  if [[ "$(running_sha)" == "$sha" ]]; then
+    log "already running $sha"
+    return
+  fi
+  preflight "$sha"
+  launch "$sha"
 }
 
 cmd_stop() {
@@ -248,6 +356,10 @@ cmd_status() {
   echo "state dir: $AGENTFORGE_STATE_DIR"
   echo "claude:    $AGENTFORGE_CLAUDE_BIN"
   echo "pstack:    $AGENTFORGE_PSTACK_DIR"
+  if [[ -n "${AGENTFORGE_GH_TOKEN:-}" ]]; then echo "gh token:  AGENTFORGE_GH_TOKEN"
+  elif [[ -f "$GH_TOKEN_FILE" ]]; then echo "gh token:  $GH_TOKEN_FILE"
+  else echo "gh token:  missing (start prints how to create one)"
+  fi
 }
 
 cmd_upgrade() {
@@ -257,8 +369,9 @@ cmd_upgrade() {
     log "already running $sha; nothing to restart"
     return
   fi
+  preflight "$sha"
   cmd_stop
-  cmd_start
+  launch "$sha"
 }
 
 case "${1:-}" in
