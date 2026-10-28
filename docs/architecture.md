@@ -280,6 +280,30 @@ review.approved      { prNumber, approvedAt }           (REST API, nothing liste
 review.rejected      { prNumber, reason, rejectedAt }   (REST API, nothing listens)
 ```
 
+### Coding executor (`src/execution/coding-executor.js`)
+
+Not wired yet. A later change calls it from the orchestrator for `kind: coding` tasks.
+The decision comes from the spike on [#194](https://github.com/sinsonido/agentforge/issues/194#issuecomment-6459499839).
+
+`run(task, opts)` prepares the task clone with `createWorkspaceManager` and runs the Claude Code CLI in a `node:24` container:
+
+```
+docker run --rm --name af-task-<id> --user <uid>:<gid>
+  -e HOME=/home/agent -e CLAUDE_CODE_TMPDIR=/home/agent/tmp -e CLAUDE_CODE_ENABLE_TODO_TOOLS=1 -e GIT_AUTHOR_*/GIT_COMMITTER_*
+  -v <task home>:/home/agent -v <claude>:/usr/local/bin/claude:ro -v <pstack>:/opt/pstack:ro -v <clone>:<clone> -w <clone>
+  node:24 claude -p "<prompt>" --output-format stream-json --verbose
+    --setting-sources project,local --plugin-dir /opt/pstack --strict-mcp-config
+    --model <m> --effort <e> --max-budget-usd <task.budget or executor.budget_usd>
+    --permission-mode bypassPermissions
+```
+
+- The container is the sandbox, so permissions are bypassed. It mounts only the task clone, never other worktrees, push credentials, or `gh`. AgentForge pushes and opens the PR on the host.
+- The prompt starts with `/pstack:poteto-mode`, names the playbook, grants full autonomy, and forbids pushing.
+- Credentials: `CLAUDE_CODE_OAUTH_TOKEN` is passed by name through the docker client env, so it never appears in argv. Without it, `~/.claude/.credentials.json` is copied into the task HOME and removed after the run.
+- Each stdout line becomes a typed event on `task.agent_event { taskId, event }`: `init`, `text`, `tool_use`, `tool_result` (with `evidence: { edited, tested, committed }`), `harness_task`, `rate_limit`, `result`.
+- Timeout or abort sends SIGTERM to the docker client, then `docker stop -t 10 af-task-<id>`. The result is `cancelled`, and no PR may be opened from it.
+- `outcome: 'stopped'` only means the harness ended its turn. Done is decided from evidence: commits ahead of base, from the host clone, and a test run seen passing after the last edit.
+
 ## Data model
 
 `AgentForgeDB` (`src/persistence/db.js`) opens `.agentforge/data.db` (or `database.path`) in WAL mode and creates these tables on startup:
