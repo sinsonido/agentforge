@@ -1,8 +1,5 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { hostRunner } from '../execution/host-runner.js';
 import { parseTaskInput } from './task-model.js';
-
-const execFileAsync = promisify(execFile);
 
 /** Issue label → playbook. The first row whose label the issue carries wins. */
 export const LABEL_PLAYBOOKS = Object.freeze([
@@ -17,20 +14,7 @@ export const LABEL_PLAYBOOKS = Object.freeze([
  */
 export const MARKER = '<!-- agentforge:intake -->';
 
-/** @typedef {(cmd: 'gh', args: string[]) => Promise<string>} Runner */
-
-/** @type {Runner} */
-async function hostRunner(cmd, args) {
-  try {
-    const { stdout } = await execFileAsync(cmd, args, {
-      env: { ...process.env, GH_PROMPT_DISABLED: '1' },
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    return stdout.trim();
-  } catch (err) {
-    throw new Error(`${cmd} ${args.slice(0, 2).join(' ')} failed: ${(err.stderr || err.message).trim()}`, { cause: err });
-  }
-}
+/** @typedef {import('../execution/host-runner.js').Runner} Runner */
 
 /** @param {Array<{ name: string }>} labels */
 export function playbookFor(labels, fallback) {
