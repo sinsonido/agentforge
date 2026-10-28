@@ -212,6 +212,19 @@ git:
   require_review_before_merge: true
   auto_merge_on_ci_pass: false
 
+# ─── INTAKE ────────────────────────────────────────────
+# Open issues with `label` become coding tasks, one per issue.
+# The playbook comes from the issue's labels: bug → bug-fix,
+# enhancement → feature, refactor → refactoring, else default_playbook.
+
+intake:
+  repos:
+    - repo: sinsonido/agentforge
+      base: master           # Branch the task's PR targets
+  label: agentforge
+  interval_seconds: 60
+  default_playbook: feature  # bug-fix, feature, refactoring, investigation, perf-issue
+
 # ─── ALERTS ────────────────────────────────────────────
 
 alerts:
