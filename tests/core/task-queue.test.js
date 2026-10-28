@@ -300,4 +300,41 @@ describe('TaskQueue', () => {
       assert.equal(q._dependenciesMet(task), false);
     });
   });
+
+  describe('with a store', () => {
+    function memoryStore(rows = [], lastSeq = 0) {
+      const saved = new Map(rows.map(r => [r.id, { ...r }]));
+      return {
+        saved,
+        saveTask: (task) => saved.set(task.id, { ...task }),
+        loadQueue: () => ({ tasks: [...saved.values()].map(r => ({ ...r })), lastSeq }),
+      };
+    }
+
+    it('writes every add and status change through', () => {
+      const store = memoryStore();
+      const sq = new TaskQueue({ store });
+      const task = sq.add({ title: 'Persist' });
+      assert.equal(store.saved.get(task.id).status, 'queued');
+      sq.updateStatus(task.id, 'waiting_quota');
+      assert.equal(store.saved.get(task.id).status, 'waiting_quota');
+    });
+
+    it('applies the boot rule to restored tasks', () => {
+      const row = (id, status) => ({ id, title: id, status, priority: 'medium', depends_on: [], created_at: 1 });
+      const store = memoryStore([
+        row('q', 'queued'), row('x', 'executing'), row('w', 'waiting_quota'),
+        row('a', 'assigned'), row('p', 'paused_budget'),
+      ], 9);
+
+      const sq = new TaskQueue({ store });
+
+      assert.deepEqual(
+        Object.fromEntries([...store.saved.values()].map(t => [t.id, t.status])),
+        { q: 'queued', x: 'failed', w: 'queued', a: 'queued', p: 'paused_budget' },
+      );
+      assert.equal(store.saved.get('x').result, 'interrupted');
+      assert.equal(sq.add({ title: 'next' }).id, 't10');
+    });
+  });
 });

@@ -2,6 +2,18 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 
+// Schema upgrades, applied in order. PRAGMA user_version counts how many have run,
+// so an existing DB file gets only the ones it is missing.
+const MIGRATIONS = [
+  `ALTER TABLE tasks ADD COLUMN priority TEXT NOT NULL DEFAULT 'medium';
+   ALTER TABLE tasks ADD COLUMN depends_on TEXT NOT NULL DEFAULT '[]';
+   ALTER TABLE tasks ADD COLUMN force_model TEXT;
+   ALTER TABLE tasks ADD COLUMN allow_tier_downgrade INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE tasks ADD COLUMN context_tokens_estimate INTEGER NOT NULL DEFAULT 0;`,
+];
+
+const TERMINAL_STATUSES = ['completed', 'failed'];
+
 /**
  * AgentForgeDB — SQLite persistence layer using better-sqlite3.
  * Stores task history, cost records, and event logs.
@@ -72,11 +84,15 @@ export class AgentForgeDB {
       CREATE INDEX IF NOT EXISTS idx_events_name ON events(event);
     `);
 
+    this._migrate();
+
     // Prepared statements for performance
     this._stmts = {
       upsertTask: this.db.prepare(`
-        INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at)
-        VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at)
+        INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
+                           priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate)
+        VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
+                @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate)
         ON CONFLICT(id) DO UPDATE SET
           status=excluded.status, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
@@ -86,6 +102,14 @@ export class AgentForgeDB {
       getTask: this.db.prepare('SELECT * FROM tasks WHERE id = ?'),
       getTasksByStatus: this.db.prepare('SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC'),
       getTaskHistory: this.db.prepare('SELECT * FROM tasks ORDER BY created_at DESC LIMIT ?'),
+      liveTasks: this.db.prepare(`
+        SELECT * FROM tasks WHERE status NOT IN (${TERMINAL_STATUSES.map(s => `'${s}'`).join(', ')})
+        ORDER BY created_at, rowid
+      `),
+      lastTaskSeq: this.db.prepare(`
+        SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) AS seq FROM tasks
+        WHERE id GLOB 't[0-9]*' AND NOT SUBSTR(id, 2) GLOB '*[^0-9]*'
+      `),
       insertCost: this.db.prepare(`
         INSERT INTO cost_records (project_id, agent_id, model, tokens_in, tokens_out, cost)
         VALUES (@project_id, @agent_id, @model, @tokens_in, @tokens_out, @cost)
@@ -99,6 +123,16 @@ export class AgentForgeDB {
         VALUES (@agent_id, @from_state, @to_state, @task_id, @data)
       `),
     };
+  }
+
+  _migrate() {
+    const applied = this.db.pragma('user_version', { simple: true });
+    MIGRATIONS.slice(applied).forEach((sql, i) => {
+      this.db.transaction(() => {
+        this.db.exec(sql);
+        this.db.pragma(`user_version = ${applied + i + 1}`);
+      })();
+    });
   }
 
   // ─── Task operations ────────────────────────────────
@@ -120,7 +154,29 @@ export class AgentForgeDB {
       created_at: task.created_at || Date.now(),
       assigned_at: task.assigned_at || null,
       completed_at: task.completed_at || null,
+      priority: task.priority || 'medium',
+      depends_on: JSON.stringify(task.depends_on || []),
+      force_model: task.force_model || null,
+      allow_tier_downgrade: task.allow_tier_downgrade === false ? 0 : 1,
+      context_tokens_estimate: task.context_tokens_estimate || 0,
     });
+  }
+
+  /**
+   * Load what a TaskQueue needs at boot: every non-terminal task, the tasks they
+   * depend on, and the highest generated `t<n>` id so new ids never reuse an old one.
+   */
+  loadQueue() {
+    const live = this._stmts.liveTasks.all().map(rowToTask);
+    const loaded = new Set(live.map(t => t.id));
+    const deps = [];
+    for (const depId of live.flatMap(t => t.depends_on)) {
+      if (loaded.has(depId)) continue;
+      loaded.add(depId);
+      const row = this.getTask(depId);
+      if (row) deps.push(rowToTask(row));
+    }
+    return { tasks: [...live, ...deps], lastSeq: this._stmts.lastTaskSeq.get().seq };
   }
 
   /** Get a task by ID */
@@ -194,6 +250,14 @@ export class AgentForgeDB {
   close() {
     this.db.close();
   }
+}
+
+function rowToTask(row) {
+  return {
+    ...row,
+    depends_on: JSON.parse(row.depends_on),
+    allow_tier_downgrade: row.allow_tier_downgrade === 1,
+  };
 }
 
 export default AgentForgeDB;

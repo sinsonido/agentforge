@@ -70,3 +70,104 @@ describe('createAgentForge() persistence wiring', () => {
     assert.ok(Math.abs(cost - 0.0105) < 1e-12, `cost ${cost} should be 0.0105`);
   });
 });
+
+describe('createAgentForge() restart', () => {
+  let dir;
+  let configPath;
+  let forge;
+  let executed;
+
+  async function boot() {
+    forge = await createAgentForge(configPath);
+    forge.providerRegistry.register({
+      id: 'fake',
+      execute: async ({ messages }) => {
+        executed.push(messages.at(-1).content);
+        return { content: 'done', tokens_in: 1, tokens_out: 1, tool_calls: [], finish_reason: 'stop' };
+      },
+    });
+    return forge;
+  }
+
+  function stopProcess() {
+    forge.orchestrator.stop();
+    forge.eventBus.removeAllListeners();
+    forge.db.close();
+  }
+
+  before(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentforge-restart-'));
+    configPath = join(dir, 'agentforge.yml');
+    writeFileSync(configPath, [
+      'project:',
+      '  name: restart',
+      'providers:',
+      '  ollama:',
+      '    enabled: false',
+      '  fake:',
+      '    enabled: false',
+      'models:',
+      '  fake-model:',
+      '    provider: fake',
+      '    tier: 1',
+      'database:',
+      `  path: ${join(dir, 'data.db')}`,
+    ].join('\n'));
+    executed = [];
+
+    const q = (await boot()).taskQueue;
+    q.add({ id: 'done', title: 'finished before restart', force_model: 'fake-model' });
+    q.updateStatus('done', 'completed', { result: 'ok' });
+    q.add({ title: 'low', priority: 'low', force_model: 'fake-model' });
+    q.add({ title: 'critical', priority: 'critical', force_model: 'fake-model', depends_on: ['done'] });
+    q.add({ title: 'high', priority: 'high', force_model: 'fake-model' });
+    q.add({ id: 'mid-run', title: 'running at shutdown', force_model: 'fake-model' });
+    q.updateStatus('mid-run', 'executing', { model_used: 'fake-model' });
+    stopProcess();
+  });
+
+  after(() => {
+    stopProcess();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('restores queued tasks in priority order and fails the interrupted one', async () => {
+    const q = (await boot()).taskQueue;
+
+    assert.deepEqual(q.getByStatus('queued').map(t => t.title).sort(), ['critical', 'high', 'low']);
+    assert.equal(q.next().title, 'critical', 'a dependency on a completed task stays met');
+
+    const interrupted = forge.db.getTask('mid-run');
+    assert.equal(interrupted.status, 'failed');
+    assert.equal(interrupted.result, 'interrupted');
+    assert.equal(q.get('mid-run').status, 'failed');
+
+    const fresh = q.add({ title: 'after restart', force_model: 'fake-model' });
+    assert.equal(fresh.id, 't4', 'generated ids continue after the last persisted one');
+    assert.equal(forge.db.getTask('done').status, 'completed');
+    stopProcess();
+  });
+
+  it('a second boot changes nothing and runs each queued task once', async () => {
+    const failedAt = (await boot()).db.getTask('mid-run').completed_at;
+    const rowsBefore = forge.db.getTaskHistory(100).length;
+    stopProcess();
+
+    await boot();
+    assert.equal(forge.db.getTask('mid-run').completed_at, failedAt, 'interrupted task is handled once');
+    assert.equal(forge.db.getTaskHistory(100).length, rowsBefore, 'no duplicate rows');
+
+    const drained = new Promise((resolve) => {
+      forge.eventBus.on('task.completed', () => {
+        if (forge.taskQueue.getByStatus('queued').length === 0) resolve();
+      });
+    });
+    forge.orchestrator.start(5);
+    await drained;
+    forge.orchestrator.stop();
+
+    assert.equal(executed.length, 4, `ran ${JSON.stringify(executed)}`);
+    assert.ok(!executed.some(c => c.includes('running at shutdown')), 'interrupted task never re-runs');
+    assert.equal(new Set(executed).size, executed.length, 'no task runs twice');
+  });
+});
