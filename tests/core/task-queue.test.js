@@ -200,7 +200,7 @@ describe('TaskQueue', () => {
     });
 
     it('accepts all valid statuses', () => {
-      const validStatuses = ['queued', 'assigned', 'executing', 'completed', 'failed', 'waiting_quota', 'paused_budget'];
+      const validStatuses = ['queued', 'assigned', 'executing', 'completed', 'failed', 'waiting_quota', 'paused_budget', 'pr-opened', 'cancelled'];
       for (const status of validStatuses) {
         const task = q.add({ title: `Task for ${status}` });
         assert.doesNotThrow(() => q.updateStatus(task.id, status));

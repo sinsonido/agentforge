@@ -2,7 +2,7 @@ import eventBus from './event-bus.js';
 import { TERMINAL_STATUSES, admissionKey } from './task-model.js';
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
-const VALID_STATUSES = ['queued', 'assigned', 'executing', 'completed', 'failed', 'waiting_quota', 'paused_budget'];
+const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', ...TERMINAL_STATUSES];
 
 // What a task loaded from the store becomes when a new process boots. Statuses not
 // listed are kept. An `executing` task lost its run with the previous process; its side
@@ -87,6 +87,7 @@ export class TaskQueue {
         playbook: taskData.playbook,
         step: null,
         budget: taskData.budget ?? null,
+        pr_url: null,
       }),
     };
     this._store?.saveTask(task);
@@ -97,11 +98,11 @@ export class TaskQueue {
 
   /**
    * Get next executable task.
-   * Must be 'queued' and all dependencies must be 'completed'.
+   * Must be 'queued', match `filter`, and all dependencies must be 'completed'.
    */
-  next() {
+  next(filter = () => true) {
     const eligible = Array.from(this._tasks.values())
-      .filter(t => t.status === 'queued')
+      .filter(t => t.status === 'queued' && filter(t))
       .filter(t => this._dependenciesMet(t))
       .sort((a, b) => {
         const pa = PRIORITY_ORDER[a.priority] ?? 2;
@@ -124,7 +125,7 @@ export class TaskQueue {
     task.status = status;
     Object.assign(task, extra);
     if (status === 'assigned') task.assigned_at = Date.now();
-    if (status === 'completed' || status === 'failed') task.completed_at = Date.now();
+    if (TERMINAL_STATUSES.includes(status)) task.completed_at = Date.now();
     this._store?.saveTask(task);
     return task;
   }

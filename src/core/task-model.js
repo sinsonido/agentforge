@@ -5,7 +5,8 @@
  * A task is one of two kinds:
  * - `text`: the single provider call that existed before v2. Carries only the common fields.
  * - `coding`: a poteto-mode playbook run against a repository. Adds
- *   `repo`, `base`, `instruction`, `issue`, `playbook`, `step` and `budget`.
+ *   `repo`, `base`, `instruction`, `issue`, `playbook`, `step`, `budget` and `pr_url`.
+ *   Its lifecycle: queued → executing → pr-opened | failed | cancelled.
  *
  * @typedef {'bug-fix'|'feature'|'refactoring'|'investigation'|'perf-issue'} Playbook
  * @typedef {{ kind: 'text', title: string, type?: string, priority?: string, agent_id?: string }} TextTaskInput
@@ -19,9 +20,9 @@ export const PLAYBOOKS = Object.freeze(['bug-fix', 'feature', 'refactoring', 'in
 
 export const TASK_KINDS = Object.freeze(['text', 'coding']);
 
-export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed']);
+export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed', 'pr-opened', 'cancelled']);
 
-export const CODING_FIELDS = Object.freeze(['repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget']);
+export const CODING_FIELDS = Object.freeze(['repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url']);
 
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 const TITLE_MAX = 120;

@@ -229,7 +229,7 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 2);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 3);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
@@ -254,7 +254,7 @@ describe('AgentForgeDB', () => {
 
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 2);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 3);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.kind, 'text');
       assert.equal(task.priority, 'high');
@@ -291,6 +291,16 @@ describe('AgentForgeDB', () => {
       assert.doesNotThrow(() => db.saveTask(coding('t3', { issue: null })));
       assert.doesNotThrow(() => db.saveTask(coding('t4', { issue: null })));
     });
+
+    for (const status of ['pr-opened', 'cancelled']) {
+      it(`frees the issue for a new task once its task is ${status}`, () => {
+        db.saveTask(coding('t1', { status: 'executing' }));
+        db.saveTask(coding('t1', { status, pr_url: 'https://github.com/o/r/pull/1' }));
+        assert.doesNotThrow(() => db.saveTask(coding('t2')));
+        assert.equal(db.getTask('t1').pr_url, 'https://github.com/o/r/pull/1');
+        assert.deepEqual(db.loadQueue().tasks.map(t => t.id), ['t2']);
+      });
+    }
   });
 
   describe('TaskQueue on a DB file', () => {
