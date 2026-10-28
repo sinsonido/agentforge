@@ -31,7 +31,7 @@ export function playbookFor(labels, fallback) {
  * next poll gets the same task back and posts the one missing comment.
  *
  * @param {{
- *   intake: { repos: Array<{ repo: string, base: string }>, label: string,
+ *   intake: { repos: Array<{ repo: string, base: string, setup_command?: string, test_command?: string }>, label: string,
  *             interval_seconds: number, default_playbook: string },
  *   queue: { admit(input: object): { task: object, created: boolean } },
  *   run?: Runner,
@@ -43,7 +43,7 @@ export function createIntake({ intake, queue, run = hostRunner, log = console })
   let running = false;
   let gen = 0;
 
-  async function takeIssue(repo, base, issue) {
+  async function takeIssue({ repo, base, setup_command, test_command }, issue) {
     if (issue.comments.some((c) => c.body.includes(MARKER))) return;
     const parsed = parseTaskInput({
       kind: 'coding',
@@ -53,6 +53,8 @@ export function createIntake({ intake, queue, run = hostRunner, log = console })
       instruction: `${issue.title}\n\n${issue.body ?? ''}`.trim(),
       issue: issue.number,
       playbook: playbookFor(issue.labels, intake.default_playbook),
+      setup_command,
+      test_command,
     });
     if (!parsed.ok) throw new Error(parsed.error);
     const { task } = queue.admit(parsed.value);
@@ -61,7 +63,8 @@ export function createIntake({ intake, queue, run = hostRunner, log = console })
   }
 
   async function pollOnce() {
-    for (const { repo, base } of intake.repos) {
+    for (const target of intake.repos) {
+      const { repo } = target;
       let issues;
       try {
         issues = JSON.parse(await run('gh', [
@@ -74,7 +77,7 @@ export function createIntake({ intake, queue, run = hostRunner, log = console })
       }
       for (const issue of issues) {
         try {
-          await takeIssue(repo, base, issue);
+          await takeIssue(target, issue);
         } catch (err) {
           log.warn('[intake] %s#%d: %s', repo, issue.number, err.message);
         }

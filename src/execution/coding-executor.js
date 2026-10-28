@@ -61,8 +61,17 @@ function shellSegments(command) {
     .replace(/\d?>\s*\/dev\/null/g, '')
     .replace(/\d?>\s*\/tmp\/\S*/g, '')
     .split(/&&|\|\||[;|\n()]/)
-    .map((s) => s.trim())
+    .map((s) => s.trim().replace(/\s+/g, ' '))
     .filter(Boolean);
+}
+
+/** Index of the last segment of the last run of `wanted` inside `segments`, or -1. */
+function lastRunEnd(segments, wanted) {
+  if (!wanted.length) return -1;
+  for (let i = segments.length - wanted.length; i >= 0; i--) {
+    if (wanted.every((w, j) => segments[i + j] === w)) return i + wanted.length - 1;
+  }
+  return -1;
 }
 
 const isEditSegment = (s) => s.includes('>') || !READ_ONLY_SEGMENTS.some((re) => re.test(s));
@@ -77,29 +86,40 @@ function lastCount(output, key) {
   return last?.n ?? null;
 }
 
-function testOutcome(output) {
-  const fail = lastCount(output, 'fail');
-  const pass = lastCount(output, 'pass');
-  return fail === 0 && pass > 0 ? 'passed' : 'failed';
+function testCounts(output) {
+  return { pass: lastCount(output, 'pass'), fail: lastCount(output, 'fail') };
 }
 
 /**
  * What a finished tool call proves about the working tree. One Bash call can
  * edit, test and commit in sequence, so `testedAfterEdit` says whether its last
  * test segment runs after its last editing segment.
- * @returns {{ edited: boolean, tested: null|'passed'|'failed', testedAfterEdit: boolean, committed: boolean }}
+ *
+ * `testCommand` is the repository's configured test command. Its segments count
+ * as a test and never as an edit. `test` is the last test segment that ran, so the
+ * gate can tell the configured command from a partial run such as one test file.
+ * `counts` come from the last runner summary in the output.
+ * @returns {{ edited: boolean, tested: null|'passed'|'failed', test: null|string,
+ *   counts: null|{ pass: number|null, fail: number|null }, testedAfterEdit: boolean, committed: boolean }}
  */
-export function classifyToolCall(name, input, { isError, output }) {
-  const none = { edited: false, tested: null, testedAfterEdit: false, committed: false };
+export function classifyToolCall(name, input, { isError, output, testCommand = null }) {
+  const none = { edited: false, tested: null, test: null, counts: null, testedAfterEdit: false, committed: false };
   if (EDIT_TOOLS.has(name)) return { ...none, edited: !isError };
   if (name !== 'Bash') return none;
   const command = String(input?.command ?? '');
   const segments = shellSegments(command);
-  const lastEdit = segments.findLastIndex(isEditSegment);
-  const lastTest = segments.findLastIndex((s) => TEST_COMMAND.test(s));
+  const wanted = testCommand ? shellSegments(testCommand) : [];
+  const runEnd = lastRunEnd(segments, wanted);
+  const inRun = (i) => runEnd >= 0 && i > runEnd - wanted.length && i <= runEnd;
+  const lastEdit = segments.findLastIndex((s, i) => !inRun(i) && isEditSegment(s));
+  const lastTest = Math.max(runEnd, segments.findLastIndex((s) => TEST_COMMAND.test(s)));
+  const counts = lastTest >= 0 ? testCounts(output) : null;
+  const passed = !isError && counts?.fail === 0 && counts.pass > 0;
   return {
     edited: lastEdit >= 0,
-    tested: lastTest >= 0 ? (isError ? 'failed' : testOutcome(output)) : null,
+    tested: lastTest >= 0 ? (passed ? 'passed' : 'failed') : null,
+    test: lastTest < 0 ? null : lastTest === runEnd ? testCommand : segments[lastTest],
+    counts,
     testedAfterEdit: lastTest > lastEdit,
     committed: !isError && COMMIT_COMMAND.test(stripQuoted(command)),
   };
@@ -124,12 +144,12 @@ const USAGE_KEYS = ['input_tokens', 'output_tokens', 'cache_creation_input_token
  *   { seq, type: 'init', sessionId, model, cwd, version }
  *   { seq, type: 'text', text }
  *   { seq, type: 'tool_use', id, name, input }
- *   { seq, type: 'tool_result', id, name, isError, output, evidence: { edited, tested, committed } }
+ *   { seq, type: 'tool_result', id, name, isError, output, evidence: { edited, tested, test, counts, committed } }
  *   { seq, type: 'harness_task', op: 'create'|'update', taskId, subject?, status? }
  *   { seq, type: 'rate_limit', status, windows: { five_hour?, seven_day? } }
  *   { seq, type: 'result', subtype, isError, sessionId, costUsd, usage, numTurns, durationMs, text }
  */
-export function createStreamParser() {
+export function createStreamParser({ testCommand = null } = {}) {
   let seq = -1;
   const pending = new Map();
   const messageUsage = new Map();
@@ -148,12 +168,12 @@ export function createStreamParser() {
     const name = call?.name ?? null;
     const isError = block.is_error === true;
     const output = toolOutput(raw, block);
-    const evidence = classifyToolCall(name, call?.input, { isError, output });
+    const evidence = classifyToolCall(name, call?.input, { isError, output, testCommand });
     if (evidence.edited) summary.lastEditSeq = seq;
     if (evidence.tested) {
       // Half steps order a test against an edit made by the same command.
       const testSeq = evidence.testedAfterEdit ? seq + 0.5 : seq - 0.5;
-      summary.observedTestRuns.push({ seq: testSeq, command: call.input.command, passed: evidence.tested === 'passed' });
+      summary.observedTestRuns.push({ seq: testSeq, command: evidence.test, passed: evidence.tested === 'passed', counts: evidence.counts });
     }
 
     const events = [{ seq, type: 'tool_result', id: block.tool_use_id, name, isError, output: output.slice(0, OUTPUT_PREVIEW), evidence }];
@@ -266,10 +286,11 @@ export function buildPrompt(task) {
     '',
     'Constraints for this run:',
     `- Work only in the current directory, a git clone on its own branch based on \`${task.base}\`.`,
-    '- Node 24 and git are installed here.',
+    '- Node 24 and git are installed here. The dependencies are not installed.',
+    `- Before you run any test, set up the clone with exactly: \`${task.setup_command}\``,
     '- Commit your work on the current branch.',
     '- Do NOT push, do NOT open a PR, do NOT call gh. Replace the "Opening a PR" step with: stop after the commits and report.',
-    '- Run the test suite after your last change and before you stop.',
+    `- The test command for this repository is exactly: \`${task.test_command}\`. After your last change and commit, run it as its own command and see it pass. AgentForge accepts the run only if that exact command passes after your last edit with no uncommitted changes. A single test file or a filtered run does not count.`,
     '',
     `Step tracking (required by the AgentForge host): before any other work, create one task per ${title} playbook step with TaskCreate, subject \`step N: <first words of the step>\`. Mark each step in_progress when you start it and completed (or deleted with a skip reason) with TaskUpdate.`,
   ].join('\n');
@@ -383,7 +404,7 @@ function runContainer({ dockerBin, args, env, name, timeoutMs, signal, onLine })
  *   outcome: 'stopped'|'cancelled'|'error', cancelReason: null|'timeout'|'signal', error: string|null,
  *   exitCode: number|null, sessionId: string|null, usage: object, costUsd: number|null,
  *   rateLimits: object, commits: Array<{ sha: string, subject: string }>, uncommitted: boolean,
- *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean }>, lastEditSeq: number,
+ *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean, counts: object|null }>, lastEditSeq: number,
  *   branch: string, dir: string }>}
  */
 export async function run(task, opts = {}) {
@@ -402,7 +423,7 @@ export async function run(task, opts = {}) {
   });
   await mkdir(join(home, 'tmp'), { recursive: true });
 
-  const parser = createStreamParser();
+  const parser = createStreamParser({ testCommand: task.test_command });
   const steps = createStepTracker(await readPlaybook(o.pstackDir, task.playbook));
   const name = containerName(task.id);
   const credentials = await stageCredentials(home, {

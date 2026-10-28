@@ -39,6 +39,18 @@ describe('parseTaskInput()', () => {
     assert.equal(value.budget, null);
   });
 
+  it('defaults the setup and test commands to npm ci and npm test, and keeps given ones', () => {
+    const { value } = parseTaskInput(coding());
+    assert.equal(value.setup_command, 'npm ci');
+    assert.equal(value.test_command, 'npm test');
+    const custom = parseTaskInput(coding({ setup_command: ' make deps ', test_command: 'make check' })).value;
+    assert.equal(custom.setup_command, 'make deps');
+    assert.equal(custom.test_command, 'make check');
+    const bad = parseTaskInput(coding({ test_command: ' ' }));
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /`test_command` must be a non-empty string/);
+  });
+
   it('names every missing required field of a coding task', () => {
     assert.deepEqual(parseTaskInput({ kind: 'coding', repo: 'a/b', base: '  ' }), {
       ok: false,

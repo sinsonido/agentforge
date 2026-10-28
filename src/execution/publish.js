@@ -8,7 +8,7 @@ import { hostRunner } from './host-runner.js';
  *   pass: boolean,
  *   cancelled: boolean,
  *   commits: Array<{ sha: string, subject: string }>,
- *   testRun: { command: string, sha: string } | null,
+ *   testRun: { command: string, sha: string, counts: { pass: number|null, fail: number|null } | null } | null,
  * }} Verdict
  */
 
@@ -52,6 +52,8 @@ export async function publish({ task, clone, verdict, queue, run = hostRunner })
   return url;
 }
 
+const passSummary = (counts) => (counts?.pass != null ? `: ${counts.pass} passed, ${counts.fail ?? 0} failed` : '');
+
 function prBody(task, verdict) {
   const short = (sha) => sha.slice(0, 7);
   const { testRun } = verdict;
@@ -63,7 +65,7 @@ function prBody(task, verdict) {
     ...verdict.commits.map((c) => `- ${short(c.sha)} ${c.subject}`),
     '',
     '## Tests',
-    testRun ? `\`${testRun.command}\` passed after ${short(testRun.sha)}.` : 'No test run recorded.',
+    testRun ? `\`${testRun.command}\` passed after ${short(testRun.sha)}${passSummary(testRun.counts)}.` : 'No test run recorded.',
     '',
     '## Cost',
     `$${(task.cost ?? 0).toFixed(2)}, ${task.tokens_in ?? 0} tokens in, ${task.tokens_out ?? 0} tokens out.`,

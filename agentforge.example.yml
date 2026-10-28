@@ -221,6 +221,8 @@ intake:
   repos:
     - repo: sinsonido/agentforge
       base: master           # Branch the task's PR targets
+      setup_command: npm ci  # Installs dependencies in the task clone (default: npm ci)
+      test_command: npm test # The one command the evidence gate accepts (default: npm test)
   label: agentforge
   interval_seconds: 60
   default_playbook: feature  # bug-fix, feature, refactoring, investigation, perf-issue

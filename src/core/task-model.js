@@ -5,14 +5,16 @@
  * A task is one of two kinds:
  * - `text`: the single provider call that existed before v2. Carries only the common fields.
  * - `coding`: a poteto-mode playbook run against a repository. Adds
- *   `repo`, `base`, `instruction`, `issue`, `playbook`, `step`, `budget` and `pr_url`.
+ *   `repo`, `base`, `instruction`, `issue`, `playbook`, `step`, `budget` and `pr_url`,
+ *   plus `setup_command` and `test_command`: what the harness runs to install the
+ *   repo's dependencies and the one test command the evidence gate accepts.
  *   Its lifecycle: queued → executing → pr-opened | failed | cancelled.
  *
  * @typedef {'bug-fix'|'feature'|'refactoring'|'investigation'|'perf-issue'} Playbook
  * @typedef {{ kind: 'text', title: string, type?: string, priority?: string, agent_id?: string }} TextTaskInput
  * @typedef {{ kind: 'coding', title: string, type?: string, priority?: string, agent_id?: string,
  *   repo: string, base: string, instruction: string, issue: number|null, playbook: Playbook,
- *   budget: number|null }} CodingTaskInput
+ *   budget: number|null, setup_command: string, test_command: string }} CodingTaskInput
  * @typedef {TextTaskInput|CodingTaskInput} TaskInput
  */
 
@@ -22,7 +24,12 @@ export const TASK_KINDS = Object.freeze(['text', 'coding']);
 
 export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed', 'pr-opened', 'cancelled']);
 
-export const CODING_FIELDS = Object.freeze(['repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url']);
+export const CODING_FIELDS = Object.freeze([
+  'repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url', 'setup_command', 'test_command',
+]);
+
+/** Commands a coding task runs when its repository configures none. */
+export const DEFAULT_COMMANDS = Object.freeze({ setup_command: 'npm ci', test_command: 'npm test' });
 
 const REPO_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 const TITLE_MAX = 120;
@@ -60,6 +67,9 @@ export function parseTaskInput(body) {
   if (raw.budget != null && !(typeof raw.budget === 'number' && Number.isFinite(raw.budget) && raw.budget > 0)) {
     problems.push('`budget` must be a positive number of USD');
   }
+  for (const f of Object.keys(DEFAULT_COMMANDS)) {
+    if (raw[f] != null && !isText(raw[f])) problems.push(`\`${f}\` must be a non-empty string`);
+  }
   if (problems.length) return { ok: false, error: problems.join('; ') };
 
   const instruction = raw.instruction.trim();
@@ -75,6 +85,8 @@ export function parseTaskInput(body) {
       issue: raw.issue ?? null,
       playbook: raw.playbook,
       budget: raw.budget ?? null,
+      setup_command: raw.setup_command?.trim() ?? DEFAULT_COMMANDS.setup_command,
+      test_command: raw.test_command?.trim() ?? DEFAULT_COMMANDS.test_command,
     },
   };
 }

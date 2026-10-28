@@ -151,7 +151,7 @@ server:
 describe('loadConfig intake', () => {
   it('reads the intake block from agentforge.example.yml', () => {
     const { intake } = loadConfig(examplePath);
-    assert.deepEqual(intake.repos, [{ repo: 'sinsonido/agentforge', base: 'master' }]);
+    assert.deepEqual(intake.repos, [{ repo: 'sinsonido/agentforge', base: 'master', setup_command: 'npm ci', test_command: 'npm test' }]);
     assert.equal(intake.label, 'agentforge');
   });
 
@@ -177,7 +177,9 @@ intake:
 intake:
   repos:
     - repo: not-a-slug
+      test_command: ""
     - base: main
+      setup_command: 3
   label: ""
   interval_seconds: 0
   default_playbook: rewrite
@@ -185,6 +187,7 @@ intake:
     assert.throws(() => loadConfig(path), (err) => {
       for (const part of [
         'repos[0].repo must be "owner/name"', 'repos[0].base is required',
+        'repos[0].test_command must be a non-empty string', 'repos[1].setup_command must be a non-empty string',
         'repos[1].repo must be "owner/name"', 'label must be a non-empty string',
         'interval_seconds must be a positive number', 'default_playbook must be one of',
       ]) assert.ok(err.message.includes(part), part);

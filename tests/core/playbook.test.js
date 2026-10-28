@@ -9,18 +9,19 @@ import { createStreamParser } from '../../src/execution/coding-executor.js';
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const pstackDir = join(fixtures, 'pstack');
 
-function replay(name) {
-  const parser = createStreamParser();
+function replay(name, testCommand = 'npm test') {
+  const parser = createStreamParser({ testCommand });
   const events = readFileSync(join(fixtures, 'agent-streams', `${name}.jsonl`), 'utf8').split('\n').flatMap((l) => parser.push(l));
   return { events, summary: parser.summary() };
 }
 
-const evidenceFrom = (summary, commits, { cancelled = false, uncommitted = false } = {}) => ({
+const evidenceFrom = (summary, commits, { cancelled = false, uncommitted = false, testCommand = 'npm test' } = {}) => ({
   commits,
   observedTestRuns: summary.observedTestRuns,
   lastEditSeq: summary.lastEditSeq,
   uncommitted,
   cancelled,
+  testCommand,
 });
 
 describe('readPlaybook', () => {
@@ -58,7 +59,8 @@ describe('verdict', () => {
     assert.equal(v.cancelled, false);
     assert.deepEqual(v.commits, twoCommits);
     assert.equal(v.testRun.sha, '0e5cc08');
-    assert.match(v.testRun.command, /npm test/);
+    assert.equal(v.testRun.command, 'npm test');
+    assert.deepEqual(v.testRun.counts, { pass: 314, fail: 0 });
   });
 
   it('fails run 3: the harness stopped with success but committed nothing', () => {
@@ -67,7 +69,7 @@ describe('verdict', () => {
     const v = verdict(evidenceFrom(summary, []));
     assert.equal(v.pass, false);
     assert.equal(v.testRun, null);
-    assert.deepEqual(v.reasons, ['no commit ahead of base', 'no test run passed after the last edit']);
+    assert.deepEqual(v.reasons, ['no commit ahead of base', '`npm test` did not pass after the last edit']);
   });
 
   it('fails a cancelled run even with a commit on the branch', () => {
@@ -90,6 +92,25 @@ describe('verdict', () => {
     assert.equal(verdict(evidenceFrom(summary, twoCommits, { uncommitted: true })).pass, false);
   });
 
+  it('fails PR #258: a single test file passed after the last edit while `npm test` failed', () => {
+    const { summary } = replay('partial-test');
+    const v = verdict(evidenceFrom(summary, [{ sha: 'f41b0d0', subject: 'fix(routing): treat a 0% budget as spent, not healthy (#243)' }]));
+    assert.equal(v.pass, false);
+    assert.equal(v.testRun, null);
+  });
+
+  it('fails when the configured test command never ran', () => {
+    const v = verdict({
+      commits: twoCommits,
+      observedTestRuns: [{ seq: 20, command: 'node --test tests/routing/router.test.js', passed: true }],
+      lastEditSeq: 12,
+      uncommitted: false,
+      cancelled: false,
+      testCommand: 'npm test',
+    });
+    assert.equal(v.pass, false);
+  });
+
   it('fails when the only passing test ran before the last edit', () => {
     const v = verdict({
       commits: twoCommits,
@@ -97,8 +118,9 @@ describe('verdict', () => {
       lastEditSeq: 12,
       uncommitted: false,
       cancelled: false,
+      testCommand: 'npm test',
     });
-    assert.deepEqual(v.reasons, ['no test run passed after the last edit']);
+    assert.deepEqual(v.reasons, ['`npm test` did not pass after the last edit']);
   });
 });
 

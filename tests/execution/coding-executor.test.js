@@ -33,6 +33,8 @@ const task = {
   issue: 7,
   playbook: 'bug-fix',
   budget: null,
+  setup_command: 'npm ci',
+  test_command: 'npm test',
 };
 
 describe('createStreamParser', () => {
@@ -85,11 +87,11 @@ describe('createStreamParser', () => {
 });
 
 describe('classifyToolCall', () => {
-  const bash = (command, output = '', isError = false) => classifyToolCall('Bash', { command }, { isError, output });
+  const bash = (command, output = '', isError = false, testCommand = 'npm test') => classifyToolCall('Bash', { command }, { isError, output, testCommand });
 
   it('does not count a commit message that quotes shell operators as an edit', () => {
     const r = bash('git add a.js && git commit -m "use `?? 1`; `|| 1` coerced 0" && git log --oneline -2');
-    assert.deepEqual(r, { edited: false, tested: null, testedAfterEdit: false, committed: true });
+    assert.deepEqual(r, { edited: false, tested: null, test: null, counts: null, testedAfterEdit: false, committed: true });
   });
 
   it('orders edit, test and commit inside one command by their segments', () => {
@@ -103,7 +105,9 @@ describe('classifyToolCall', () => {
       'git log --oneline',
     ].join('\n');
     const output = 'ℹ pass 1\nℹ fail 1\n✖ sum of 2 and 3\n✔ sum of zeros\n✔ sum of 2 and 3\nℹ pass 2\nℹ fail 0\n4999c53 Fix sum';
-    assert.deepEqual(bash(live, output), { edited: true, tested: 'passed', testedAfterEdit: true, committed: true });
+    assert.deepEqual(bash(live, output), {
+      edited: true, tested: 'passed', test: 'npm test', counts: { pass: 2, fail: 0 }, testedAfterEdit: true, committed: true,
+    });
 
     const editLast = bash('npm test; sed -i s/a/b/ x.js', 'ℹ pass 2\nℹ fail 0');
     assert.equal(editLast.testedAfterEdit, false);
@@ -122,6 +126,23 @@ describe('classifyToolCall', () => {
     assert.equal(bash('node --test x.js | grep ok', '✔ ok').tested, 'failed');
     assert.equal(bash('npm test', 'ℹ pass 3\nℹ fail 0', true).tested, 'failed');
     assert.equal(bash('ls').tested, null);
+  });
+
+  it('names the test that ran last, so a single test file is not the configured command', () => {
+    const partial = bash('npm test | tail -3; node --test tests/a.test.js', 'ℹ pass 9\nℹ fail 1\nℹ pass 3\nℹ fail 0');
+    assert.equal(partial.test, 'node --test tests/a.test.js');
+    assert.equal(partial.tested, 'passed');
+    assert.equal(bash('npm test -- tests/a.test.js', 'ℹ pass 3\nℹ fail 0').test, 'npm test -- tests/a.test.js');
+    assert.equal(bash('cd /w;  npm  test 2>&1 | tail -5', 'ℹ pass 3\nℹ fail 0').test, 'npm test');
+  });
+
+  it('counts a configured test command as a test and not as an edit', () => {
+    const r = bash('git commit -qam fix && make check', '# pass 4\n# fail 0', false, 'make check');
+    assert.deepEqual(r, { edited: false, tested: 'passed', test: 'make check', counts: { pass: 4, fail: 0 }, testedAfterEdit: true, committed: true });
+    const compound = bash('npm run build && npm test', 'ℹ pass 4\nℹ fail 0', false, 'npm run build && npm test');
+    assert.equal(compound.test, 'npm run build && npm test');
+    assert.equal(compound.testedAfterEdit, true);
+    assert.equal(bash('make check', '# pass 4\n# fail 0').edited, true, 'an unconfigured unknown command is an edit');
   });
 
   it('counts Edit and Write tool calls as edits', () => {
@@ -164,6 +185,12 @@ describe('buildDockerArgs', () => {
     assert.match(prompt, /^\/pstack:poteto-mode Work this task with the \*\*Bug fix\*\* playbook/);
     assert.match(prompt, /issue #7/);
     assert.match(prompt, /Do NOT push/);
+  });
+
+  it('names the repository setup and test commands the gate will require', () => {
+    const prompt = buildPrompt({ ...task, setup_command: 'pnpm install --frozen-lockfile', test_command: 'pnpm test' });
+    assert.match(prompt, /set up the clone with exactly: `pnpm install --frozen-lockfile`/);
+    assert.match(prompt, /test command for this repository is exactly: `pnpm test`/);
   });
 });
 

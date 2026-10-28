@@ -81,6 +81,7 @@ export function validateModelReferences(config) {
 /**
  * Throw when the `intake:` block cannot drive the GitHub issue poller.
  * Each repo needs an "owner/name" slug and the base branch its PRs target.
+ * `setup_command` and `test_command` are optional; when given they must be non-empty strings.
  */
 export function validateIntake(intake) {
   if (!intake || typeof intake !== 'object') throw new Error('Invalid intake configuration: intake must be a mapping');
@@ -91,6 +92,9 @@ export function validateIntake(intake) {
     intake.repos.forEach((r, i) => {
       if (!/^[\w.-]+\/[\w.-]+$/.test(r?.repo ?? '')) errors.push(`repos[${i}].repo must be "owner/name"`);
       if (typeof r?.base !== 'string' || !r.base.trim()) errors.push(`repos[${i}].base is required`);
+      for (const f of ['setup_command', 'test_command']) {
+        if (r?.[f] != null && (typeof r[f] !== 'string' || !r[f].trim())) errors.push(`repos[${i}].${f} must be a non-empty string`);
+      }
     });
   }
   if (typeof intake.label !== 'string' || !intake.label.trim()) errors.push('label must be a non-empty string');

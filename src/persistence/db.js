@@ -25,6 +25,9 @@ const MIGRATIONS = [
    DROP INDEX idx_tasks_coding_admission;
    CREATE UNIQUE INDEX idx_tasks_coding_admission ON tasks(repo, issue, playbook)
      WHERE kind = 'coding' AND issue IS NOT NULL AND status NOT IN ('completed', 'failed', 'pr-opened', 'cancelled');`,
+  `ALTER TABLE tasks ADD COLUMN setup_command TEXT;
+   ALTER TABLE tasks ADD COLUMN test_command TEXT;
+   UPDATE tasks SET setup_command = 'npm ci', test_command = 'npm test' WHERE kind = 'coding';`,
 ];
 
 /**
@@ -104,10 +107,10 @@ export class AgentForgeDB {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
                            priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
-                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url)
+                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
                 @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
-                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url)
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command)
         ON CONFLICT(id) DO UPDATE SET
           status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,

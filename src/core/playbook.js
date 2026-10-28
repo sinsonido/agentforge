@@ -49,29 +49,31 @@ export async function readPlaybook(pstackDir, name) {
  * The evidence gate between a stopped harness run and a pushed branch.
  *
  * Passes only when the run was not cancelled, the clone has at least one commit
- * ahead of base and no uncommitted tracked changes, and a test run passed after
- * the last edit. Given a clean tree, that test ran against the last commit's tree.
+ * ahead of base and no uncommitted tracked changes, and the repository's
+ * configured test command passed after the last edit. Any other test run, such
+ * as a single test file, does not count. Given a clean tree, that command ran
+ * against the last commit's tree.
  *
  * @param {{ commits: Array<{ sha: string, subject: string }>,
- *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean }>,
- *   lastEditSeq: number, uncommitted: boolean, cancelled: boolean }} evidence
+ *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean, counts?: object|null }>,
+ *   lastEditSeq: number, uncommitted: boolean, cancelled: boolean, testCommand: string }} evidence
  * @returns {{ pass: boolean, cancelled: boolean, commits: Array<{ sha: string, subject: string }>,
- *   testRun: { command: string, sha: string } | null, reasons: string[] }}
+ *   testRun: { command: string, sha: string, counts: object|null } | null, reasons: string[] }}
  */
-export function verdict({ commits, observedTestRuns, lastEditSeq, uncommitted, cancelled }) {
-  const fresh = observedTestRuns.filter((r) => r.passed && r.seq > lastEditSeq).at(-1);
+export function verdict({ commits, observedTestRuns, lastEditSeq, uncommitted, cancelled, testCommand }) {
+  const fresh = observedTestRuns.filter((r) => r.passed && r.seq > lastEditSeq && r.command === testCommand).at(-1);
   const head = commits.at(-1);
   const reasons = [
     cancelled && 'the run was cancelled',
     !commits.length && 'no commit ahead of base',
     uncommitted && 'uncommitted changes in the clone',
-    !fresh && 'no test run passed after the last edit',
+    !fresh && `\`${testCommand}\` did not pass after the last edit`,
   ].filter(Boolean);
   return {
     pass: reasons.length === 0,
     cancelled,
     commits,
-    testRun: fresh && head ? { command: fresh.command, sha: head.sha } : null,
+    testRun: fresh && head ? { command: fresh.command, sha: head.sha, counts: fresh.counts ?? null } : null,
     reasons,
   };
 }

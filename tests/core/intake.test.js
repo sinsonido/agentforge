@@ -92,6 +92,7 @@ describe('intake', () => {
     ]);
     assert.equal(tasks[0].title, '#7 Crash on save');
     assert.equal(tasks[0].instruction, 'Crash on save\n\nBody of 7');
+    assert.deepEqual([tasks[0].setup_command, tasks[0].test_command], ['npm ci', 'npm test']);
 
     const comments = gh.comments();
     assert.equal(comments.length, 2);
@@ -156,6 +157,18 @@ describe('intake', () => {
     });
     await intake.pollOnce();
     assert.deepEqual(queue.getAll().map((t) => [t.repo, t.issue]), [['acme/lib', 3]]);
+  });
+
+  it('carries each repo\'s configured setup and test commands onto its tasks', async () => {
+    gh.state.issuesByRepo['acme/lib'] = [issue(3, 'Typo', [])];
+    const queue = new TaskQueue();
+    const intake = createIntake({
+      intake: { ...INTAKE, repos: [...INTAKE.repos, { repo: 'acme/lib', base: 'main', setup_command: 'make deps', test_command: 'make check' }] },
+      queue, run: gh.run, log: quiet,
+    });
+    await intake.pollOnce();
+    const lib = queue.getAll().find((t) => t.repo === 'acme/lib');
+    assert.deepEqual([lib.setup_command, lib.test_command], ['make deps', 'make check']);
   });
 
   it('polls on start, again after the interval, and not after stop', async (t) => {
