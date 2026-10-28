@@ -20,6 +20,16 @@ import { createAuthMiddleware } from '../auth/auth.js';
 import { parseTaskInput } from '../core/task-model.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const UI_DIST_DIR = path.resolve(__dirname, '../../ui/dist');
+const UI_MISSING_MESSAGE =
+  'Dashboard not built: ui/dist/index.html is missing. Run `npm run ui:install` once, then `npm run ui:build`. The API and WebSocket keep working.';
+const UI_MISSING_PAGE = `<!doctype html>
+<meta charset="utf-8">
+<title>AgentForge: dashboard not built</title>
+<h1>Dashboard not built</h1>
+<p><code>ui/dist/index.html</code> is missing. Run <code>npm run ui:install</code> once, then <code>npm run ui:build</code>, and reload this page.</p>
+<p>The API and WebSocket keep working.</p>
+`;
 
 // ---------------------------------------------------------------------------
 // CORS middleware — allow any localhost origin for dev dashboard
@@ -429,12 +439,14 @@ const mutationLimiter = rateLimit({
  * Start the AgentForge HTTP (REST + WebSocket) server.
  *
  * Creates an Express application, mounts the API routes under `/api`,
- * serves the static UI from `src/ui/` if it exists, attaches the
- * WebSocket server to the same HTTP server, then starts listening.
+ * serves the React build from `ui/dist/`, attaches the WebSocket server
+ * to the same HTTP server, then starts listening. Without a build, page
+ * requests get a 503 that tells the operator to run `npm run ui:build`.
  *
  * @param {Object} forge  - The forge instance returned by createAgentForge().
  * @param {number} [port=3000] - Port to listen on.
  * @param {string} [host='127.0.0.1'] - Address to bind to.
+ * @param {string} [uiDir] - Directory holding the built dashboard.
  * @returns {http.Server} The underlying Node.js HTTP server.
  *
  * @example
@@ -444,16 +456,15 @@ const mutationLimiter = rateLimit({
  * const forge = await createAgentForge();
  * const server = startServer(forge, 3000);
  */
-export function startServer(forge, port = 3000, host = '127.0.0.1') {
+export function startServer(forge, port = 3000, host = '127.0.0.1', uiDir = UI_DIST_DIR) {
   const app = express();
+  const uiIndex = path.join(uiDir, 'index.html');
 
-  // Security headers — allow inline styles/scripts needed by React/Vite build
-  const isReactBuild = fs.existsSync(path.resolve(__dirname, '../../ui/dist'));
   app.use(helmet({
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", ...(isReactBuild ? [] : ["'unsafe-inline'"])],
+        scriptSrc: ["'self'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", 'data:'],
         connectSrc: ["'self'", 'ws:', 'wss:'],
@@ -481,16 +492,13 @@ export function startServer(forge, port = 3000, host = '127.0.0.1') {
   // API routes
   app.use('/api', buildRouter(forge));
 
-  // Static UI — prefer React build (ui/dist/) over vanilla (src/ui/)
-  const reactBuildDir = path.resolve(__dirname, '../../ui/dist');
-  const vanillaUIDir  = path.resolve(__dirname, '../ui');
-  const uiDir = fs.existsSync(reactBuildDir) ? reactBuildDir : vanillaUIDir;
-  if (fs.existsSync(uiDir)) {
-    app.use(express.static(uiDir));
-    // SPA fallback: serve index.html for any non-API route
-    app.get('/{*splat}', (req, res) => {
-      res.sendFile(path.join(uiDir, 'index.html'));
-    });
+  app.use(express.static(uiDir));
+  app.get('/{*splat}', generalLimiter, (req, res) => {
+    if (fs.existsSync(uiIndex)) return res.sendFile(uiIndex);
+    res.status(503).type('html').send(UI_MISSING_PAGE);
+  });
+  if (!fs.existsSync(uiIndex)) {
+    console.warn('[agentforge:api] %s', UI_MISSING_MESSAGE);
   }
 
   // Create the HTTP server and attach the WebSocket server

@@ -7,6 +7,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
 import { CostTracker } from '../../src/core/cost-tracker.js';
@@ -321,5 +324,34 @@ describe('auth enabled outside NODE_ENV=test', () => {
   it('leaves GET /api/status open as a health check', async (t) => {
     const { call } = await serveWithAuth(t);
     assert.equal((await call('GET', '/api/status')).status, 200);
+  });
+});
+
+describe('dashboard pages', () => {
+  async function serveUi(t, uiDir) {
+    const server = startServer(makeForge(), 0, '127.0.0.1', uiDir);
+    await new Promise((resolve) => server.once('listening', resolve));
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    return `http://127.0.0.1:${server.address().port}`;
+  }
+
+  it('serves index.html for client-side routes when the build exists', async (t) => {
+    const uiDir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-ui-'));
+    t.after(() => fs.rmSync(uiDir, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(uiDir, 'index.html'), '<div id="root"></div>');
+    const base = await serveUi(t, uiDir);
+    for (const page of ['/', '/kanban']) {
+      const res = await fetch(base + page);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), '<div id="root"></div>');
+    }
+  });
+
+  it('answers 503 with the build command when the build is missing', async (t) => {
+    const base = await serveUi(t, path.join(os.tmpdir(), 'af-ui-missing-' + process.pid));
+    const res = await fetch(base + '/');
+    assert.equal(res.status, 503);
+    assert.match(await res.text(), /npm run ui:build/);
+    assert.equal((await fetch(base + '/api/status')).status, 200);
   });
 });
