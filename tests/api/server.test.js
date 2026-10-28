@@ -1,466 +1,317 @@
 /**
- * @file tests/api/server.test.js
- * @description Unit tests for src/api/server.js REST endpoints.
- *
- * Covers: GET /api/status, GET|POST /api/tasks, GET /api/tasks/:id,
- * GET /api/agents, GET /api/quotas, GET /api/costs, GET /api/events,
- * POST /api/control/start|stop, POST /api/review/:pr/approve|reject,
- * and server-level auth middleware integration.
- *
- * Endpoints already covered by tests/api.test.js (not duplicated here):
- *   POST /api/tasks/:id/status, POST /api/agents/:id, POST /api/providers/test
+ * REST endpoints of src/api/server.js not covered by tests/api.test.js
+ * (which owns POST /api/tasks/:id/status, POST /api/agents/:id and
+ * POST /api/providers/test).
  */
 
-import { describe, it, before, after } from 'node:test';
+import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
+import { CostTracker } from '../../src/core/cost-tracker.js';
 import { startServer } from '../../src/api/server.js';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function makeForge({ orchestratorRunning = false } = {}) {
-  const taskQueue    = new TaskQueue();
-  const quotaManager = new QuotaManager();
-  const eventBus     = Object.assign(new EventEmitter(), {
-    getRecentEvents: (n = 50) => Array.from({ length: 3 }, (_, i) => ({
-      event: 'task.queued',
-      data: { id: `t${i}` },
-      timestamp: Date.now(),
-    })).slice(0, n),
+function makeForge(overrides = {}) {
+  const recent = Array.from({ length: 3 }, (_, i) => ({
+    event: 'task.queued',
+    data: { task: { id: `t${i}` } },
+    timestamp: 1000 + i,
+  }));
+  const eventBus = Object.assign(new EventEmitter(), {
+    getRecentEvents: (n) => recent.slice(-n),
     clearRecent: () => {},
   });
-
-  const agentPool = {
-    getAllStatuses() {
-      return { agent1: { agentId: 'agent1', status: 'idle', model: 'claude-opus-4-6' } };
+  return {
+    taskQueue: new TaskQueue(),
+    quotaManager: new QuotaManager(),
+    eventBus,
+    agentPool: {
+      getAllStatuses: () => ({ dev: { agentId: 'dev', status: 'idle', model: 'claude-sonnet-5-5' } }),
     },
-    updateAgentConfig(id) {
-      return id === 'agent1' ? true : false;
+    orchestrator: {
+      _running: false,
+      start() { this._running = true; },
+      stop() { this._running = false; },
     },
+    costTracker: null,
+    providerRegistry: null,
+    db: null,
+    config: {},
+    ...overrides,
   };
-
-  const orchestrator = {
-    _running: orchestratorRunning,
-    start() { this._running = true; },
-    stop()  { this._running = false; },
-  };
-
-  const costTracker = {
-    getAllStats: () => ({
-      totalCost: 1.23,
-      byAgent: { agent1: 0.75 },
-      byModel: { 'claude-opus-4-6': 1.23 },
-      budgets: {},
-    }),
-  };
-
-  const providerRegistry = { get: () => null };
-
-  return { taskQueue, quotaManager, eventBus, agentPool, orchestrator,
-    costTracker, providerRegistry, db: null, config: {} };
 }
 
-/**
- * Make an HTTP request to the test server.
- * Tolerates empty bodies and non-JSON responses by returning raw text as body
- * when JSON.parse fails, preventing SyntaxErrors from hiding the real status.
- */
-function apiReq(server, method, path, body, authHeader) {
-  return new Promise((resolve, reject) => {
-    const { port } = server.address();
-    const headers = { 'Content-Type': 'application/json' };
-    if (authHeader) headers['Authorization'] = authHeader;
-    const opts = { hostname: '127.0.0.1', port, path, method, headers };
-    const r = http.request(opts, res => {
-      let data = '';
-      res.on('data', c => { data += c; });
-      res.on('end', () => {
-        let parsed;
-        try { parsed = data ? JSON.parse(data) : null; } catch { parsed = data; }
-        resolve({ status: res.statusCode, body: parsed });
-      });
-    });
-    r.on('error', reject);
-    if (body !== undefined) r.write(JSON.stringify(body));
-    r.end();
-  });
-}
-
-async function makeServer(opts) {
-  const forge = makeForge(opts);
+async function serve(t, forge = makeForge()) {
   const server = startServer(forge, 0);
-  await new Promise(r => server.once('listening', r));
-  return { server, forge };
+  await new Promise((resolve) => server.once('listening', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const call = async (method, path, { body, headers = {} } = {}) => {
+    const res = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const text = await res.text();
+    return { status: res.status, headers: res.headers, body: text ? JSON.parse(text) : null };
+  };
+  return { forge, call };
 }
-
-// ---------------------------------------------------------------------------
-// GET /api/status
-// ---------------------------------------------------------------------------
 
 describe('GET /api/status', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
+  it('reports task counts, quotas, agents and orchestrator state', async (t) => {
+    const { forge, call } = await serve(t);
+    forge.taskQueue.add({ title: 'a' });
+    const done = forge.taskQueue.add({ title: 'b' });
+    forge.taskQueue.updateStatus(done.id, 'completed');
+    forge.quotaManager.addProvider('anthropic', { max_requests_per_minute: 50 });
 
-  it('returns ok:true with orchestrator, tasks, quotas, agents', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/status');
+    const { status, body } = await call('GET', '/api/status');
+
     assert.equal(status, 200);
     assert.equal(body.ok, true);
-    assert.ok('orchestrator' in body);
-    assert.ok('tasks' in body);
-    assert.ok('quotas' in body);
-    assert.ok('agents' in body);
-  });
-
-  it('reflects orchestrator running state (false)', async () => {
-    const { body } = await apiReq(server, 'GET', '/api/status');
     assert.equal(body.orchestrator.running, false);
+    assert.equal(body.tasks.total, 2);
+    assert.equal(body.tasks.queued, 1);
+    assert.equal(body.tasks.completed, 1);
+    assert.deepEqual(Object.keys(body.quotas), ['anthropic']);
+    assert.equal(body.agents.dev.status, 'idle');
   });
 });
 
-// ---------------------------------------------------------------------------
-// GET /api/tasks
-// ---------------------------------------------------------------------------
+describe('/api/tasks', () => {
+  it('lists every task, or only those matching ?status', async (t) => {
+    const { forge, call } = await serve(t);
+    forge.taskQueue.add({ title: 'queued one' });
+    const done = forge.taskQueue.add({ title: 'done one' });
+    forge.taskQueue.updateStatus(done.id, 'completed');
 
-describe('GET /api/tasks', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
+    const all = await call('GET', '/api/tasks');
+    assert.equal(all.body.count, 2);
+    assert.deepEqual(all.body.tasks.map((x) => x.title).sort(), ['done one', 'queued one']);
 
-  it('returns empty list when no tasks', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/tasks');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.ok(Array.isArray(body.tasks));
-    assert.equal(body.count, 0);
+    const queued = await call('GET', '/api/tasks?status=queued');
+    assert.equal(queued.body.count, 1);
+    assert.equal(queued.body.tasks[0].title, 'queued one');
   });
 
-  it('returns added tasks', async () => {
-    forge.taskQueue.add({ title: 'Task A' });
-    const { body } = await apiReq(server, 'GET', '/api/tasks');
-    assert.equal(body.count, 1);
-    assert.equal(body.tasks[0].title, 'Task A');
-  });
-
-  it('filters tasks by ?status=queued', async () => {
-    const { body } = await apiReq(server, 'GET', '/api/tasks?status=queued');
-    assert.equal(body.ok, true);
-    assert.ok(body.tasks.every(t => t.status === 'queued'));
-  });
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/tasks
-// ---------------------------------------------------------------------------
-
-describe('POST /api/tasks', () => {
-  let server;
-  before(async () => ({ server } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('creates a task and returns 201', async () => {
-    const { status, body } = await apiReq(server, 'POST', '/api/tasks', {
-      title: 'New task',
-      type: 'implement',
-      priority: 'high',
+  it('creates a queued task from the posted fields', async (t) => {
+    const { forge, call } = await serve(t);
+    const { status, body } = await call('POST', '/api/tasks', {
+      body: { title: 'New task', type: 'review', priority: 'high', agent_id: 'dev' },
     });
+
     assert.equal(status, 201);
-    assert.equal(body.ok, true);
-    assert.equal(body.task.title, 'New task');
+    assert.equal(body.task.status, 'queued');
+    assert.equal(body.task.type, 'review');
     assert.equal(body.task.priority, 'high');
-    assert.ok(body.task.id);
+    assert.equal(body.task.agent_id, 'dev');
+    assert.equal(forge.taskQueue.get(body.task.id).title, 'New task');
   });
 
-  it('returns 400 when title is missing', async () => {
-    const { status, body } = await apiReq(server, 'POST', '/api/tasks', { type: 'test' });
+  it('rejects a task without a title', async (t) => {
+    const { forge, call } = await serve(t);
+    const { status, body } = await call('POST', '/api/tasks', { body: { type: 'test' } });
     assert.equal(status, 400);
     assert.equal(body.ok, false);
-    assert.match(body.error, /title/);
+    assert.equal(forge.taskQueue.getAll().length, 0);
+  });
+
+  it('returns one task by id, or 404', async (t) => {
+    const { forge, call } = await serve(t);
+    const task = forge.taskQueue.add({ title: 'Find me' });
+
+    const found = await call('GET', `/api/tasks/${task.id}`);
+    assert.equal(found.status, 200);
+    assert.equal(found.body.task.title, 'Find me');
+
+    const missing = await call('GET', '/api/tasks/no-such-task');
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.ok, false);
   });
 });
-
-// ---------------------------------------------------------------------------
-// GET /api/tasks/:id
-// ---------------------------------------------------------------------------
-
-describe('GET /api/tasks/:id', () => {
-  let server, forge, taskId;
-  before(async () => {
-    ({ server, forge } = await makeServer());
-    const t = forge.taskQueue.add({ title: 'Find me' });
-    taskId = t.id;
-  });
-  after(async () => new Promise(r => server.close(r)));
-
-  it('returns the task when found', async () => {
-    const { status, body } = await apiReq(server, 'GET', `/api/tasks/${taskId}`);
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.task.title, 'Find me');
-  });
-
-  it('returns 404 for unknown id', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/tasks/no-such-task');
-    assert.equal(status, 404);
-    assert.equal(body.ok, false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/agents
-// ---------------------------------------------------------------------------
 
 describe('GET /api/agents', () => {
-  let server;
-  before(async () => ({ server } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('returns agents list from agentPool', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/agents');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.ok(Array.isArray(body.agents));
-    assert.equal(body.agents.length, 1);
-    assert.equal(body.agents[0].agentId, 'agent1');
+  it('lists agent statuses from the pool', async (t) => {
+    const { call } = await serve(t);
+    const { body } = await call('GET', '/api/agents');
+    assert.equal(body.count, 1);
+    assert.deepEqual(body.agents, [{ agentId: 'dev', status: 'idle', model: 'claude-sonnet-5-5' }]);
   });
 });
-
-// ---------------------------------------------------------------------------
-// GET /api/quotas
-// ---------------------------------------------------------------------------
 
 describe('GET /api/quotas', () => {
-  let server;
-  before(async () => ({ server } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
+  it('reports usage per configured provider', async (t) => {
+    const { forge, call } = await serve(t);
+    forge.quotaManager.addProvider('anthropic', { max_requests_per_minute: 50 });
+    forge.quotaManager.recordUsage('anthropic', 100);
 
-  it('returns quota statuses', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/quotas');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.ok(typeof body.quotas === 'object');
+    const { body } = await call('GET', '/api/quotas');
+
+    assert.equal(body.quotas.anthropic.provider, 'anthropic');
+    assert.equal(body.quotas.anthropic.requests.used, 1);
+    assert.equal(body.quotas.anthropic.requests.max, 50);
   });
 });
-
-// ---------------------------------------------------------------------------
-// GET /api/costs
-// ---------------------------------------------------------------------------
 
 describe('GET /api/costs', () => {
-  let server;
-  before(async () => ({ server } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
+  it('reports spend by agent, model and project budget from the cost tracker', async (t) => {
+    const costTracker = new CostTracker({});
+    costTracker.initProject('proj', 10);
+    costTracker.recordCost('proj', 'dev', 'claude-sonnet-5-5', 0.5);
+    costTracker.recordCost('proj', 'qa', 'codestral:22b', 0.25);
+    const { call } = await serve(t, makeForge({ costTracker }));
 
-  it('returns cost data when costTracker is available', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/costs');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
+    const { body } = await call('GET', '/api/costs');
+
     assert.equal(body.available, true);
-    assert.ok(typeof body.costs.totalCostUSD === 'number');
-    assert.ok(typeof body.costs.byAgent === 'object');
-    assert.ok(typeof body.costs.byModel === 'object');
+    assert.equal(body.costs.totalCostUSD, 0.75);
+    assert.deepEqual(body.costs.byAgent, { dev: 0.5, qa: 0.25 });
+    assert.deepEqual(body.costs.byModel, { 'claude-sonnet-5-5': 0.5, 'codestral:22b': 0.25 });
+    assert.equal(body.costs.budgets.proj.spent, 0.75);
+    assert.equal(body.costs.budgets.proj.budget, 10);
   });
 
-  it('returns available:false when no costTracker and no db', async () => {
-    const forge2 = makeForge();
-    forge2.costTracker = null;
-    forge2.db = null;
-    const s = startServer(forge2, 0);
-    await new Promise(r => s.once('listening', r));
-    const { body } = await apiReq(s, 'GET', '/api/costs');
-    assert.equal(body.available, false);
-    await new Promise(r => s.close(r));
+  it('reports costs unavailable without a cost tracker or db', async (t) => {
+    const { call } = await serve(t, makeForge({ orchestrator: null }));
+    const { body } = await call('GET', '/api/costs');
+    assert.deepEqual(body, { ok: true, available: false, costs: null });
   });
 });
-
-// ---------------------------------------------------------------------------
-// GET /api/events
-// ---------------------------------------------------------------------------
 
 describe('GET /api/events', () => {
-  let server;
-  before(async () => ({ server } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
+  it('returns the most recent events, capped by ?limit', async (t) => {
+    const { call } = await serve(t);
 
-  it('returns recent events from eventBus', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/events');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.ok(Array.isArray(body.events));
-    assert.ok(typeof body.count === 'number');
-  });
+    const all = await call('GET', '/api/events');
+    assert.equal(all.body.count, 3);
 
-  it('respects ?limit param', async () => {
-    const { body } = await apiReq(server, 'GET', '/api/events?limit=1');
-    assert.ok(body.events.length <= 1);
+    const one = await call('GET', '/api/events?limit=1');
+    assert.equal(one.body.count, 1);
+    assert.deepEqual(one.body.events[0].data, { task: { id: 't2' } });
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/control/start
-// Each test explicitly sets orchestrator state to avoid order-dependency.
-// ---------------------------------------------------------------------------
+describe('/api/control', () => {
+  it('starts a stopped orchestrator and refuses to start it twice', async (t) => {
+    const { forge, call } = await serve(t);
 
-describe('POST /api/control/start', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('starts the orchestrator when it is stopped', async () => {
-    forge.orchestrator._running = false;
-    const { status, body } = await apiReq(server, 'POST', '/api/control/start');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
+    const first = await call('POST', '/api/control/start');
+    assert.equal(first.status, 200);
     assert.equal(forge.orchestrator._running, true);
+
+    const second = await call('POST', '/api/control/start');
+    assert.equal(second.status, 409);
   });
 
-  it('returns 409 when orchestrator is already running', async () => {
-    forge.orchestrator._running = true; // explicitly set — no order dependency
-    const { status, body } = await apiReq(server, 'POST', '/api/control/start');
-    assert.equal(status, 409);
-    assert.equal(body.ok, false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/control/stop
-// Each test explicitly sets orchestrator state to avoid order-dependency.
-// ---------------------------------------------------------------------------
-
-describe('POST /api/control/stop', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('stops the orchestrator when it is running', async () => {
+  it('stops a running orchestrator and refuses to stop it twice', async (t) => {
+    const { forge, call } = await serve(t);
     forge.orchestrator._running = true;
-    const { status, body } = await apiReq(server, 'POST', '/api/control/stop');
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
+
+    const first = await call('POST', '/api/control/stop');
+    assert.equal(first.status, 200);
     assert.equal(forge.orchestrator._running, false);
+
+    const second = await call('POST', '/api/control/stop');
+    assert.equal(second.status, 409);
   });
 
-  it('returns 409 when orchestrator is already stopped', async () => {
-    forge.orchestrator._running = false; // explicitly set — no order dependency
-    const { status, body } = await apiReq(server, 'POST', '/api/control/stop');
-    assert.equal(status, 409);
-    assert.equal(body.ok, false);
+  it('answers 503 when there is no orchestrator', async (t) => {
+    const { call } = await serve(t, makeForge({ orchestrator: null }));
+    assert.equal((await call('POST', '/api/control/start')).status, 503);
+    assert.equal((await call('POST', '/api/control/stop')).status, 503);
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/review/:prNumber/approve
-// ---------------------------------------------------------------------------
-
-describe('POST /api/review/:prNumber/approve', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('emits review.approved and returns ok', async () => {
+describe('/api/review', () => {
+  it('emits review.approved for a PR number', async (t) => {
+    const { forge, call } = await serve(t);
     let emitted = null;
     forge.eventBus.once('review.approved', (d) => { emitted = d; });
-    const { status, body } = await apiReq(server, 'POST', '/api/review/42/approve');
+
+    const { status, body } = await call('POST', '/api/review/42/approve');
+
     assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.prNumber, 42);
     assert.equal(body.action, 'approved');
-    assert.equal(emitted?.prNumber, 42);
+    assert.equal(emitted.prNumber, 42);
   });
 
-  it('returns 400 for invalid PR number', async () => {
-    const { status, body } = await apiReq(server, 'POST', '/api/review/abc/approve');
-    assert.equal(status, 400);
-    assert.equal(body.ok, false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/review/:prNumber/reject
-// ---------------------------------------------------------------------------
-
-describe('POST /api/review/:prNumber/reject', () => {
-  let server, forge;
-  before(async () => ({ server, forge } = await makeServer()));
-  after(async () => new Promise(r => server.close(r)));
-
-  it('emits review.rejected with reason and returns ok', async () => {
+  it('emits review.rejected with the reason', async (t) => {
+    const { forge, call } = await serve(t);
     let emitted = null;
     forge.eventBus.once('review.rejected', (d) => { emitted = d; });
-    const { status, body } = await apiReq(server, 'POST', '/api/review/7/reject', { reason: 'bad code' });
+
+    const { status, body } = await call('POST', '/api/review/7/reject', { body: { reason: 'bad code' } });
+
     assert.equal(status, 200);
-    assert.equal(body.ok, true);
-    assert.equal(body.prNumber, 7);
-    assert.equal(body.action, 'rejected');
     assert.equal(body.reason, 'bad code');
-    assert.equal(emitted?.reason, 'bad code');
+    assert.equal(emitted.prNumber, 7);
+    assert.equal(emitted.reason, 'bad code');
   });
 
-  it('returns 400 when reason is missing', async () => {
-    const { status, body } = await apiReq(server, 'POST', '/api/review/7/reject', {});
-    assert.equal(status, 400);
-    assert.equal(body.ok, false);
-    assert.match(body.error, /reason/);
-  });
+  it('rejects invalid PR numbers and a missing reason without emitting', async (t) => {
+    const { forge, call } = await serve(t);
+    let emitted = 0;
+    forge.eventBus.on('review.approved', () => { emitted++; });
+    forge.eventBus.on('review.rejected', () => { emitted++; });
 
-  it('returns 400 for invalid PR number', async () => {
-    const { status, body } = await apiReq(server, 'POST', '/api/review/0/reject', { reason: 'x' });
-    assert.equal(status, 400);
-    assert.equal(body.ok, false);
+    assert.equal((await call('POST', '/api/review/abc/approve')).status, 400);
+    assert.equal((await call('POST', '/api/review/0/reject', { body: { reason: 'x' } })).status, 400);
+    assert.equal((await call('POST', '/api/review/7/reject', { body: {} })).status, 400);
+    assert.equal(emitted, 0);
   });
 });
 
-// ---------------------------------------------------------------------------
-// Auth middleware — server-level integration
-// Starts the server with auth enabled (NODE_ENV=production) and verifies that
-// protected endpoints enforce the Bearer token, while GET /api/status remains
-// exempt as a health-check endpoint.
-// ---------------------------------------------------------------------------
+describe('CORS', () => {
+  it('echoes a localhost origin', async (t) => {
+    const { call } = await serve(t);
+    const { headers } = await call('GET', '/api/status', { headers: { Origin: 'http://localhost:5173' } });
+    assert.equal(headers.get('access-control-allow-origin'), 'http://localhost:5173');
+  });
 
-describe('Auth middleware — server-level', () => {
+  it('answers preflight with 204', async (t) => {
+    const { call } = await serve(t);
+    const { status } = await call('OPTIONS', '/api/tasks', {
+      headers: { Origin: 'http://localhost:3000', 'Access-Control-Request-Method': 'POST' },
+    });
+    assert.equal(status, 204);
+  });
+
+  it('sends no allow-origin header for other origins', async (t) => {
+    const { call } = await serve(t);
+    const { headers } = await call('GET', '/api/status', { headers: { Origin: 'https://evil.example.com' } });
+    assert.equal(headers.get('access-control-allow-origin'), null);
+  });
+});
+
+describe('auth enabled outside NODE_ENV=test', () => {
   const SECRET = 'server-auth-test-secret';
-  let server, savedNodeEnv;
 
-  before(async () => {
-    savedNodeEnv = process.env.NODE_ENV;
-    process.env.NODE_ENV = 'production'; // disable test-bypass in auth middleware
-    const forge = makeForge();
-    forge.config = { server: { auth: { enabled: true, secret: SECRET } } };
-    server = startServer(forge, 0);
-    await new Promise(r => server.once('listening', r));
+  async function serveWithAuth(t) {
+    const saved = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    t.after(() => {
+      if (saved === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = saved;
+    });
+    return serve(t, makeForge({ config: { server: { auth: { enabled: true, secret: SECRET } } } }));
+  }
+
+  it('rejects requests without a token or with a wrong one', async (t) => {
+    const { call } = await serveWithAuth(t);
+    assert.equal((await call('GET', '/api/tasks')).status, 401);
+    assert.equal((await call('GET', '/api/tasks', { headers: { Authorization: 'Bearer wrong' } })).status, 401);
   });
 
-  after(async () => {
-    process.env.NODE_ENV = savedNodeEnv;
-    return new Promise(r => server.close(r));
-  });
-
-  it('returns 401 on protected endpoint without Authorization header', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/tasks');
-    assert.equal(status, 401);
-    assert.equal(body.ok, false);
-  });
-
-  it('returns 401 with wrong Bearer token', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/tasks', undefined, 'Bearer wrong-token');
-    assert.equal(status, 401);
-    assert.equal(body.ok, false);
-  });
-
-  it('GET /api/status is accessible without token (health-check exemption)', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/status');
+  it('accepts the correct bearer token', async (t) => {
+    const { call } = await serveWithAuth(t);
+    const { status } = await call('GET', '/api/tasks', { headers: { Authorization: `Bearer ${SECRET}` } });
     assert.equal(status, 200);
-    assert.equal(body.ok, true);
   });
 
-  it('returns 200 with correct Bearer token', async () => {
-    const { status, body } = await apiReq(server, 'GET', '/api/tasks', undefined, `Bearer ${SECRET}`);
-    assert.equal(status, 200);
-    assert.equal(body.ok, true);
+  it('leaves GET /api/status open as a health check', async (t) => {
+    const { call } = await serveWithAuth(t);
+    assert.equal((await call('GET', '/api/status')).status, 200);
   });
 });
