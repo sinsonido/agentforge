@@ -1,4 +1,6 @@
-export interface Task {
+export type Playbook = 'bug-fix' | 'feature' | 'refactoring' | 'investigation' | 'perf-issue'
+
+interface TaskBase {
   id: string
   title: string
   type: string
@@ -15,6 +17,23 @@ export interface Task {
   assigned_at?: number
   completed_at?: number
 }
+
+export interface TextTask extends TaskBase {
+  kind: 'text'
+}
+
+export interface CodingTask extends TaskBase {
+  kind: 'coding'
+  repo: string
+  base: string
+  instruction: string
+  issue: number | null
+  playbook: Playbook
+  step: string | null
+  budget: number | null
+}
+
+export type Task = TextTask | CodingTask
 
 export interface AgentStatus {
   id: string

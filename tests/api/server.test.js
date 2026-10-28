@@ -118,6 +118,53 @@ describe('/api/tasks', () => {
     assert.equal(forge.taskQueue.getAll().length, 0);
   });
 
+  const codingBody = {
+    kind: 'coding', repo: 'sinsonido/agentforge', base: 'master',
+    instruction: 'Add task model v2', issue: 195, playbook: 'feature', budget: 5,
+  };
+
+  it('creates a coding task and lists it with its coding fields', async (t) => {
+    const { call } = await serve(t);
+    const created = await call('POST', '/api/tasks', { body: codingBody });
+
+    assert.equal(created.status, 201);
+    assert.equal(created.body.created, true);
+    assert.equal(created.body.task.kind, 'coding');
+    assert.equal(created.body.task.title, 'Add task model v2');
+    assert.equal(created.body.task.step, null);
+
+    const listed = await call('GET', '/api/tasks');
+    assert.equal(listed.body.tasks[0].playbook, 'feature');
+    assert.equal(listed.body.tasks[0].issue, 195);
+  });
+
+  it('returns the live coding task for a duplicate repo, issue and playbook', async (t) => {
+    const { forge, call } = await serve(t);
+    const first = await call('POST', '/api/tasks', { body: codingBody });
+    const again = await call('POST', '/api/tasks', { body: codingBody });
+
+    assert.equal(again.status, 200);
+    assert.equal(again.body.created, false);
+    assert.equal(again.body.task.id, first.body.task.id);
+    assert.equal(forge.taskQueue.getAll().length, 1);
+  });
+
+  it('rejects a coding task missing its required fields with a readable message', async (t) => {
+    const { forge, call } = await serve(t);
+    const { status, body } = await call('POST', '/api/tasks', { body: { kind: 'coding', title: 'x', repo: 'o/r' } });
+
+    assert.equal(status, 400);
+    assert.deepEqual(body, { ok: false, error: 'a coding task requires `base`, `instruction`, `playbook`' });
+    assert.equal(forge.taskQueue.getAll().length, 0);
+  });
+
+  it('rejects a coding task with an unknown playbook', async (t) => {
+    const { call } = await serve(t);
+    const { status, body } = await call('POST', '/api/tasks', { body: { ...codingBody, playbook: 'yolo' } });
+    assert.equal(status, 400);
+    assert.match(body.error, /`playbook` must be one of/);
+  });
+
   it('returns one task by id, or 404', async (t) => {
     const { forge, call } = await serve(t);
     const task = forge.taskQueue.add({ title: 'Find me' });
