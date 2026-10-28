@@ -16,6 +16,7 @@ import {
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const stream = (name) => join(fixtures, 'agent-streams', `${name}.jsonl`);
+const pstackDir = join(fixtures, 'pstack');
 
 function parse(name) {
   const parser = createStreamParser();
@@ -215,10 +216,13 @@ describe('run (fake docker)', () => {
     writeFileSync(credentialsFile, '{"secret":"x"}');
     const bus = new EventEmitter();
     const seen = [];
+    const stepChanges = [];
     bus.on('task.agent_event', (e) => seen.push(e));
+    bus.on('task.step_changed', (e) => stepChanges.push(e.step));
+    const replayTask = { ...task, id: 'replay1' };
 
-    const result = await run({ ...task, id: 'replay1' }, {
-      stateDir: join(tmp, 'state'), pstackDir: '/pstack', claudeBin: '/bin/claude', dockerBin: docker,
+    const result = await run(replayTask, {
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, credentialsFile, eventBus: bus,
     });
 
@@ -228,6 +232,8 @@ describe('run (fake docker)', () => {
     assert.deepEqual(result.commits.map((c) => c.subject), ['fix: the bug']);
     assert.equal(result.uncommitted, false);
     assert.ok(seen.length > 50 && seen.every((e) => e.taskId === 'replay1'));
+    assert.deepEqual(stepChanges, [1, 5], 'TaskUpdate hints step 1, the first commit moves it to the commit step');
+    assert.equal(replayTask.step, 5);
 
     const runCall = readCalls().find((c) => c.args?.[0] === 'run');
     assert.equal(runCall.args[runCall.args.indexOf('--max-budget-usd') + 1], '2');
@@ -239,7 +245,7 @@ describe('run (fake docker)', () => {
   it('prefers the OAuth token and never puts it in argv', async () => {
     fake({ mode: 'replay', stream: stream('no-commit') });
     const result = await run({ ...task, id: 'token1', budget: 0.5 }, {
-      stateDir: join(tmp, 'state'), pstackDir: '/pstack', claudeBin: '/bin/claude', dockerBin: docker,
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok-secret', eventBus: new EventEmitter(),
     });
     assert.equal(result.outcome, 'stopped');
@@ -256,7 +262,7 @@ describe('run (fake docker)', () => {
     bus.once('task.agent_event', () => controller.abort());
 
     const result = await run({ ...task, id: 'cancel1' }, {
-      stateDir: join(tmp, 'state'), pstackDir: '/pstack', claudeBin: '/bin/claude', dockerBin: docker,
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok', eventBus: bus, signal: controller.signal,
     });
 
@@ -269,7 +275,7 @@ describe('run (fake docker)', () => {
   it('cancels on timeout', async () => {
     fake({ mode: 'hang', stream: stream('cancelled'), linesBeforeHang: 1 });
     const result = await run({ ...task, id: 'timeout1' }, {
-      stateDir: join(tmp, 'state'), pstackDir: '/pstack', claudeBin: '/bin/claude', dockerBin: docker,
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok', eventBus: new EventEmitter(), timeoutMs: 300,
     });
     assert.equal(result.outcome, 'cancelled');
@@ -278,7 +284,7 @@ describe('run (fake docker)', () => {
 
   it('reports error when the harness exits without a result', async () => {
     const result = await run({ ...task, id: 'err1' }, {
-      stateDir: join(tmp, 'state'), pstackDir: '/pstack', claudeBin: '/bin/claude', dockerBin: join(tmp, 'missing-docker'),
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: join(tmp, 'missing-docker'),
       repoUrl: upstream, oauthToken: 'tok', eventBus: new EventEmitter(),
     });
     assert.equal(result.outcome, 'error');

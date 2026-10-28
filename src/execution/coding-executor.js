@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import defaultEventBus from '../core/event-bus.js';
+import { createStepTracker, readPlaybook } from '../core/playbook.js';
 import { createWorkspaceManager } from './workspace.js';
 
 const execFileAsync = promisify(execFile);
@@ -402,6 +403,7 @@ export async function run(task, opts = {}) {
   await mkdir(join(home, 'tmp'), { recursive: true });
 
   const parser = createStreamParser();
+  const steps = createStepTracker(await readPlaybook(o.pstackDir, task.playbook));
   const name = containerName(task.id);
   const credentials = await stageCredentials(home, {
     oauthToken: o.oauthToken ?? process.env.CLAUDE_CODE_OAUTH_TOKEN,
@@ -431,7 +433,13 @@ export async function run(task, opts = {}) {
       exit = await runContainer({
         dockerBin: o.dockerBin, args, env, name, timeoutMs: o.timeoutMs, signal: o.signal,
         onLine: (line) => {
-          for (const event of parser.push(line)) eventBus.emit('task.agent_event', { taskId: task.id, event });
+          for (const event of parser.push(line)) {
+            eventBus.emit('task.agent_event', { taskId: task.id, event });
+            if (steps.push(event)) {
+              task.step = steps.step;
+              eventBus.emit('task.step_changed', { taskId: task.id, step: steps.step });
+            }
+          }
         },
       });
     }
@@ -457,6 +465,7 @@ export async function run(task, opts = {}) {
     uncommitted,
     observedTestRuns: summary.observedTestRuns,
     lastEditSeq: summary.lastEditSeq,
+    step: steps.step,
     branch,
     dir,
   };

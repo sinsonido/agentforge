@@ -303,6 +303,8 @@ docker run --rm --name af-task-<id> --user <uid>:<gid>
 - Each stdout line becomes a typed event on `task.agent_event { taskId, event }`: `init`, `text`, `tool_use`, `tool_result` (with `evidence: { edited, tested, committed }`), `harness_task`, `rate_limit`, `result`.
 - Timeout or abort sends SIGTERM to the docker client, then `docker stop -t 10 af-task-<id>`. The result is `cancelled`, and no PR may be opened from it.
 - `outcome: 'stopped'` only means the harness ended its turn. Done is decided from evidence: commits ahead of base, from the host clone, and a test run seen passing after the last edit.
+- `src/core/playbook.js` reads the playbook's numbered steps from `<pstack>/skills/poteto-mode/playbooks/<name>.md`. The executor sets `task.step` and emits `task.step_changed { taskId, step }`. The harness's `TaskUpdate(in_progress)` is a hint, and the first commit moves the step to the first step that names commits.
+- `verdict({ commits, observedTestRuns, lastEditSeq, uncommitted, cancelled })` returns `{ pass, cancelled, commits, testRun: { command, sha } | null, reasons }`. It passes only with a commit ahead of base, a clean tree, a test run passing after the last edit, and no cancel.
 
 ## Data model
 
