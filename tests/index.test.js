@@ -171,3 +171,52 @@ describe('createAgentForge() restart', () => {
     assert.equal(new Set(executed).size, executed.length, 'no task runs twice');
   });
 });
+
+describe('createAgentForge() coding loop wiring', () => {
+  const dirs = [];
+
+  async function boot(extra) {
+    const dir = mkdtempSync(join(tmpdir(), 'agentforge-coding-'));
+    dirs.push(dir);
+    const configPath = join(dir, 'agentforge.yml');
+    writeFileSync(configPath, [
+      'providers:',
+      '  ollama:',
+      '    enabled: false',
+      'database:',
+      `  path: ${join(dir, 'data.db')}`,
+      ...extra(dir),
+    ].join('\n'));
+    const forge = await createAgentForge(configPath);
+    forge.db.close();
+    return forge;
+  }
+
+  after(() => {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('gives the orchestrator a coding runner and intake when executor and intake repos are set', async () => {
+    const forge = await boot((dir) => [
+      'intake:',
+      '  repos:',
+      '    - repo: acme/app',
+      '      base: master',
+      'executor:',
+      `  state_dir: ${join(dir, 'state')}`,
+      `  pstack_dir: ${join(dir, 'pstack')}`,
+      '  concurrency: 2',
+    ]);
+    forge.eventBus.removeAllListeners('task.agent_event');
+
+    assert.equal(forge.orchestrator.coding.concurrency, 2);
+    assert.equal(typeof forge.orchestrator.intake.start, 'function');
+  });
+
+  it('leaves coding unwired without an executor block', async () => {
+    const forge = await boot(() => ['intake:', '  repos:', '    - repo: acme/app', '      base: master']);
+
+    assert.equal(forge.orchestrator.coding, null);
+    assert.equal(forge.orchestrator.intake, null);
+  });
+});
