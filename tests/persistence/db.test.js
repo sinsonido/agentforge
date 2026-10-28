@@ -198,6 +198,47 @@ describe('AgentForgeDB', () => {
     });
   });
 
+  describe('loadQueue()', () => {
+    it('returns live tasks with their completed dependencies and the last generated id', () => {
+      db.saveTask({ id: 't7', title: 'Dep', status: 'completed', created_at: 1 });
+      db.saveTask({ id: 't2', title: 'Old', status: 'failed', created_at: 2 });
+      db.saveTask({ id: 'custom', title: 'Run', status: 'queued', priority: 'high', depends_on: ['t7'], allow_tier_downgrade: false, created_at: 3 });
+
+      const { tasks, lastSeq } = db.loadQueue();
+
+      assert.deepEqual(tasks.map(t => t.id), ['custom', 't7']);
+      assert.equal(tasks[0].priority, 'high');
+      assert.deepEqual(tasks[0].depends_on, ['t7']);
+      assert.equal(tasks[0].allow_tier_downgrade, false);
+      assert.equal(lastSeq, 7);
+    });
+  });
+
+  describe('schema migration', () => {
+    it('upgrades a DB file created before the queue columns existed, once', async () => {
+      const { default: Database } = await import('better-sqlite3');
+      const path = `${TEST_DIR}/legacy.db`;
+      const legacy = new Database(path);
+      legacy.exec(`CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT, status TEXT, agent_id TEXT, project_id TEXT,
+        model_used TEXT, tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, cost REAL DEFAULT 0,
+        result TEXT, created_at INTEGER, assigned_at INTEGER, completed_at INTEGER)`);
+      legacy.prepare("INSERT INTO tasks (id, title, status, created_at) VALUES ('t1', 'Legacy', 'queued', 1)").run();
+      legacy.close();
+
+      new AgentForgeDB(path).close();
+      const upgraded = new AgentForgeDB(path);
+
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 1);
+      const [task] = upgraded.loadQueue().tasks;
+      assert.equal(task.title, 'Legacy');
+      assert.equal(task.priority, 'medium');
+      assert.deepEqual(task.depends_on, []);
+      assert.equal(task.allow_tier_downgrade, true);
+      upgraded.close();
+    });
+  });
+
   // ─── Lifecycle ────────────────────────────────────────────────────────────
 
   describe('close()', () => {
