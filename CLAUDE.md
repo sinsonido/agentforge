@@ -11,13 +11,12 @@ management, and SQLite persistence. Node.js ES modules only (no transpilation, *
 ## Architecture
 
 What runs today: a task enters the queue, the router picks a model, the provider
-makes one call, and the result text is stored. There is no tool use: `_resolveTools()`
-in `orchestrator.js` returns `[]`, so agents never edit files, run commands, or use git.
+makes one call, and the result text is stored. There is no tool use: the orchestrator
+sends no tool definitions, so agents never edit files, run commands, or use git.
 See `ROADMAP.md` for the reorientation.
 
 `src/` and `ui/` are siblings at the repository root. Modules marked
-**not wired** exist in code, but nothing in `createAgentForge()` or the CLI imports them.
-They are scheduled for removal in v0.9 (see #190).
+**not wired** exist in code, but nothing in `createAgentForge()` or the CLI uses them.
 
 ```
 agentforge/
@@ -35,17 +34,11 @@ agentforge/
 │   │   └── dependency-graph.js  # Task DAG with topological sort (tested, not wired)
 │   ├── execution/
 │   │   ├── context-builder.js   # Assembles provider messages from tasks
-│   │   ├── output-collector.js  # Parses and normalises provider responses
-│   │   ├── inter-agent-comm.js  # not wired
-│   │   ├── parallel-execution.js # not wired
-│   │   ├── review-workflow.js   # not wired
-│   │   └── task-decomposition.js # not wired
+│   │   └── output-collector.js  # Parses and normalises provider responses
 │   ├── providers/
 │   │   ├── interface.js         # BaseProvider, OllamaProvider, ProviderRegistry
 │   │   └── anthropic.js / google.js / deepseek.js / openrouter.js
 │   ├── routing/router.js        # Model selection: rules → tier → fallback chain
-│   ├── git/                     # not wired: GitManager, BranchStrategy, AutoCommit, AutoPR, ReviewGate, GitHubIntegration
-│   ├── plugins/                 # not wired: PluginManager is never instantiated
 │   ├── persistence/db.js        # AgentForgeDB — better-sqlite3 (WAL mode)
 │   ├── auth/auth.js             # Optional Bearer-token middleware (server.auth)
 │   ├── api/server.js            # Express REST API (port 4242)
@@ -79,7 +72,7 @@ agentforge/
 { content, tokens_in, tokens_out, tool_calls, finish_reason }
 ```
 
-Providers receive `tools` as `undefined` or `[]` today, so `tool_calls` is always empty in practice.
+Providers receive no `tools` today, so `tool_calls` is always empty in practice.
 
 **EventBus events emitted by wired code** (use `eventBus.emit / .on / .once`):
 ```
@@ -89,9 +82,7 @@ agent.paused | agent.resumed                   (from the orchestrator on quota e
 quota.throttled | quota.exhausted | quota.reset
 budget.warning | budget.exceeded               → { projectId, spent, budget, spent_pct }
 cost.recorded    → { projectId, agentId, model, tokensIn, tokensOut, cost }  (Orchestrator only)
-review.approved | review.rejected              (from the REST API; nothing listens)
 ```
-`git.*` and `review.pending` come only from the unwired `src/git/` modules.
 
 **AgentLifecycle states** (defined in `agent-lifecycle.js`; the orchestrator never calls
 the transitions, so registered agents stay `idle`):

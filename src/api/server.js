@@ -401,45 +401,6 @@ function buildRouter(forge) {
     });
   }
 
-  // ── POST /api/review/:prNumber/approve ───────────────────────────────────
-  /**
-   * Approve a PR review.
-   */
-  router.post('/review/:prNumber/approve', (req, res) => {
-    try {
-      const prNumber = parseInt(req.params.prNumber, 10);
-      if (!Number.isFinite(prNumber) || prNumber < 1) {
-        return res.status(400).json({ ok: false, error: 'Invalid PR number' });
-      }
-      forge.eventBus.emit('review.approved', { prNumber, approvedAt: Date.now() });
-      res.json({ ok: true, prNumber, action: 'approved' });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
-  // ── POST /api/review/:prNumber/reject ────────────────────────────────────
-  /**
-   * Reject a PR review.
-   * Body: { reason }
-   */
-  router.post('/review/:prNumber/reject', (req, res) => {
-    try {
-      const prNumber = parseInt(req.params.prNumber, 10);
-      if (!Number.isFinite(prNumber) || prNumber < 1) {
-        return res.status(400).json({ ok: false, error: 'Invalid PR number' });
-      }
-      const { reason } = req.body ?? {};
-      if (!reason) {
-        return res.status(400).json({ ok: false, error: '`reason` is required in the request body' });
-      }
-      forge.eventBus.emit('review.rejected', { prNumber, reason, rejectedAt: Date.now() });
-      res.json({ ok: true, prNumber, action: 'rejected', reason });
-    } catch (err) {
-      res.status(500).json({ ok: false, error: err.message });
-    }
-  });
-
   return router;
 }
 

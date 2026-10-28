@@ -29,12 +29,7 @@ const EVENTS = [
   'agent.resumed',
   'budget.warning',
   'budget.exceeded',
-  'git.committed',
-  'git.pr_created',
   'cost.recorded',
-  'review.pending',
-  'review.approved',
-  'review.rejected',
 ];
 
 /** Interval (ms) between server-initiated pings to detect dead connections. */

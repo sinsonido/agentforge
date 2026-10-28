@@ -4,7 +4,6 @@
 project:
   name: "My Project"
   budget: 50.00            # Max spend in USD
-  currency: USD
 
 # ─── PROVIDERS ─────────────────────────────────────────
 # Configure each AI provider with API keys and quota limits.
@@ -166,51 +165,26 @@ routing:
       prefer: codestral:22b           # Local first
       fallback: [deepseek-flash, claude-haiku-5-5]
 
-  fallback_strategy: same_tier_then_downgrade
-  cost_optimization: true
-
 # ─── TEAM ──────────────────────────────────────────────
-# Agent definitions. Each agent has a model, prompt, and tools.
+# Agent definitions. Each agent has a model and a prompt.
 
 team:
   - name: Architect
     role: Lead Architect
     model: claude-opus-5-5
     system_prompt_file: prompts/architect.md
-    tools: [file_read, ask_agent]
-    require_review: false
 
   - name: Developer
     role: Backend Developer
     model: claude-sonnet-5-5
     fallback_models: [gemini-3.8-flash, deepseek-v4-pro]
     system_prompt_file: prompts/developer.md
-    tools: [file_read, file_write, git_commit, run_tests, ask_agent]
-    require_review: true
-    reviewer: Architect
-    max_cost_per_task: 5.00
 
   - name: Tester
     role: QA Engineer
     model: deepseek-flash
     fallback_models: [codestral:22b]
     system_prompt_file: prompts/tester.md
-    tools: [file_read, file_write, run_tests]
-    allow_tier_downgrade: true
-
-# ─── GIT ───────────────────────────────────────────────
-
-git:
-  enabled: true
-  remote: origin
-  base_branch: develop
-  branch_pattern: "agent/{agent_name}/{task_id}"
-  commit_format: "[T{tier}] {task_title} (#{task_id})"
-  auto_branch: true
-  auto_commit: true
-  auto_pr: true
-  require_review_before_merge: true
-  auto_merge_on_ci_pass: false
 
 # ─── INTAKE ────────────────────────────────────────────
 # Open issues with `label` become coding tasks, one per issue.

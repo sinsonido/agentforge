@@ -4,12 +4,11 @@ import yaml from 'js-yaml';
 import { PLAYBOOKS } from '../core/task-model.js';
 
 const DEFAULT_CONFIG = {
-  project: { name: 'AgentForge Project', budget: 100, currency: 'USD' },
+  project: { name: 'AgentForge Project', budget: 100 },
   providers: {},
   models: {},
-  routing: { rules: [], fallback_strategy: 'same_tier_then_downgrade', cost_optimization: true },
+  routing: { rules: [] },
   team: [],
-  git: { enabled: false },
   alerts: { budget_warning_pct: 0.80, budget_pause_pct: 0.95 },
   server: { port: 4242, host: 'localhost' },
   intake: { repos: [], label: 'agentforge', interval_seconds: 60, default_playbook: 'feature' },
@@ -135,12 +134,7 @@ export function buildFromConfig(config) {
         fallback_models: a.fallback_models || [],
         system_prompt: a.system_prompt || '',
         system_prompt_file: a.system_prompt_file || null,
-        tools: a.tools || [],
-        require_review: a.require_review || false,
-        reviewer: a.reviewer || null,
-        max_cost_per_task: a.max_cost_per_task || null,
         max_tokens_per_task: a.max_tokens_per_task || null,
-        allow_tier_downgrade: a.allow_tier_downgrade ?? true,
       };
 
       // Load system prompt from file if specified

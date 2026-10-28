@@ -112,7 +112,6 @@ describe('WebSocket /ws', () => {
       ['quota.exhausted', { provider: 'anthropic' }],
       ['budget.warning', { projectId: 'p', spent_pct: 0.85 }],
       ['agent.paused', { agent: 'dev', reason: 'quota_exhausted' }],
-      ['review.approved', { prNumber: 7 }],
     ];
     const received = nextMessages(ws, sent.length);
     await opened;

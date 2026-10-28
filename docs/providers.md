@@ -271,7 +271,7 @@ The router tries models in this order when a task is dispatched:
 
 A task returns from `waiting_quota` to the queue on the `quota.reset` event. The quota tracker emits that event only when a provider goes straight from `exhausted` to `available`. A provider that passes through `throttled` on its way down does not emit it, and its waiting tasks stay in `waiting_quota`.
 
-The agent setting `allow_tier_downgrade` is not read. The router checks `allow_tier_downgrade` on the task, and neither the API nor the CLI sets it, so tier downgrade is always allowed.
+There is no agent setting `allow_tier_downgrade`. The router checks `allow_tier_downgrade` on the task, and neither the API nor the CLI sets it, so tier downgrade is always allowed.
 
 ---
 

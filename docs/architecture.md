@@ -2,7 +2,7 @@
 
 This page describes the code on `master`. One path works end to end: a task enters the queue (persisted in SQLite), the router picks a model, the provider answers one prompt, and the result text is stored. Agents have no tools, so they do not edit files, run commands, or use git.
 
-Several modules exist in `src/` but nothing starts them. [Present but not wired](#present-but-not-wired) lists them. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)). [ROADMAP.md](../ROADMAP.md) describes the reorientation.
+[Present but not wired](#present-but-not-wired) lists the module that exists in `src/` but that nothing starts. [ROADMAP.md](../ROADMAP.md) describes the reorientation.
 
 ## Design principles
 
@@ -77,7 +77,7 @@ flowchart TD
     Record --> Complete["outputCollector.parse()\nstatus = completed, result = text\nemit task.completed"] --> End
 ```
 
-`_resolveTools()` returns `[]`, so providers never receive tool definitions. There is no review step and no git step after a task completes.
+The orchestrator sends no tool definitions to providers. There is no review step and no git step after a task completes.
 
 The orchestrator also listens to events:
 
@@ -125,7 +125,7 @@ flowchart TD
     AV5 -- no --> W(["wait: all_providers_exhausted"])
 ```
 
-A model is available when it is listed under `models`, its `context` fits `context_tokens_estimate`, and `quotaManager.canExecute()` allows its provider. The orchestrator sets `context_tokens_estimate` after routing, so the first routing of a task always sees `0`. The router ignores `routing.fallback_strategy` and `routing.cost_optimization`.
+A model is available when it is listed under `models`, its `context` fits `context_tokens_estimate`, and `quotaManager.canExecute()` allows its provider. The orchestrator sets `context_tokens_estimate` after routing, so the first routing of a task always sees `0`.
 
 ### QuotaManager (`src/core/quota-tracker.js`)
 
@@ -225,13 +225,6 @@ interface AgentConfig {
   system_prompt: string            // Or loaded from system_prompt_file
   system_prompt_file: string | null
   max_tokens_per_task: number | null
-
-  // Loaded but not read by any running code:
-  tools: string[]
-  require_review: boolean
-  reviewer: string | null
-  max_cost_per_task: number | null
-  allow_tier_downgrade: boolean
 }
 ```
 
@@ -276,8 +269,6 @@ agent.config_updated { agentId, model, updatedAt }      (REST API)
 budget.warning       { projectId, spent, budget, spent_pct }
 budget.exceeded      { projectId, spent, budget, spent_pct }
 cost.recorded        { projectId, agentId, model, tokensIn, tokensOut, cost }
-review.approved      { prNumber, approvedAt }           (REST API, nothing listens)
-review.rejected      { prNumber, reason, rejectedAt }   (REST API, nothing listens)
 ```
 
 ### Coding executor (`src/execution/coding-executor.js`)
@@ -368,16 +359,7 @@ Nothing reads the database back into the queue or the cost tracker at startup.
 
 ## Present but not wired
 
-These modules exist in `src/`, but nothing in `createAgentForge()` or the CLI imports them. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)).
-
-- `src/git/`: `GitManager`, `BranchStrategy`, `AutoCommit`, `AutoPR`, `ReviewGate`, `GitHubIntegration`. No branch, commit, or pull request is ever created.
-- `src/plugins/`: `PluginManager` and `BasePlugin`. `PluginManager` is never instantiated. See [Plugin System](plugins.md).
-- `src/execution/inter-agent-comm.js`: the `ask_agent` round trip.
-- `src/execution/task-decomposition.js`: splitting a task into subtasks.
-- `src/execution/review-workflow.js`: the review step between agents.
-- `src/execution/parallel-execution.js`: the concurrency gate.
-
-`src/core/dependency-graph.js` is also unused at runtime. The queue checks `depends_on` itself.
+`src/core/dependency-graph.js` is unused at runtime. The queue checks `depends_on` itself.
 
 ## File structure
 
@@ -414,14 +396,7 @@ agentforge/
 │   │   └── openrouter.js       # OpenAI-compatible + HTTP-Referer headers
 │   ├── execution/
 │   │   ├── context-builder.js  # Assembles messages for providers
-│   │   ├── output-collector.js # Parses provider responses
-│   │   ├── inter-agent-comm.js # not wired
-│   │   ├── parallel-execution.js # not wired
-│   │   ├── review-workflow.js  # not wired
-│   │   ├── task-decomposition.js # not wired
-│   │   └── index.js
-│   ├── git/                    # not wired (six modules + index.js)
-│   ├── plugins/                # not wired (plugin-manager.js + index.js)
+│   │   └── output-collector.js # Parses provider responses
 │   ├── auth/
 │   │   └── auth.js             # Optional Bearer-token middleware
 │   ├── api/
@@ -439,7 +414,7 @@ agentforge/
 │   ├── api/auth.test.js
 │   ├── core/                   # task-queue, event-bus, quota-tracker, cost-tracker,
 │   │                           # agent-lifecycle, dependency-graph
-│   ├── execution/              # context-builder, output-collector, parallel-execution
+│   ├── execution/              # context-builder, output-collector, coding loop
 │   ├── persistence/db.test.js
 │   └── routing/router.test.js
 ├── docs/
