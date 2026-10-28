@@ -84,6 +84,20 @@ ensure_cloudflared() {
 }
 
 # ------------------------------------------------------------------
+# Construye el dashboard React si falta ui/dist
+# ------------------------------------------------------------------
+ensure_ui() {
+  if [[ -f "$ROOT_DIR/ui/dist/index.html" ]]; then
+    return
+  fi
+  echo "[ui] ui/dist no existe, construyendo el dashboard (solo una vez)..." >&2
+  if [[ ! -d "$ROOT_DIR/ui/node_modules" ]]; then
+    npm --prefix "$ROOT_DIR/ui" ci --no-audit --no-fund >&2
+  fi
+  npm --prefix "$ROOT_DIR/ui" run build >&2
+}
+
+# ------------------------------------------------------------------
 # Espera hasta que el API responda (max 15s)
 # ------------------------------------------------------------------
 wait_for_server() {
@@ -99,6 +113,8 @@ wait_for_server() {
   done
   log "[tunnel] Servidor listo."
 }
+
+ensure_ui
 
 # ------------------------------------------------------------------
 # TUNNEL mode
