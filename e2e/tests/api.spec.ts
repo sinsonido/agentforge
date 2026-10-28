@@ -179,18 +179,11 @@ test.describe('API — GET /api/agents', () => {
     expect(ids).toContain('tester')
   })
 
-  test('each agent has id, state, name fields', async ({ request }) => {
+  test('each agent has id, name, role and model fields', async ({ request }) => {
     const body = await (await request.get('/api/agents')).json()
     for (const agent of body.agents) {
-      expect(agent).toHaveProperty('id')
-      expect(agent).toHaveProperty('state')
-      expect(agent).toHaveProperty('name')
+      expect(Object.keys(agent).sort()).toEqual(['id', 'model', 'name', 'role'])
     }
-  })
-
-  test('fresh agents start in idle state', async ({ request }) => {
-    const body = await (await request.get('/api/agents')).json()
-    expect(body.agents.every((a: { state: string }) => a.state === 'idle')).toBe(true)
   })
 })
 
