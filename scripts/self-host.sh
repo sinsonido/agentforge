@@ -7,7 +7,8 @@
 #   current             symlink to the active release
 #   data/               SQLite database (container working directory)
 #   config/             agentforge.yml, created once from the example
-#   state/              reserved for the executor (per-task clones)
+#   state/              executor state: mirrors, per-task clones and HOMEs
+#   tools/              gh release binary for the container
 set -euo pipefail
 
 AGENTFORGE_HOME="${AGENTFORGE_HOME:-$HOME/.agentforge-self}"
@@ -16,15 +17,20 @@ AGENTFORGE_NODE_IMAGE="${AGENTFORGE_NODE_IMAGE:-node:24}"
 AGENTFORGE_CONTAINER="${AGENTFORGE_CONTAINER:-agentforge-self}"
 AGENTFORGE_BIND="${AGENTFORGE_BIND:-127.0.0.1}"
 AGENTFORGE_PORT="${AGENTFORGE_PORT:-4343}"
-# Reserved for the executor (#197, #198, #200). Not mounted yet.
+# What the coding executor needs. See docs/self-hosting.md, "Executor mounts".
 AGENTFORGE_DOCKER_SOCKET="${AGENTFORGE_DOCKER_SOCKET:-/var/run/docker.sock}"
 AGENTFORGE_STATE_DIR="${AGENTFORGE_STATE_DIR:-$AGENTFORGE_HOME/state}"
+AGENTFORGE_CLAUDE_BIN="${AGENTFORGE_CLAUDE_BIN:-$(readlink -f "$HOME/.local/bin/claude" 2>/dev/null || true)}"
+AGENTFORGE_PSTACK_DIR="${AGENTFORGE_PSTACK_DIR:-$HOME/.claude/plugins/cache/cursor-plugins/pstack/0.15.30}"
+AGENTFORGE_CLAUDE_CREDENTIALS="${AGENTFORGE_CLAUDE_CREDENTIALS:-$HOME/.claude/.credentials.json}"
+AGENTFORGE_GH_VERSION="${AGENTFORGE_GH_VERSION:-2.62.0}"
 
 REPO="$AGENTFORGE_HOME/repo.git"
 RELEASES="$AGENTFORGE_HOME/releases"
 CURRENT="$AGENTFORGE_HOME/current"
 DATA_DIR="$AGENTFORGE_HOME/data"
 CONFIG_DIR="$AGENTFORGE_HOME/config"
+TOOLS_DIR="$AGENTFORGE_HOME/tools"
 CONTAINER_PORT=4242
 
 log() { echo "[self-host] $*" >&2; }
@@ -48,8 +54,13 @@ Environment:
   AGENTFORGE_CONTAINER     $AGENTFORGE_CONTAINER
   AGENTFORGE_BIND          $AGENTFORGE_BIND
   AGENTFORGE_PORT          $AGENTFORGE_PORT
-  AGENTFORGE_DOCKER_SOCKET $AGENTFORGE_DOCKER_SOCKET (reserved, unused)
-  AGENTFORGE_STATE_DIR     $AGENTFORGE_STATE_DIR (reserved, unused)
+  AGENTFORGE_DOCKER_SOCKET      $AGENTFORGE_DOCKER_SOCKET
+  AGENTFORGE_STATE_DIR          $AGENTFORGE_STATE_DIR
+  AGENTFORGE_CLAUDE_BIN         $AGENTFORGE_CLAUDE_BIN
+  AGENTFORGE_PSTACK_DIR         $AGENTFORGE_PSTACK_DIR
+  AGENTFORGE_CLAUDE_CREDENTIALS $AGENTFORGE_CLAUDE_CREDENTIALS
+  AGENTFORGE_GH_VERSION         $AGENTFORGE_GH_VERSION
+  CLAUDE_CODE_OAUTH_TOKEN       (optional; preferred over the credentials file)
 EOF
 }
 
@@ -113,10 +124,62 @@ ensure_config() {
   mkdir -p "$CONFIG_DIR"
   {
     cat "$CURRENT/agentforge.example.yml"
-    printf '\n# Added by scripts/self-host.sh on first run\ndatabase:\n  path: /data/agentforge.db\n'
+    cat <<'YAML'
+
+# Added by scripts/self-host.sh on first run. The ${...} values come from
+# the container environment that `self-host.sh start` sets.
+database:
+  path: /data/agentforge.db
+
+executor:
+  image: node:24
+  state_dir: ${AGENTFORGE_STATE_DIR}
+  pstack_dir: ${AGENTFORGE_PSTACK_DIR}
+  claude_bin: ${AGENTFORGE_CLAUDE_BIN}
+  credentials_file: ${AGENTFORGE_CLAUDE_CREDENTIALS}
+  oauth_token: ${CLAUDE_CODE_OAUTH_TOKEN}
+  model: sonnet
+  effort: medium
+  budget_usd: 2.00
+  timeout_minutes: 30
+  concurrency: 1
+YAML
   } > "$config.tmp"
   mv "$config.tmp" "$config"
   log "created $config"
+}
+
+gh_arch() {
+  case "$(uname -m)" in
+    x86_64) echo amd64 ;;
+    aarch64|arm64) echo arm64 ;;
+    *) die "no gh release for $(uname -m)" ;;
+  esac
+}
+
+# A host gh is often linked against the host's loader, so the container gets
+# the static release binary instead.
+ensure_gh() {
+  local dir="$TOOLS_DIR/gh-$AGENTFORGE_GH_VERSION" name
+  if [[ ! -x "$dir/gh" ]]; then
+    name="gh_${AGENTFORGE_GH_VERSION}_linux_$(gh_arch)"
+    log "downloading gh $AGENTFORGE_GH_VERSION"
+    rm -rf "$dir.partial"
+    mkdir -p "$dir.partial"
+    curl -fsSL "https://github.com/cli/cli/releases/download/v$AGENTFORGE_GH_VERSION/$name.tar.gz" \
+      | tar -xz -C "$dir.partial" --strip-components=2 "$name/bin/gh"
+    mv -T "$dir.partial" "$dir"
+  fi
+  echo "$dir/gh"
+}
+
+check_executor_inputs() {
+  [[ -S "$AGENTFORGE_DOCKER_SOCKET" ]] || die "no Docker socket at $AGENTFORGE_DOCKER_SOCKET"
+  [[ -x "$AGENTFORGE_CLAUDE_BIN" ]] || die "no claude binary at '$AGENTFORGE_CLAUDE_BIN'; set AGENTFORGE_CLAUDE_BIN"
+  [[ -d "$AGENTFORGE_PSTACK_DIR/skills/poteto-mode" ]] || die "no pstack at $AGENTFORGE_PSTACK_DIR; set AGENTFORGE_PSTACK_DIR"
+  [[ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" || -f "$AGENTFORGE_CLAUDE_CREDENTIALS" ]] \
+    || die "no harness credentials: set CLAUDE_CODE_OAUTH_TOKEN or AGENTFORGE_CLAUDE_CREDENTIALS"
+  command -v gh >/dev/null || die "gh is required on the host for its token"
 }
 
 cmd_start() {
@@ -127,14 +190,35 @@ cmd_start() {
     log "already running $sha"
     return
   fi
+  check_executor_inputs
+  local gh_bin creds=()
+  gh_bin="$(ensure_gh)"
+  if [[ -f "$AGENTFORGE_CLAUDE_CREDENTIALS" ]]; then
+    creds=(-v "$AGENTFORGE_CLAUDE_CREDENTIALS:$AGENTFORGE_CLAUDE_CREDENTIALS:ro")
+  fi
   docker rm -f "$AGENTFORGE_CONTAINER" >/dev/null 2>&1 || true
-  mkdir -p "$DATA_DIR"
+  mkdir -p "$DATA_DIR" "$AGENTFORGE_STATE_DIR"
   ensure_config
+  # Secrets go by name (-e VAR), so they never appear in the host process list.
+  GH_TOKEN="$(gh auth token)" CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN:-}" \
   docker run -d --name "$AGENTFORGE_CONTAINER" --init --stop-signal SIGINT \
     --restart unless-stopped --label "agentforge.sha=$sha" \
     --user "$(id -u):$(id -g)" -e HOME=/tmp \
+    --group-add "$(stat -c %g "$AGENTFORGE_DOCKER_SOCKET")" \
+    -e GH_TOKEN -e CLAUDE_CODE_OAUTH_TOKEN \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=credential.https://github.com.helper \
+    -e 'GIT_CONFIG_VALUE_0=!gh auth git-credential' \
+    -e AGENTFORGE_STATE_DIR="$AGENTFORGE_STATE_DIR" -e AGENTFORGE_PSTACK_DIR="$AGENTFORGE_PSTACK_DIR" \
+    -e AGENTFORGE_CLAUDE_BIN="$AGENTFORGE_CLAUDE_BIN" -e AGENTFORGE_CLAUDE_CREDENTIALS="$AGENTFORGE_CLAUDE_CREDENTIALS" \
     -p "$AGENTFORGE_BIND:$AGENTFORGE_PORT:$CONTAINER_PORT" \
     -v "$RELEASES/$sha":/app:ro -v "$DATA_DIR":/data -v "$CONFIG_DIR":/config:ro \
+    -v "$AGENTFORGE_DOCKER_SOCKET":/var/run/docker.sock \
+    -v "$(command -v docker)":/usr/local/bin/docker:ro \
+    -v "$gh_bin":/usr/local/bin/gh:ro \
+    -v "$AGENTFORGE_STATE_DIR:$AGENTFORGE_STATE_DIR" \
+    -v "$AGENTFORGE_CLAUDE_BIN:$AGENTFORGE_CLAUDE_BIN:ro" \
+    -v "$AGENTFORGE_PSTACK_DIR:$AGENTFORGE_PSTACK_DIR:ro" \
+    "${creds[@]}" \
     -w /data "$AGENTFORGE_NODE_IMAGE" \
     node /app/src/cli.js --config /config/agentforge.yml start --host 0.0.0.0 --port "$CONTAINER_PORT" >/dev/null
   curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-connrefused --retry-all-errors \
@@ -160,8 +244,10 @@ cmd_status() {
   echo "current:   $(current_sha)"
   echo "running:   ${running:-no}"
   echo "endpoint:  $(status_url) -> ${http:-000}"
-  echo "socket:    $AGENTFORGE_DOCKER_SOCKET (reserved)"
-  echo "state dir: $AGENTFORGE_STATE_DIR (reserved)"
+  echo "socket:    $AGENTFORGE_DOCKER_SOCKET"
+  echo "state dir: $AGENTFORGE_STATE_DIR"
+  echo "claude:    $AGENTFORGE_CLAUDE_BIN"
+  echo "pstack:    $AGENTFORGE_PSTACK_DIR"
 }
 
 cmd_upgrade() {

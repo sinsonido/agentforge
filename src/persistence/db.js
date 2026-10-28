@@ -21,6 +21,10 @@ const MIGRATIONS = [
    ALTER TABLE tasks ADD COLUMN budget REAL;
    CREATE UNIQUE INDEX idx_tasks_coding_admission ON tasks(repo, issue, playbook)
      WHERE kind = 'coding' AND issue IS NOT NULL AND status NOT IN ('completed', 'failed');`,
+  `ALTER TABLE tasks ADD COLUMN pr_url TEXT;
+   DROP INDEX idx_tasks_coding_admission;
+   CREATE UNIQUE INDEX idx_tasks_coding_admission ON tasks(repo, issue, playbook)
+     WHERE kind = 'coding' AND issue IS NOT NULL AND status NOT IN ('completed', 'failed', 'pr-opened', 'cancelled');`,
 ];
 
 /**
@@ -100,12 +104,12 @@ export class AgentForgeDB {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
                            priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
-                           kind, repo, base, instruction, issue, playbook, step, budget)
+                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
                 @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
-                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget)
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url)
         ON CONFLICT(id) DO UPDATE SET
-          status=excluded.status, step=excluded.step, model_used=excluded.model_used,
+          status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
           cost=excluded.cost, result=excluded.result,
           assigned_at=excluded.assigned_at, completed_at=excluded.completed_at
@@ -172,6 +176,8 @@ export class AgentForgeDB {
       context_tokens_estimate: task.context_tokens_estimate || 0,
       kind: task.kind || 'text',
       ...Object.fromEntries(CODING_FIELDS.map(f => [f, task[f] ?? null])),
+      // better-sqlite3 binds a JS number as REAL, which the TEXT column would keep as '5.0'.
+      step: task.step == null ? null : String(task.step),
     });
   }
 

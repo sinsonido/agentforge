@@ -11,6 +11,10 @@ import { GoogleProvider } from './providers/google.js';
 import { DeepSeekProvider } from './providers/deepseek.js';
 import { OpenRouterProvider } from './providers/openrouter.js';
 import eventBus from './core/event-bus.js';
+import { createIntake } from './core/intake.js';
+import { run as runExecutor } from './execution/coding-executor.js';
+import { executorConfig, runCodingTask } from './execution/coding-runner.js';
+import { publish } from './execution/publish.js';
 
 /**
  * Bootstrap AgentForge from config.
@@ -71,6 +75,26 @@ export async function createAgentForge(configPath) {
   // Router
   const router = new Router({ rules, models, agents, quotaManager });
 
+  // Coding loop: with an executor and intake repos, labelled issues become coding
+  // tasks that run in a container and end in a PR opened from this host.
+  let coding = null;
+  let intake = null;
+  if (config.executor && config.intake?.repos?.length) {
+    const { concurrency, options } = executorConfig(config.executor);
+    coding = {
+      concurrency,
+      run: (task, signal) => runCodingTask(task, {
+        queue: taskQueue,
+        execute: (t, opts) => runExecutor(t, { ...options, ...opts }),
+        publish,
+        signal,
+      }),
+    };
+    intake = createIntake({ intake: config.intake, queue: taskQueue });
+    eventBus.on('task.agent_event', ({ taskId, event }) => console.log('[coding] %s %s', taskId, describeAgentEvent(event)));
+    console.log('[agentforge] Coding loop: %s, concurrency %d', config.intake.repos.map(r => r.repo).join(', '), concurrency);
+  }
+
   // Orchestrator
   const orchestrator = new Orchestrator({
     taskQueue,
@@ -79,6 +103,8 @@ export async function createAgentForge(configPath) {
     providerRegistry,
     agents,
     config,
+    coding,
+    intake,
   });
 
   // Agent pool — register all agents from config
@@ -127,6 +153,17 @@ export async function createAgentForge(configPath) {
     agents,
     models,
   };
+}
+
+function describeAgentEvent(event) {
+  const clip = (v) => String(v ?? '').replace(/\s+/g, ' ').slice(0, 160);
+  switch (event.type) {
+    case 'tool_use': return `tool_use ${event.name} ${clip(event.input?.command ?? event.input?.file_path ?? event.input?.subject ?? '')}`;
+    case 'tool_result': return `tool_result ${event.name}${event.isError ? ' error' : ''}`;
+    case 'text': return `text ${clip(event.text)}`;
+    case 'result': return `result ${event.subtype} $${event.costUsd ?? '?'} turns=${event.numTurns}`;
+    default: return event.type;
+  }
 }
 
 // Run directly

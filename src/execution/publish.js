@@ -1,26 +1,6 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { hostRunner } from './host-runner.js';
 
-const execFileAsync = promisify(execFile);
-
-/**
- * Run a host command with an argument array and return its trimmed stdout.
- * Uses the host's git and gh credentials, never a task's HOME or container.
- * @typedef {(cmd: 'git'|'gh', args: string[], opts?: { cwd?: string }) => Promise<string>} Runner
- * @type {Runner}
- */
-export async function hostRunner(cmd, args, { cwd } = {}) {
-  try {
-    const { stdout } = await execFileAsync(cmd, args, {
-      cwd,
-      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GH_PROMPT_DISABLED: '1' },
-      maxBuffer: 16 * 1024 * 1024,
-    });
-    return stdout.trim();
-  } catch (err) {
-    throw new Error(`${cmd} ${args[0]} failed: ${(err.stderr || err.message).trim()}`, { cause: err });
-  }
-}
+/** @typedef {import('./host-runner.js').Runner} Runner */
 
 /**
  * What the evidence gate decided about one run.

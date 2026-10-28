@@ -127,7 +127,7 @@ describe('publish', () => {
       const gh = fakeGitHub();
       await assert.rejects(publish({ task, clone, verdict: { ...verdict, ...bad }, queue, run: gh.run }), pattern);
       assert.equal(gh.calls.length, 0);
-      assert.equal(queue.get('t1').pr_url, undefined);
+      assert.equal(queue.get('t1').pr_url, null);
     });
   }
 });

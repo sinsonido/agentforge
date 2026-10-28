@@ -5,7 +5,7 @@ import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
 import eventBus from '../../src/core/event-bus.js';
 
-const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning'];
+const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
 const OK = { content: 'result text', tokens_in: 10, tokens_out: 20, tool_calls: [], finish_reason: 'stop' };
 
 let running = [];
@@ -23,6 +23,8 @@ function makeOrchestrator({
   execute = async () => OK,
   agents = {},
   config = {},
+  coding = null,
+  intake = null,
 } = {}) {
   const calls = [];
   const providerRegistry = {
@@ -38,6 +40,8 @@ function makeOrchestrator({
     providerRegistry,
     agents,
     config,
+    coding,
+    intake,
   });
   return { orchestrator, taskQueue, calls };
 }
@@ -208,5 +212,129 @@ describe('Orchestrator event reactions', () => {
     assert.equal(taskQueue.get(mine.id).status, 'paused_budget');
     assert.equal(taskQueue.get(unscoped.id).status, 'paused_budget');
     assert.equal(taskQueue.get(other.id).status, 'queued');
+  });
+});
+
+const CODING = { kind: 'coding', repo: 'acme/app', base: 'master', instruction: 'Fix it', playbook: 'bug-fix' };
+
+function fakeCoding(concurrency = 1) {
+  const runs = [];
+  return {
+    runs,
+    coding: {
+      concurrency,
+      run(task, signal) {
+        let finish;
+        const done = new Promise((r) => { finish = r; });
+        const queue = runs.queue;
+        queue.updateStatus(task.id, 'executing');
+        signal.addEventListener('abort', () => {
+          queue.updateStatus(task.id, 'cancelled');
+          finish();
+        });
+        runs.push({ task, signal, finish: (status = 'pr-opened', extra = {}) => { queue.updateStatus(task.id, status, extra); finish(); } });
+        return done;
+      },
+    },
+  };
+}
+
+describe('Orchestrator coding tasks', () => {
+  function setup(concurrency = 1) {
+    const fake = fakeCoding(concurrency);
+    const made = makeOrchestrator({ coding: fake.coding });
+    fake.runs.queue = made.taskQueue;
+    return { ...made, runs: fake.runs };
+  }
+
+  it('routes coding tasks to the coding runner and text tasks to the provider', async () => {
+    const { orchestrator, taskQueue, calls, runs } = setup();
+    const code = taskQueue.add({ ...CODING, issue: 1 });
+    const text = taskQueue.add({ title: 'plain', priority: 'low' });
+
+    start(orchestrator);
+    await waitFor(() => taskQueue.get(text.id).status === 'completed');
+
+    assert.deepEqual(runs.map((r) => r.task.id), [code.id]);
+    assert.equal(calls.length, 1);
+    assert.ok(calls[0].params.messages.some((m) => m.content.includes('plain')));
+  });
+
+  it('runs at most `concurrency` coding tasks at a time', async () => {
+    const { orchestrator, taskQueue, runs } = setup(1);
+    const first = taskQueue.add({ ...CODING, issue: 1 });
+    const second = taskQueue.add({ ...CODING, issue: 2 });
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 1);
+    await new Promise((r) => setTimeout(r, 30));
+    assert.equal(runs.length, 1);
+    assert.equal(taskQueue.get(second.id).status, 'queued');
+
+    runs[0].finish();
+    await waitFor(() => runs.length === 2);
+    assert.equal(taskQueue.get(first.id).status, 'pr-opened');
+    assert.equal(runs[1].task.id, second.id);
+  });
+
+  it('records the spend of a finished coding task once', async () => {
+    const { orchestrator, taskQueue, runs } = setup();
+    taskQueue.add({ ...CODING, issue: 1 });
+    const costs = [];
+    const onCost = (d) => costs.push(d);
+    eventBus.on('cost.recorded', onCost);
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 1);
+    runs[0].finish('pr-opened', { cost: 0.5, tokens_in: 100, tokens_out: 7 });
+    await waitFor(() => costs.length === 1);
+    eventBus.off('cost.recorded', onCost);
+
+    assert.deepEqual(costs, [{ projectId: 'default', agentId: null, model: 'coding-executor', tokensIn: 100, tokensOut: 7, cost: 0.5 }]);
+  });
+
+  it('cancelTask aborts a running coding task', async () => {
+    const { orchestrator, taskQueue, runs } = setup();
+    const task = taskQueue.add({ ...CODING, issue: 1 });
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 1);
+
+    assert.equal(orchestrator.cancelTask(task.id), true);
+    assert.equal(runs[0].signal.aborted, true);
+    assert.equal(taskQueue.get(task.id).status, 'cancelled');
+    assert.equal(orchestrator.cancelTask('nope'), false);
+  });
+
+  it('leaves coding tasks queued without a coding runner', async () => {
+    const { orchestrator, taskQueue, calls } = makeOrchestrator();
+    const task = taskQueue.add({ ...CODING, issue: 1 });
+
+    start(orchestrator);
+    await new Promise((r) => setTimeout(r, 30));
+
+    assert.equal(taskQueue.get(task.id).status, 'queued');
+    assert.equal(calls.length, 0);
+  });
+
+  it('persists step changes through the queue', () => {
+    const { taskQueue } = makeOrchestrator();
+    const task = taskQueue.add({ ...CODING, issue: 1 });
+    taskQueue.updateStatus(task.id, 'executing');
+
+    eventBus.emit('task.step_changed', { taskId: task.id, step: 4 });
+
+    assert.equal(taskQueue.get(task.id).step, 4);
+    assert.equal(taskQueue.get(task.id).status, 'executing');
+  });
+
+  it('starts intake with the loop and stops it with the loop', () => {
+    const log = [];
+    const { orchestrator } = makeOrchestrator({ intake: { start: () => log.push('start'), stop: () => log.push('stop') } });
+
+    start(orchestrator);
+    orchestrator.stop();
+
+    assert.deepEqual(log, ['start', 'stop']);
   });
 });

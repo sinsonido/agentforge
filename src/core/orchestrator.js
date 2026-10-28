@@ -9,7 +9,12 @@ import { CostTracker } from './cost-tracker.js';
  * Implements GitHub issue #2.
  */
 export class Orchestrator {
-  constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config }) {
+  /**
+   * `coding` runs `kind: 'coding'` tasks: `run(task, signal)` drives one task to a
+   * terminal status, at most `concurrency` at a time. Without it coding tasks stay queued.
+   * `intake` polls for new coding tasks while the orchestrator runs.
+   */
+  constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config, coding = null, intake = null }) {
     this.taskQueue = taskQueue;
     this.router = router;
     this.quotaManager = quotaManager;
@@ -18,6 +23,9 @@ export class Orchestrator {
     this.config = config || {};
     this._running = false;
     this._loopInterval = null;
+    this.coding = coding;
+    this.intake = intake;
+    this._codingRuns = new Map();
 
     // Execution helpers
     this.contextBuilder = new ContextBuilder({ agents, config });
@@ -40,11 +48,13 @@ export class Orchestrator {
     this.quotaManager.startWatcher();
     console.log('[orchestrator] Started. Polling every %dms.', intervalMs);
     this._loopInterval = setInterval(() => this._tick(), intervalMs);
+    this.intake?.start();
   }
 
   stop() {
     this._running = false;
     this.quotaManager.stopWatcher();
+    this.intake?.stop();
     if (this._loopInterval) {
       clearInterval(this._loopInterval);
       this._loopInterval = null;
@@ -54,8 +64,9 @@ export class Orchestrator {
 
   async _tick() {
     if (!this._running) return;
+    this._dispatchCoding();
 
-    const task = this.taskQueue.next();
+    const task = this.taskQueue.next(t => t.kind !== 'coding');
     if (!task) return;
 
     // Route the task
@@ -113,6 +124,41 @@ export class Orchestrator {
       eventBus.emit('task.failed', { task, error: error.message });
       console.error('[orchestrator] Task %s failed: %s', task.id, error.message);
     }
+  }
+
+  /** Abort a running coding task. It ends `cancelled` and never opens a PR. */
+  cancelTask(id) {
+    const run = this._codingRuns.get(id);
+    run?.abort();
+    return Boolean(run);
+  }
+
+  _dispatchCoding() {
+    if (!this.coding) return;
+    while (this._codingRuns.size < this.coding.concurrency) {
+      const task = this.taskQueue.next(t => t.kind === 'coding');
+      if (!task) return;
+      const controller = new globalThis.AbortController();
+      this._codingRuns.set(task.id, controller);
+      this.coding.run(task, controller.signal)
+        .then(() => this._recordCodingCost(this.taskQueue.get(task.id)))
+        .catch((err) => console.error('[orchestrator] Coding task %s: %s', task.id, err.message))
+        .finally(() => this._codingRuns.delete(task.id));
+    }
+  }
+
+  _recordCodingCost(task) {
+    if (!task.cost) return;
+    const projectId = task.project_id || this.config.project?.name || 'default';
+    this.costTracker.recordCost(projectId, task.agent_id, 'coding-executor', task.cost);
+    eventBus.emit('cost.recorded', {
+      projectId,
+      agentId: task.agent_id,
+      model: 'coding-executor',
+      tokensIn: task.tokens_in,
+      tokensOut: task.tokens_out,
+      cost: task.cost,
+    });
   }
 
   async _executeTask(task, route) {
@@ -184,6 +230,11 @@ export class Orchestrator {
           this.taskQueue.updateStatus(task.id, 'paused_budget');
         }
       }
+    });
+
+    eventBus.on('task.step_changed', ({ taskId, step }) => {
+      const task = this.taskQueue.get(taskId);
+      if (task) this.taskQueue.updateStatus(taskId, task.status, { step });
     });
 
     // Budget warning — just log
