@@ -9,18 +9,19 @@ import { createStreamParser } from '../../src/execution/coding-executor.js';
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const pstackDir = join(fixtures, 'pstack');
 
-function replay(name) {
-  const parser = createStreamParser();
+function replay(name, testCommand = 'npm test') {
+  const parser = createStreamParser({ testCommand });
   const events = readFileSync(join(fixtures, 'agent-streams', `${name}.jsonl`), 'utf8').split('\n').flatMap((l) => parser.push(l));
   return { events, summary: parser.summary() };
 }
 
-const evidenceFrom = (summary, commits, { cancelled = false, uncommitted = false } = {}) => ({
+const evidenceFrom = (summary, commits, { cancelled = false, uncommitted = false, testCommand = 'npm test' } = {}) => ({
   commits,
   observedTestRuns: summary.observedTestRuns,
   lastEditSeq: summary.lastEditSeq,
   uncommitted,
   cancelled,
+  testCommand,
 });
 
 describe('readPlaybook', () => {
@@ -88,6 +89,25 @@ describe('verdict', () => {
   it('fails when the clone has uncommitted changes', () => {
     const { summary } = replay('two-commits');
     assert.equal(verdict(evidenceFrom(summary, twoCommits, { uncommitted: true })).pass, false);
+  });
+
+  it('fails PR #258: a single test file passed after the last edit while `npm test` failed', () => {
+    const { summary } = replay('partial-test');
+    const v = verdict(evidenceFrom(summary, [{ sha: 'f41b0d0', subject: 'fix(routing): treat a 0% budget as spent, not healthy (#243)' }]));
+    assert.equal(v.pass, false);
+    assert.equal(v.testRun, null);
+  });
+
+  it('fails when the configured test command never ran', () => {
+    const v = verdict({
+      commits: twoCommits,
+      observedTestRuns: [{ seq: 20, command: 'node --test tests/routing/router.test.js', passed: true }],
+      lastEditSeq: 12,
+      uncommitted: false,
+      cancelled: false,
+      testCommand: 'npm test',
+    });
+    assert.equal(v.pass, false);
   });
 
   it('fails when the only passing test ran before the last edit', () => {
