@@ -88,6 +88,8 @@ export class TaskQueue {
         step: null,
         budget: taskData.budget ?? null,
         pr_url: null,
+        setup_command: taskData.setup_command,
+        test_command: taskData.test_command,
       }),
     };
     this._store?.saveTask(task);

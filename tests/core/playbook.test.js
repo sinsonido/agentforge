@@ -59,7 +59,8 @@ describe('verdict', () => {
     assert.equal(v.cancelled, false);
     assert.deepEqual(v.commits, twoCommits);
     assert.equal(v.testRun.sha, '0e5cc08');
-    assert.match(v.testRun.command, /npm test/);
+    assert.equal(v.testRun.command, 'npm test');
+    assert.deepEqual(v.testRun.counts, { pass: 314, fail: 0 });
   });
 
   it('fails run 3: the harness stopped with success but committed nothing', () => {
@@ -68,7 +69,7 @@ describe('verdict', () => {
     const v = verdict(evidenceFrom(summary, []));
     assert.equal(v.pass, false);
     assert.equal(v.testRun, null);
-    assert.deepEqual(v.reasons, ['no commit ahead of base', 'no test run passed after the last edit']);
+    assert.deepEqual(v.reasons, ['no commit ahead of base', '`npm test` did not pass after the last edit']);
   });
 
   it('fails a cancelled run even with a commit on the branch', () => {
@@ -117,8 +118,9 @@ describe('verdict', () => {
       lastEditSeq: 12,
       uncommitted: false,
       cancelled: false,
+      testCommand: 'npm test',
     });
-    assert.deepEqual(v.reasons, ['no test run passed after the last edit']);
+    assert.deepEqual(v.reasons, ['`npm test` did not pass after the last edit']);
   });
 });
 

@@ -40,7 +40,7 @@ describe('runCodingTask', () => {
     queue = new TaskQueue();
     task = queue.admit({
       kind: 'coding', title: 'Fix the parser', repo: 'acme/app', base: 'master',
-      instruction: 'Fix it', issue: 42, playbook: 'bug-fix',
+      instruction: 'Fix it', issue: 42, playbook: 'bug-fix', test_command: 'npm test',
     }).task;
     bus = new EventEmitter();
     published = [];
@@ -68,7 +68,7 @@ describe('runCodingTask', () => {
     assert.ok(stored.completed_at);
     assert.equal(published.length, 1);
     assert.equal(published[0].clone.dir, '/state/tasks/t1/repo');
-    assert.deepEqual(published[0].verdict.testRun, { command: 'npm test', sha: SHA });
+    assert.deepEqual(published[0].verdict.testRun, { command: 'npm test', sha: SHA, counts: null });
     assert.deepEqual(events, [['task.executing', undefined], ['task.completed', 'pr-opened']]);
   });
 
@@ -76,7 +76,7 @@ describe('runCodingTask', () => {
     const status = await runWith(async () => stoppedRun({ commits: [], observedTestRuns: [] }));
 
     assert.equal(status, 'failed');
-    assert.equal(queue.get(task.id).result, 'evidence gate: no commit ahead of base; no test run passed after the last edit');
+    assert.equal(queue.get(task.id).result, 'evidence gate: no commit ahead of base; `npm test` did not pass after the last edit');
     assert.equal(published.length, 0);
   });
 

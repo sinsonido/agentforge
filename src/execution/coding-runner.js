@@ -91,7 +91,7 @@ async function settle(task, { queue, execute, publish, signal }) {
   if (signal?.aborted) return ['cancelled', { ...spend, result: 'cancelled (signal)' }];
   if (run.outcome !== 'stopped') return ['failed', { ...spend, result: run.error }];
 
-  const gate = verdict({ ...run, cancelled: false });
+  const gate = verdict({ ...run, testCommand: task.test_command, cancelled: false });
   if (!gate.pass) return ['failed', { ...spend, result: `evidence gate: ${gate.reasons.join('; ')}` }];
 
   try {

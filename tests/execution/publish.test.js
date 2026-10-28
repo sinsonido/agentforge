@@ -44,7 +44,7 @@ describe('publish', () => {
     pass: true,
     cancelled: false,
     commits: [{ sha: SHA1, subject: 'fix: first' }, { sha: SHA2, subject: 'test: second' }],
-    testRun: { command: 'npm test', sha: SHA2 },
+    testRun: { command: 'npm test', sha: SHA2, counts: { pass: 377, fail: 0 } },
   };
 
   beforeEach(() => {
@@ -77,7 +77,7 @@ describe('publish', () => {
     assert.match(body, /^Closes #42\n/);
     assert.match(body, /`bug-fix` playbook/);
     assert.match(body, /- aaaaaaa fix: first\n- bbbbbbb test: second/);
-    assert.match(body, /`npm test` passed after bbbbbbb/);
+    assert.match(body, /## Tests\n`npm test` passed after bbbbbbb: 377 passed, 0 failed\.\n/);
     assert.match(body, /\$1\.23, 1200 tokens in, 340 tokens out/);
   });
 
