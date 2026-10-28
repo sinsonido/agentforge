@@ -426,44 +426,6 @@ An unknown provider returns `404`.
 
 ---
 
-### Reviews
-
-These two endpoints only emit `review.approved` or `review.rejected` on the event
-bus and forward them to WebSocket clients. Nothing acts on them: the `ReviewGate`
-in `src/git/review-gate.js` is present but not wired, and is scheduled for removal
-in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)).
-
-#### `POST /api/review/:prNumber/approve`
-
-Emit `review.approved` for a PR number.
-
-```bash
-curl -X POST http://localhost:4242/api/review/42/approve
-```
-
-**Response `200`**
-```json
-{ "ok": true, "prNumber": 42, "action": "approved" }
-```
-
----
-
-#### `POST /api/review/:prNumber/reject`
-
-Emit `review.rejected` for a PR number. Requires a reason.
-
-**Body**
-```json
-{ "reason": "Missing error handling in the payment flow." }
-```
-
-**Response `200`**
-```json
-{ "ok": true, "prNumber": 42, "action": "rejected", "reason": "Missing error handling..." }
-```
-
----
-
 ### Test support
 
 #### `POST /api/test/reset`
@@ -501,8 +463,8 @@ All messages are JSON:
 
 ### Event catalogue
 
-The server forwards these events. Events marked **never emitted** come only from
-modules that are present but not wired (`src/git/`), so clients never see them today.
+The server forwards these events. Events marked **never emitted** have
+no emitter, so clients never see them today.
 
 | Event | Data |
 |---|---|
@@ -518,12 +480,7 @@ modules that are present but not wired (`src/git/`), so clients never see them t
 | `agent.resumed` | `{ agent }` |
 | `budget.warning` | `{ projectId, spent, budget, spent_pct }` |
 | `budget.exceeded` | `{ projectId, spent, budget, spent_pct }` |
-| `git.committed` | never emitted |
-| `git.pr_created` | never emitted |
 | `cost.recorded` | `{ projectId, agentId, model, tokensIn, tokensOut, cost }` |
-| `review.pending` | never emitted |
-| `review.approved` | `{ prNumber, approvedAt }` |
-| `review.rejected` | `{ prNumber, reason, rejectedAt }` |
 
 `task.status_changed` and `agent.config_updated` are emitted by the REST API but
 are not forwarded.

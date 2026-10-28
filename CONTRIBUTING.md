@@ -37,7 +37,6 @@ ollama pull deepseek-r1:32b  # Reasoning model
 - `tests/` — Tests for `src/core`, `src/execution`, `src/routing`, `src/persistence`, and the API.
 
 There is no `src/tools/`. Agents have no tools today: the orchestrator sends one prompt per task and stores the reply.
-`src/git/`, `src/plugins/`, and four modules in `src/execution/` are present but not wired, and are scheduled for removal in v0.9 (see #190). Do not build on them.
 
 ## Conventions
 

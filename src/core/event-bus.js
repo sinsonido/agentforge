@@ -9,7 +9,6 @@ import { EventEmitter } from 'node:events';
  *   quota.throttled, quota.exhausted, quota.reset
  *   agent.paused, agent.resumed
  *   budget.warning, budget.exceeded
- *   git.committed, git.pr_created
  */
 class AgentForgeEventBus extends EventEmitter {
   constructor() {

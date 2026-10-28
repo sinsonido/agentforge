@@ -57,20 +57,6 @@ set_status() {
   sleep 0.8
 }
 
-# Emit a review event
-review_event() {
-  local pr="$1" action="$2" reason="${3:-}"
-  if [[ "$action" == "approve" ]]; then
-    curl -s -X POST "$BASE/review/$pr/approve" \
-      -H "Content-Type: application/json" >/dev/null || true
-  else
-    curl -s -X POST "$BASE/review/$pr/reject" \
-      -H "Content-Type: application/json" \
-      -d "{\"reason\":\"$reason\"}" >/dev/null || true
-  fi
-  sleep 0.8
-}
-
 # ------------------------------------------------------------------
 # Checks
 # ------------------------------------------------------------------
@@ -185,19 +171,6 @@ for body in "${tasks_failed[@]}"; do
   set_status "$id" "failed"
   ok "failed → $id"
 done
-
-# ------------------------------------------------------------------
-# Eventos de review (PR)
-# ------------------------------------------------------------------
-
-info "Emitiendo eventos de review..."
-sleep 0.3
-
-review_event 42 "approve"
-ok "review.approved  → PR #42"
-sleep 0.3
-review_event 41 "reject" "Tests are failing in the CI pipeline"
-ok "review.rejected  → PR #41"
 
 # ------------------------------------------------------------------
 # Resumen

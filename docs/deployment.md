@@ -293,7 +293,7 @@ when the limit is exceeded.
 
 ### GitHub token
 
-AgentForge needs no GitHub token. The git integration in `src/git/` is present but not wired.
+AgentForge needs no GitHub token.
 
 ### Docker non-root
 

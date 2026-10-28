@@ -271,45 +271,6 @@ describe('/api/control', () => {
   });
 });
 
-describe('/api/review', () => {
-  it('emits review.approved for a PR number', async (t) => {
-    const { forge, call } = await serve(t);
-    let emitted = null;
-    forge.eventBus.once('review.approved', (d) => { emitted = d; });
-
-    const { status, body } = await call('POST', '/api/review/42/approve');
-
-    assert.equal(status, 200);
-    assert.equal(body.action, 'approved');
-    assert.equal(emitted.prNumber, 42);
-  });
-
-  it('emits review.rejected with the reason', async (t) => {
-    const { forge, call } = await serve(t);
-    let emitted = null;
-    forge.eventBus.once('review.rejected', (d) => { emitted = d; });
-
-    const { status, body } = await call('POST', '/api/review/7/reject', { body: { reason: 'bad code' } });
-
-    assert.equal(status, 200);
-    assert.equal(body.reason, 'bad code');
-    assert.equal(emitted.prNumber, 7);
-    assert.equal(emitted.reason, 'bad code');
-  });
-
-  it('rejects invalid PR numbers and a missing reason without emitting', async (t) => {
-    const { forge, call } = await serve(t);
-    let emitted = 0;
-    forge.eventBus.on('review.approved', () => { emitted++; });
-    forge.eventBus.on('review.rejected', () => { emitted++; });
-
-    assert.equal((await call('POST', '/api/review/abc/approve')).status, 400);
-    assert.equal((await call('POST', '/api/review/0/reject', { body: { reason: 'x' } })).status, 400);
-    assert.equal((await call('POST', '/api/review/7/reject', { body: {} })).status, 400);
-    assert.equal(emitted, 0);
-  });
-});
-
 describe('CORS', () => {
   it('echoes a localhost origin', async (t) => {
     const { call } = await serve(t);

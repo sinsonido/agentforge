@@ -37,28 +37,6 @@ test.describe('Error states — API bad input handling', () => {
     expect(body.ok).toBe(false)
   })
 
-  test('POST /api/review/0/approve returns 400 for invalid PR number', async ({ request }) => {
-    const res = await request.post('/api/review/0/approve')
-    expect(res.status()).toBe(400)
-    const body = await res.json()
-    expect(body.ok).toBe(false)
-  })
-
-  test('POST /api/review/abc/approve returns 400 for non-numeric PR number', async ({ request }) => {
-    const res = await request.post('/api/review/abc/approve')
-    expect(res.status()).toBe(400)
-    const body = await res.json()
-    expect(body.ok).toBe(false)
-  })
-
-  test('POST /api/review/:id/reject without reason returns 400', async ({ request }) => {
-    const res = await request.post('/api/review/1/reject', { data: {} })
-    expect(res.status()).toBe(400)
-    const body = await res.json()
-    expect(body.ok).toBe(false)
-    expect(body.error).toMatch(/reason/)
-  })
-
   test('GET /api/tasks/:id with unknown id returns 404 with ok:false', async ({ request }) => {
     const res = await request.get('/api/tasks/definitely-does-not-exist')
     expect(res.status()).toBe(404)

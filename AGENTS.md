@@ -70,11 +70,6 @@ Files that multiple agents might need to touch simultaneously — coordinate car
 - `ui/src/components/<feature>/` — isolated by feature folder
 - `tests/<anything>.test.js` — independent test files
 
-**Do not build on unwired modules.** `src/git/`, `src/plugins/`, and
-`src/execution/{inter-agent-comm,parallel-execution,review-workflow,task-decomposition}.js`
-are present but not wired. Nothing in `createAgentForge()` or the CLI imports them, and
-they are scheduled for removal in v0.9 (see #190).
-
 ---
 
 ## Merge order for conflicting files

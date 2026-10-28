@@ -12,7 +12,6 @@ Multi-agent orchestration platform with cost control, quota management, and inte
 | [Configuration Reference](configuration.md) | Every field in `agentforge.yml`, with defaults and examples |
 | [Provider Setup](providers.md) | API keys, endpoints, and quota settings for each provider |
 | [API Reference](api-reference.md) | REST endpoints and WebSocket event catalogue |
-| [Plugin System](plugins.md) | Status of the unwired plugin code |
 | [Deployment](deployment.md) | Docker, production hardening, environment variables |
 | [Architecture](architecture.md) | System design, data model, component internals |
 
@@ -42,10 +41,6 @@ See [ROADMAP.md](../ROADMAP.md) and the
 ### Not wired today
 
 Agents have no tools: they cannot read or write files, run commands, or commit.
-The git integration (`src/git/`), the plugin system (`src/plugins/`), and the
-inter-agent, parallel, review, and decomposition modules in `src/execution/` exist
-in code, but nothing starts them. They are scheduled for removal in v0.9 (see
-[#190](https://github.com/sinsonido/agentforge/issues/190)).
 
 ---
 

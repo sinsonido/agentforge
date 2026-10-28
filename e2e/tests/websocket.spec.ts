@@ -98,43 +98,6 @@ test.describe('WebSocket — live event broadcast', () => {
     const msgs = await msgsPromise
     expect(msgs.some((m) => m.event === 'task.queued')).toBe(true)
   })
-
-  test('approving a review broadcasts review.approved event over WS', async ({ page }) => {
-    await page.goto('/dashboard')
-
-    const msgsPromise = page.evaluate(
-      ({ url }) =>
-        new Promise<Array<{ event: string }>>((resolve) => {
-          const msgs: Array<{ event: string }> = []
-          const ws = new WebSocket(url)
-          // Wait for the connection to open before resolving readiness
-          ws.onopen = () => {
-            // Signal readiness by pushing a sentinel
-            msgs.push({ event: '__ready__' })
-          }
-          ws.onmessage = (e) => {
-            try {
-              const parsed = JSON.parse(e.data)
-              msgs.push(parsed)
-              if (parsed.event === 'review.approved') {
-                ws.close()
-                resolve(msgs)
-              }
-            } catch { /* ignore */ }
-          }
-          // 5 s total timeout
-          setTimeout(() => { ws.close(); resolve(msgs) }, 5000)
-        }),
-      { url: 'ws://127.0.0.1:4243/ws' },
-    )
-
-    // Wait for the WS open + connection handshake before firing the event
-    await page.waitForTimeout(600)
-    await page.request.post('/api/review/99/approve')
-
-    const msgs = await msgsPromise
-    expect(msgs.some((m) => m.event === 'review.approved')).toBe(true)
-  })
 })
 
 test.describe('WebSocket — UI integration', () => {

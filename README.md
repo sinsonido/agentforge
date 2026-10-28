@@ -17,14 +17,6 @@ flowchart TD
 
 AgentForge is being reoriented. Today one path works end to end: a task enters the queue, the router picks a model, the provider makes one call, and the result text is stored. Agents do not edit files, run commands, or use git. The new direction is a self-hosted control panel for coding agents that work on real repositories. [ROADMAP.md](ROADMAP.md) describes the plan, and the [AgentForge Roadmap project](https://github.com/users/sinsonido/projects/4) tracks the work.
 
-Some modules exist in `src/`, but nothing starts them:
-
-- `src/git/` (`GitManager`, `BranchStrategy`, `AutoCommit`, `AutoPR`, `ReviewGate`, `GitHubIntegration`)
-- `src/plugins/` (`PluginManager` is never instantiated)
-- `src/execution/inter-agent-comm.js`, `parallel-execution.js`, `review-workflow.js`, and `task-decomposition.js`
-
-These modules are present but not wired. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)).
-
 ## What works today
 
 - **Model routing.** Rules match on task type, estimated context size, or remaining budget. A rule names a model to force, a preferred model with fallbacks, or a tier. If no rule matches, the router takes the cheapest available model in the tier for the task type, then tries lower tiers.

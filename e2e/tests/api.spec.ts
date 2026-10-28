@@ -332,39 +332,3 @@ test.describe('API — POST /api/providers/test', () => {
   })
 })
 
-// ─── POST /api/review/:prNumber ─────────────────────────────────────────────
-
-test.describe('API — POST /api/review/:prNumber', () => {
-  test('approve emits review.approved event', async ({ request }) => {
-    const res = await request.post('/api/review/42/approve')
-    expect(res.ok()).toBe(true)
-    const body = await res.json()
-    expect(body.ok).toBe(true)
-    expect(body.prNumber).toBe(42)
-    expect(body.action).toBe('approved')
-  })
-
-  test('reject with reason emits review.rejected event', async ({ request }) => {
-    const res = await request.post('/api/review/42/reject', {
-      data: { reason: 'Tests are failing' },
-    })
-    expect(res.ok()).toBe(true)
-    const body = await res.json()
-    expect(body.ok).toBe(true)
-    expect(body.action).toBe('rejected')
-    expect(body.reason).toBe('Tests are failing')
-  })
-
-  test('reject without reason returns 400', async ({ request }) => {
-    const res = await request.post('/api/review/42/reject', { data: {} })
-    expect(res.status()).toBe(400)
-    const body = await res.json()
-    expect(body.ok).toBe(false)
-    expect(body.error).toMatch(/reason/)
-  })
-
-  test('approve with invalid pr number returns 400', async ({ request }) => {
-    const res = await request.post('/api/review/0/approve')
-    expect(res.status()).toBe(400)
-  })
-})
