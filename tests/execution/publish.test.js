@@ -81,6 +81,13 @@ describe('publish', () => {
     assert.match(body, /\$1\.23, 1200 tokens in, 340 tokens out/);
   });
 
+  it('ends the PR body with a footer that names AgentForge and the task', async () => {
+    const gh = fakeGitHub();
+    await publish({ task, clone, verdict, queue, run: gh.run });
+    const body = flag(gh.calls.find((c) => c.args[1] === 'create').args, '--body');
+    assert.match(body, /\n---\nOpened by AgentForge for task `t1`\.$/);
+  });
+
   it('omits Closes when the task has no issue', async () => {
     const gh = fakeGitHub();
     await publish({ task: { ...task, issue: null }, clone, verdict, queue, run: gh.run });

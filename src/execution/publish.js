@@ -67,5 +67,8 @@ function prBody(task, verdict) {
     '',
     '## Cost',
     `$${(task.cost ?? 0).toFixed(2)}, ${task.tokens_in ?? 0} tokens in, ${task.tokens_out ?? 0} tokens out.`,
+    '',
+    '---',
+    `Opened by AgentForge for task \`${task.id}\`.`,
   ].join('\n');
 }
