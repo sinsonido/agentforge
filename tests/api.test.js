@@ -12,6 +12,8 @@ import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { TaskQueue } from '../src/core/task-queue.js';
 import { QuotaManager } from '../src/core/quota-tracker.js';
+import { Router } from '../src/routing/router.js';
+import { buildFromConfig } from '../src/config/loader.js';
 import { startServer } from '../src/api/server.js';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,18 +27,14 @@ function makeForge() {
     getRecentEvents: () => [],
   });
 
-  // Minimal agent pool stub
-  const agentPool = {
-    _configs: {},
-    getAllStatuses() {
-      return { dummy: { agentId: 'dummy', status: 'idle', model: 'claude-opus-4-6' } };
+  const { agents, models } = buildFromConfig({
+    models: {
+      'claude-opus-5-5': { provider: 'anthropic', tier: 1, context: 1000000 },
+      'claude-haiku-5-5': { provider: 'anthropic', tier: 3, context: 1000000 },
     },
-    updateAgentConfig(id, cfg) {
-      if (id !== 'dummy') return false;
-      Object.assign(this._configs[id] ?? (this._configs[id] = {}), cfg);
-      return true;
-    },
-  };
+    team: [{ name: 'Dummy', model: 'claude-opus-5-5', system_prompt: 'Old prompt.' }],
+  });
+  const router = new Router({ models, agents, quotaManager });
 
   // Minimal provider registry stub
   const providerRegistry = {
@@ -47,7 +45,7 @@ function makeForge() {
     get(id) { return this._providers[id] ?? null; },
   };
 
-  return { taskQueue, quotaManager, eventBus, agentPool, providerRegistry,
+  return { taskQueue, quotaManager, eventBus, agents, router, providerRegistry,
     orchestrator: { _running: false, start() {}, stop() {} },
     costTracker: null };
 }
@@ -135,15 +133,22 @@ describe('POST /api/agents/:id', () => {
 
   after(async () => new Promise(r => server.close(r)));
 
-  it('updates an existing agent config', async () => {
-    const { status, body } = await req(server, 'POST', '/api/agents/dummy', {
-      model: 'claude-haiku-4-5-20251001',
-      systemPrompt: 'You are helpful.',
-    });
+  it('routes the next task to the new model and keeps fields the body leaves out', async () => {
+    const task = { agent_id: 'dummy', type: 'implement' };
+    assert.equal(forge.router.resolve(task).model, 'claude-opus-5-5');
+
+    const { status, body } = await req(server, 'POST', '/api/agents/dummy', { model: 'claude-haiku-5-5' });
+
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.agentId, 'dummy');
-    assert.equal(body.model, 'claude-haiku-4-5-20251001');
+    assert.equal(forge.router.resolve(task).model, 'claude-haiku-5-5');
+    assert.equal(forge.agents.dummy.system_prompt, 'Old prompt.');
+  });
+
+  it('replaces the system prompt', async () => {
+    await req(server, 'POST', '/api/agents/dummy', { systemPrompt: 'You are helpful.' });
+    assert.equal(forge.agents.dummy.system_prompt, 'You are helpful.');
   });
 
   it('returns 404 when agent does not exist', async () => {

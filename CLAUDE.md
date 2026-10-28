@@ -15,8 +15,7 @@ makes one call, and the result text is stored. There is no tool use: the orchest
 sends no tool definitions, so agents never edit files, run commands, or use git.
 See `ROADMAP.md` for the reorientation.
 
-`src/` and `ui/` are siblings at the repository root. Modules marked
-**not wired** exist in code, but nothing in `createAgentForge()` or the CLI uses them.
+`src/` and `ui/` are siblings at the repository root.
 
 ```
 agentforge/
@@ -29,9 +28,7 @@ agentforge/
 │   │   ├── task-queue.js        # Priority queue mirrored to SQLite, restored on boot, honours depends_on
 │   │   ├── orchestrator.js      # Main tick loop — consumes queue, calls providers
 │   │   ├── quota-tracker.js     # Sliding-window rate limiter (QuotaManager)
-│   │   ├── cost-tracker.js      # Budget enforcement (CostTracker, created by Orchestrator)
-│   │   ├── agent-lifecycle.js   # AgentLifecycle + AgentPool (agents registered, transitions never driven)
-│   │   └── dependency-graph.js  # Task DAG with topological sort (tested, not wired)
+│   │   └── cost-tracker.js      # Budget enforcement (CostTracker, created by Orchestrator)
 │   ├── execution/
 │   │   ├── context-builder.js   # Assembles provider messages from tasks
 │   │   └── output-collector.js  # Parses and normalises provider responses
@@ -61,7 +58,7 @@ agentforge/
 
 ```js
 { orchestrator, taskQueue, router, quotaManager, providerRegistry,
-  agentPool, db, eventBus, config, agents, models }
+  db, eventBus, config, agents, models }
 ```
 
 ---
@@ -83,14 +80,6 @@ agent.paused | agent.resumed                   (from the orchestrator on quota e
 quota.throttled | quota.exhausted | quota.reset
 budget.warning | budget.exceeded               → { projectId, spent, budget, spent_pct }
 cost.recorded    → { projectId, agentId, model, tokensIn, tokensOut, cost }  (Orchestrator only)
-```
-
-**AgentLifecycle states** (defined in `agent-lifecycle.js`; the orchestrator never calls
-the transitions, so registered agents stay `idle`):
-```
-idle → assigned → executing → reviewing → completed → idle
-                            ↘ failed → idle
-            executing → paused → idle
 ```
 
 **Config env vars:** `${VAR_NAME}` syntax in `agentforge.yml`.

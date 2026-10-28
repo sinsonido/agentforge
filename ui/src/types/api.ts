@@ -38,9 +38,8 @@ export type Task = TextTask | CodingTask
 export interface AgentStatus {
   id: string
   name: string
-  state: 'idle' | 'assigned' | 'executing' | 'reviewing' | 'completed' | 'failed' | 'paused'
-  currentTaskId?: string
-  historyLength: number
+  role: string
+  model: string | null
 }
 
 export interface QuotaStatus {

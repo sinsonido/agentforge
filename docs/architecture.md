@@ -2,7 +2,7 @@
 
 This page describes the code on `master`. One path works end to end: a task enters the queue (persisted in SQLite), the router picks a model, the provider answers one prompt, and the result text is stored. Agents have no tools, so they do not edit files, run commands, or use git.
 
-[Present but not wired](#present-but-not-wired) lists the module that exists in `src/` but that nothing starts. [ROADMAP.md](../ROADMAP.md) describes the reorientation.
+[ROADMAP.md](../ROADMAP.md) describes the reorientation.
 
 ## Design principles
 
@@ -51,7 +51,7 @@ flowchart TD
 
 ```js
 { orchestrator, taskQueue, router, quotaManager, providerRegistry,
-  agentPool, db, eventBus, config, agents, models }
+  db, eventBus, config, agents, models }
 ```
 
 The CLI's `start` command calls it, starts the orchestrator, and starts the HTTP server from `src/api/server.js`. The other CLI commands (`task add`, `task list`, `task show`, `status`) call `createAgentForge()` in their own process. They do not reach a running server.
@@ -228,27 +228,7 @@ interface AgentConfig {
 }
 ```
 
-**Agent lifecycle.** `AgentLifecycle` in `src/core/agent-lifecycle.js` defines the state machine below, and `createAgentForge()` registers one per agent in an `AgentPool`. The orchestrator never calls the transitions, so every agent stays `idle`. The API reads the pool for `GET /api/agents`.
-
-```mermaid
-stateDiagram-v2
-    [*] --> idle
-    idle --> assigned
-    idle --> paused
-    assigned --> executing
-    assigned --> idle
-    assigned --> failed
-    executing --> reviewing
-    executing --> completed
-    executing --> failed
-    executing --> paused
-    reviewing --> completed
-    reviewing --> failed
-    reviewing --> executing
-    completed --> idle
-    failed --> idle
-    paused --> idle
-```
+`GET /api/agents` lists these configs, and `POST /api/agents/:id` changes `model` or `system_prompt` in place. The router and the context builder read the same objects.
 
 ### Event bus (`src/core/event-bus.js`)
 
@@ -352,14 +332,9 @@ CREATE TABLE IF NOT EXISTS agent_activity (
 
 - `task.queued`, `task.executing`, `task.completed`, and `task.failed` upsert the task row.
 - Each `cost.recorded` event inserts a `cost_records` row.
-- `agent.assigned`, `agent.executing`, `agent.completed`, and `agent.failed` write `agent_activity`. They never fire, because the lifecycle is not driven.
 - The four `task.*` events above plus `cost.recorded`, `quota.exhausted`, `quota.reset`, `budget.warning`, and `budget.exceeded` write to `events`.
 
 Nothing reads the database back into the queue or the cost tracker at startup.
-
-## Present but not wired
-
-`src/core/dependency-graph.js` is unused at runtime. The queue checks `depends_on` itself.
 
 ## File structure
 
@@ -383,8 +358,6 @@ agentforge/
 │   │   ├── task-queue.js       # Priority queue mirrored to SQLite, restored on boot
 │   │   ├── quota-tracker.js    # Sliding window per provider + QuotaManager
 │   │   ├── cost-tracker.js     # Budget per project, spend per agent and model
-│   │   ├── agent-lifecycle.js  # AgentLifecycle, AgentPool (transitions not driven)
-│   │   ├── dependency-graph.js # Task DAG with topological sort (not wired)
 │   │   └── event-bus.js        # EventEmitter singleton with recent-event log
 │   ├── routing/
 │   │   └── router.js           # Rules, tiers, fallback
@@ -413,7 +386,7 @@ agentforge/
 │   ├── core.test.js
 │   ├── api/auth.test.js
 │   ├── core/                   # task-queue, event-bus, quota-tracker, cost-tracker,
-│   │                           # agent-lifecycle, dependency-graph
+│   │                           # intake, orchestrator, playbook, task-model
 │   ├── execution/              # context-builder, output-collector, coding loop
 │   ├── persistence/db.test.js
 │   └── routing/router.test.js
