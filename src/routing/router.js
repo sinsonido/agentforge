@@ -81,7 +81,7 @@ export class Router {
     }
 
     if (match.budget_remaining_lt != null) {
-      if ((context.budget_remaining_pct || 1) >= match.budget_remaining_lt) return false;
+      if ((context.budget_remaining_pct ?? 1) >= match.budget_remaining_lt) return false;
     }
 
     return true;
