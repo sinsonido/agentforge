@@ -1,6 +1,6 @@
 # Architecture
 
-This page describes the code on `master`. One path works end to end: a task enters an in-memory queue, the router picks a model, the provider answers one prompt, and the result text is stored. Agents have no tools, so they do not edit files, run commands, or use git.
+This page describes the code on `master`. One path works end to end: a task enters the queue (persisted in SQLite), the router picks a model, the provider answers one prompt, and the result text is stored. Agents have no tools, so they do not edit files, run commands, or use git.
 
 Several modules exist in `src/` but nothing starts them. [Present but not wired](#present-but-not-wired) lists them. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)). [ROADMAP.md](../ROADMAP.md) describes the reorientation.
 
@@ -20,7 +20,7 @@ flowchart TD
     CF["Config Loader\nagentforge.yml"]
 
     subgraph ORC["Orchestrator — 500 ms tick"]
-        TQ["TaskQueue\nin-memory priority queue"]
+        TQ["TaskQueue\npriority queue, persisted"]
         RT["Router\nrule evaluation"]
         EX["Execution\ncontext · call · collect"]
         TQ --> RT --> EX
@@ -87,7 +87,7 @@ The orchestrator also listens to events:
 
 ### TaskQueue (`src/core/task-queue.js`)
 
-An in-memory map of tasks. `next()` returns the `queued` task with the highest priority (`critical`, `high`, `medium`, `low`), oldest first, whose `depends_on` tasks are all `completed`. Task IDs are `t1`, `t2`, and so on, and the counter restarts with the process. A restart drops every task in the queue.
+An in-memory map of tasks. `next()` returns the `queued` task with the highest priority (`critical`, `high`, `medium`, `low`), oldest first, whose `depends_on` tasks are all `completed`. Every add and status change is written to SQLite at once. On boot the queue reloads its live tasks and the tasks they depend on. Tasks found `executing` become `failed` with result `interrupted`, and `assigned` or `waiting_quota` tasks return to `queued`. Booting twice changes nothing. Task IDs are `t1`, `t2`, and so on, and the counter continues across restarts.
 
 Statuses: `queued`, `assigned`, `executing`, `completed`, `failed`, `waiting_quota`, `paused_budget`.
 
@@ -372,7 +372,7 @@ agentforge/
 │   │   └── loader.js           # YAML parser + env var resolution
 │   ├── core/
 │   │   ├── orchestrator.js     # Main execution loop
-│   │   ├── task-queue.js       # In-memory priority queue with dependencies
+│   │   ├── task-queue.js       # Priority queue mirrored to SQLite, restored on boot
 │   │   ├── quota-tracker.js    # Sliding window per provider + QuotaManager
 │   │   ├── cost-tracker.js     # Budget per project, spend per agent and model
 │   │   ├── agent-lifecycle.js  # AgentLifecycle, AgentPool (transitions not driven)

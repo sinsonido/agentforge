@@ -27,7 +27,7 @@ agentforge/
 │   ├── config/loader.js         # Loads agentforge.yml, resolves ${ENV_VAR} refs
 │   ├── core/
 │   │   ├── event-bus.js         # EventEmitter singleton (import as default)
-│   │   ├── task-queue.js        # In-memory priority queue, honours depends_on
+│   │   ├── task-queue.js        # Priority queue mirrored to SQLite, restored on boot, honours depends_on
 │   │   ├── orchestrator.js      # Main tick loop — consumes queue, calls providers
 │   │   ├── quota-tracker.js     # Sliding-window rate limiter (QuotaManager)
 │   │   ├── cost-tracker.js      # Budget enforcement (CostTracker, created by Orchestrator)
