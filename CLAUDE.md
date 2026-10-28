@@ -39,8 +39,7 @@ agentforge/
 │   ├── persistence/db.js        # AgentForgeDB — better-sqlite3 (WAL mode)
 │   ├── auth/auth.js             # Optional Bearer-token middleware (server.auth)
 │   ├── api/server.js            # Express REST API (port 4242)
-│   ├── api/ws.js                # WebSocket server on /ws
-│   └── ui/                      # Vanilla JS dashboard (served only if ui/dist is absent)
+│   └── api/ws.js                # WebSocket server on /ws
 ├── ui/                          # React 19 SPA (Vite 6, Tailwind v4, shadcn/ui new-york)
 │   └── src/
 │       ├── index.css            # Tailwind v4 entry and @theme tokens
@@ -169,7 +168,6 @@ docker run -p 4242:4242 -v $(pwd)/agentforge.yml:/app/agentforge.yml agentforge 
 - Do not add `require()` or CommonJS syntax anywhere.
 - Do not add Jest, Mocha, or any test framework — the built-in runner is intentional.
 - Do not import `db.js` directly from `orchestrator.js` or `api/server.js` — use the `forge.db` reference injected at startup.
-- Do not touch `src/ui/` (vanilla dashboard) unless the React SPA is explicitly unavailable.
 - Do not commit `agentforge.yml` (contains secrets) — only `agentforge.example.yml`.
 - Do not use `git add -A` or `git add .` — stage specific files to avoid committing `.agentforge/` data.
 - Do not push to `master` without tests passing (`npm test`).

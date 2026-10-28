@@ -99,7 +99,7 @@ cd agentforge
 npm ci --omit=dev
 ```
 
-To serve the React dashboard, also run `npm run ui:install` and `npm run ui:build`. Without `ui/dist/`, the server serves the vanilla UI in `src/ui/`.
+To serve the dashboard, also run `npm run ui:install` and `npm run ui:build`. Without `ui/dist/`, the API and WebSocket work, and page requests return a 503 that names these two commands.
 
 ### 2. Configure
 

@@ -35,7 +35,7 @@ git clone https://github.com/sinsonido/agentforge.git
 cd agentforge
 npm install
 
-# Optional: build the React dashboard (without it, the server serves the older vanilla UI in src/ui/)
+# Build the React dashboard (scripts/start.sh does this for you when ui/dist is missing)
 npm run ui:install
 npm run ui:build
 
