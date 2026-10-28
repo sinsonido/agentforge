@@ -267,6 +267,26 @@ describe('Router', () => {
       assert.equal(result.model, 'codestral:22b');
     });
 
+    it('matches budget_remaining_lt rule when the budget is fully spent (0%)', () => {
+      const lowBudgetRules = [
+        {
+          match: { budget_remaining_lt: 0.2 },
+          tier: 3,
+          prefer: 'codestral:22b',
+        },
+        { match: { type: ['implement'] }, tier: 2, prefer: 'claude-sonnet-4' },
+      ];
+      const router = makeRouter({ rules: lowBudgetRules });
+
+      const result = router.resolve(
+        { type: 'implement', context_tokens_estimate: 0 },
+        { budget_remaining_pct: 0 }
+      );
+
+      assert.equal(result.action, 'execute');
+      assert.equal(result.model, 'codestral:22b');
+    });
+
     it('does not trigger budget_remaining_lt when budget is healthy', () => {
       const lowBudgetRules = [
         {
