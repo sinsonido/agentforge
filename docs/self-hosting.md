@@ -2,7 +2,7 @@
 
 AgentForge edits its own repository. The instance that does the work must not run from the tree it edits, or a task could change the code under the running process. `scripts/self-host.sh` runs AgentForge from an immutable release directory, built from a tag or SHA of `sinsonido/agentforge`, in a Docker container.
 
-Requirements on the host: `bash`, `git`, `curl` and Docker. Node is not needed. The build and the server run in the `node:24` image.
+Requirements on the host: `bash`, `git`, `curl`, Docker, `gh` logged in to GitHub, the `claude` binary with a login, and the pinned pstack plugin. Node is not needed. The build and the server run in the `node:24` image.
 
 ## Commands
 
@@ -36,12 +36,31 @@ releases/<sha>/    source from git archive, node_modules, ui/dist
 current            symlink to releases/<sha>
 data/              agentforge.db (the container's working directory)
 config/            agentforge.yml
-state/             reserved for the executor
+state/             executor mirrors, per-task clones and per-task HOMEs
+tools/gh-<ver>/    static gh binary for the container
 ```
 
 The container mounts the release read-only at `/app`, `data/` at `/data` and `config/` read-only at `/config`. It runs as your user, so the files in `data/` belong to you.
 
-`start` creates `config/agentforge.yml` from the release's `agentforge.example.yml` on the first run and adds `database.path: /data/agentforge.db`. It never overwrites the file. Edit it to add provider keys, then run `stop` and `start`.
+`start` creates `config/agentforge.yml` from the release's `agentforge.example.yml` on the first run and adds `database.path: /data/agentforge.db` and an `executor:` block. The executor paths in that block are `${AGENTFORGE_*}` references, which `start` sets in the container environment, so a changed path needs no config edit. `start` never overwrites the file. Edit it to add provider keys, then run `stop` and `start`.
+
+## Executor mounts
+
+The executor starts one container per task through the host's Docker daemon. The daemon resolves every `-v` path on the host, so each path the executor hands it is mounted into the AgentForge container at the same absolute path. `start` checks each input and stops with a message when one is missing.
+
+| Mount or variable | Inside the container | What it grants |
+|---|---|---|
+| `AGENTFORGE_DOCKER_SOCKET` | `/var/run/docker.sock`, plus the socket's group | Starting containers. This is root on the host. Keep the port on `127.0.0.1` or turn on `server.auth`. |
+| host `docker` binary | `/usr/local/bin/docker`, read-only | The Docker client the executor runs. |
+| `AGENTFORGE_STATE_DIR` | same path, read-write | Mirrors, per-task clones and HOMEs. Task containers mount parts of it by this path. |
+| `AGENTFORGE_CLAUDE_BIN` | same path, read-only | The `claude` binary that task containers mount. Default: the target of `~/.local/bin/claude`. |
+| `AGENTFORGE_PSTACK_DIR` | same path, read-only | The pinned pstack plugin. AgentForge reads playbooks from it and task containers mount it. |
+| `AGENTFORGE_CLAUDE_CREDENTIALS` | same path, read-only | The harness login. Copied into a task HOME for one run, then removed. Not mounted when `CLAUDE_CODE_OAUTH_TOKEN` is set and the file is absent. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | environment, by name | The harness login, preferred over the file. |
+| `gh auth token` of the host | `GH_TOKEN`, by name | Intake comments, `git push` and `gh pr create`. Only AgentForge holds it. Task containers never get it. |
+| `tools/gh-<ver>/gh` | `/usr/local/bin/gh`, read-only | A static `gh`. A host `gh` from Homebrew needs the Homebrew loader, which the image lacks. |
+
+`git push` uses `gh auth git-credential` as its credential helper, set through `GIT_CONFIG_*` variables. Secrets reach the container by name (`-e GH_TOKEN`), so they never appear in the host process list. `docker inspect` still shows them to anyone who can reach the Docker socket.
 
 ## Network
 
@@ -57,17 +76,17 @@ The server binds `0.0.0.0` inside the container (`--host 0.0.0.0`), because a se
 | `AGENTFORGE_CONTAINER` | `agentforge-self` | container name |
 | `AGENTFORGE_BIND` | `127.0.0.1` | host address of the published port |
 | `AGENTFORGE_PORT` | `4343` | host port |
-| `AGENTFORGE_DOCKER_SOCKET` | `/var/run/docker.sock` | reserved, see below |
-| `AGENTFORGE_STATE_DIR` | `$AGENTFORGE_HOME/state` | reserved, see below |
-
-The two reserved variables are for the executor, which starts one container per task and keeps a clone per task. The script does not mount either of them yet. Mounting the Docker socket gives the container root on the host, so it waits for the executor that needs it.
+| `AGENTFORGE_DOCKER_SOCKET` | `/var/run/docker.sock` | see Executor mounts |
+| `AGENTFORGE_STATE_DIR` | `$AGENTFORGE_HOME/state` | see Executor mounts |
+| `AGENTFORGE_CLAUDE_BIN` | target of `~/.local/bin/claude` | see Executor mounts |
+| `AGENTFORGE_PSTACK_DIR` | `~/.claude/plugins/cache/cursor-plugins/pstack/0.15.30` | see Executor mounts |
+| `AGENTFORGE_CLAUDE_CREDENTIALS` | `~/.claude/.credentials.json` | see Executor mounts |
+| `AGENTFORGE_GH_VERSION` | `2.62.0` | `gh` release downloaded into `tools/` |
 
 ## The dogfood loop
 
-Available once #197, #198 and #200 land.
-
-1. Label an issue on `sinsonido/agentforge` with `agentforge`. AgentForge turns it into exactly one task.
+1. Label an issue on `sinsonido/agentforge` with `agentforge`. Intake turns it into exactly one task and comments on the issue. The issue's `bug`, `enhancement` or `refactor` label picks the playbook.
 2. The executor clones the repository for the task and runs the coding harness in its own `node:24` container. The agent commits, but it never pushes and holds no GitHub credentials.
-3. AgentForge checks the evidence: commits ahead of the base branch and a passing test run after the last commit. It then pushes the branch and opens the PR from the host.
+3. AgentForge checks the evidence: commits ahead of the base branch, a clean tree, and a passing test run after the last edit. It then pushes `agentforge/<task>` and opens the PR. The task ends `pr-opened` with its `pr_url`, or `failed` with the reasons, or `cancelled` (aborted or timed out, never published). `docker logs agentforge-self` shows the harness stream as `[coding]` lines.
 4. You review and merge the PR.
 5. `scripts/self-host.sh upgrade <new-sha>` puts the merged change into the running instance.
