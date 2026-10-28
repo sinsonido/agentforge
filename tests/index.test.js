@@ -19,7 +19,7 @@ describe('createAgentForge() persistence wiring', () => {
       '  ollama:',
       '    enabled: false',
       '  fake:',
-      '    enabled: false',
+      '    enabled: true',
       'models:',
       '  fake-model:',
       '    provider: fake',
