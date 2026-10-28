@@ -532,7 +532,7 @@ export function startServer(forge, port = 3000, host = '127.0.0.1', uiDir = UI_D
   app.use('/api', buildRouter(forge));
 
   app.use(express.static(uiDir));
-  app.get('/{*splat}', (req, res) => {
+  app.get('/{*splat}', generalLimiter, (req, res) => {
     if (fs.existsSync(uiIndex)) return res.sendFile(uiIndex);
     res.status(503).type('html').send(UI_MISSING_PAGE);
   });
