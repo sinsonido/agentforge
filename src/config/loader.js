@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
+import { PLAYBOOKS } from '../core/task-model.js';
 
 const DEFAULT_CONFIG = {
   project: { name: 'AgentForge Project', budget: 100, currency: 'USD' },
@@ -11,6 +12,7 @@ const DEFAULT_CONFIG = {
   git: { enabled: false },
   alerts: { budget_warning_pct: 0.80, budget_pause_pct: 0.95 },
   server: { port: 4242, host: 'localhost' },
+  intake: { repos: [], label: 'agentforge', interval_seconds: 60, default_playbook: 'feature' },
 };
 
 /**
@@ -34,6 +36,7 @@ export function loadConfig(configPath = 'agentforge.yml') {
 
   const config = mergeDeep(DEFAULT_CONFIG, yaml.load(raw) || {});
   validateModelReferences(config);
+  validateIntake(config.intake);
   return config;
 }
 
@@ -72,6 +75,33 @@ export function validateModelReferences(config) {
 
   if (errors.length) {
     throw new Error(`Invalid model configuration:\n  - ${errors.join('\n  - ')}`);
+  }
+}
+
+/**
+ * Throw when the `intake:` block cannot drive the GitHub issue poller.
+ * Each repo needs an "owner/name" slug and the base branch its PRs target.
+ */
+export function validateIntake(intake) {
+  if (!intake || typeof intake !== 'object') throw new Error('Invalid intake configuration: intake must be a mapping');
+  const errors = [];
+  if (!Array.isArray(intake.repos)) {
+    errors.push('repos must be a list');
+  } else {
+    intake.repos.forEach((r, i) => {
+      if (!/^[\w.-]+\/[\w.-]+$/.test(r?.repo ?? '')) errors.push(`repos[${i}].repo must be "owner/name"`);
+      if (typeof r?.base !== 'string' || !r.base.trim()) errors.push(`repos[${i}].base is required`);
+    });
+  }
+  if (typeof intake.label !== 'string' || !intake.label.trim()) errors.push('label must be a non-empty string');
+  if (!(typeof intake.interval_seconds === 'number' && intake.interval_seconds > 0)) {
+    errors.push('interval_seconds must be a positive number');
+  }
+  if (!PLAYBOOKS.includes(intake.default_playbook)) {
+    errors.push(`default_playbook must be one of: ${PLAYBOOKS.join(', ')}`);
+  }
+  if (errors.length) {
+    throw new Error(`Invalid intake configuration:\n  - ${errors.join('\n  - ')}`);
   }
 }
 

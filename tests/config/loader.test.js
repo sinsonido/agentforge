@@ -148,6 +148,55 @@ server:
   });
 });
 
+describe('loadConfig intake', () => {
+  it('reads the intake block from agentforge.example.yml', () => {
+    const { intake } = loadConfig(examplePath);
+    assert.deepEqual(intake.repos, [{ repo: 'sinsonido/agentforge', base: 'master' }]);
+    assert.equal(intake.label, 'agentforge');
+  });
+
+  it('defaults to no repos, label agentforge, 60 s and the feature playbook', () => {
+    assert.deepEqual(loadConfig(write('no-intake.yml', '')).intake, {
+      repos: [], label: 'agentforge', interval_seconds: 60, default_playbook: 'feature',
+    });
+  });
+
+  it('keeps sibling defaults when the file sets only repos', () => {
+    const { intake } = loadConfig(write('intake-repos.yml', `
+intake:
+  repos:
+    - repo: acme/app
+      base: main
+`));
+    assert.deepEqual(intake.repos, [{ repo: 'acme/app', base: 'main' }]);
+    assert.equal(intake.interval_seconds, 60);
+  });
+
+  it('lists every intake problem in one error', () => {
+    const path = write('intake-bad.yml', `
+intake:
+  repos:
+    - repo: not-a-slug
+    - base: main
+  label: ""
+  interval_seconds: 0
+  default_playbook: rewrite
+`);
+    assert.throws(() => loadConfig(path), (err) => {
+      for (const part of [
+        'repos[0].repo must be "owner/name"', 'repos[0].base is required',
+        'repos[1].repo must be "owner/name"', 'label must be a non-empty string',
+        'interval_seconds must be a positive number', 'default_playbook must be one of',
+      ]) assert.ok(err.message.includes(part), part);
+      return true;
+    });
+  });
+
+  it('rejects an empty intake block', () => {
+    assert.throws(() => loadConfig(write('intake-null.yml', 'intake:\n')), /intake must be a mapping/);
+  });
+});
+
 describe('buildFromConfig', () => {
   it('returns empty registries for an empty config', () => {
     assert.deepEqual(buildFromConfig({}), { models: {}, agents: {}, rules: [] });
