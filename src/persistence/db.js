@@ -176,6 +176,8 @@ export class AgentForgeDB {
       context_tokens_estimate: task.context_tokens_estimate || 0,
       kind: task.kind || 'text',
       ...Object.fromEntries(CODING_FIELDS.map(f => [f, task[f] ?? null])),
+      // better-sqlite3 binds a JS number as REAL, which the TEXT column would keep as '5.0'.
+      step: task.step == null ? null : String(task.step),
     });
   }
 

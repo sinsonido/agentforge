@@ -283,6 +283,11 @@ describe('AgentForgeDB', () => {
       assert.equal(db.getTaskHistory(1)[0].playbook, 'bug-fix');
     });
 
+    it('stores a numeric step from the step tracker as its plain number', () => {
+      db.saveTask(coding('t1', { status: 'executing', step: 5 }));
+      assert.equal(db.getTask('t1').step, '5');
+    });
+
     it('refuses a second live row for the same repo, issue and playbook', () => {
       db.saveTask(coding('t1'));
       assert.throws(() => db.saveTask(coding('t2')), /UNIQUE constraint failed/);
