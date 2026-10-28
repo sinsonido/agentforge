@@ -34,6 +34,6 @@ export default [
   },
   {
     // Ignore generated / vendored files
-    ignores: ['node_modules/**', 'src/ui/**'],
+    ignores: ['node_modules/**'],
   },
 ];

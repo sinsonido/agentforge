@@ -44,7 +44,7 @@ It starts with a spike that measures two things: which executor to use (the Agen
 
 ### v0.9.0. Subtract and observe
 
-Delete the unwired modules and the duplicate vanilla UI. Then make task work visible with a live transcript and a decision trail per task.
+The unwired modules and the duplicate vanilla UI are deleted (#190, #191, #192). Next, make task work visible with a live transcript and a decision trail per task.
 
 ### v0.10.0. Gates
 
