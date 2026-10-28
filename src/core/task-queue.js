@@ -3,15 +3,44 @@ import eventBus from './event-bus.js';
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const VALID_STATUSES = ['queued', 'assigned', 'executing', 'completed', 'failed', 'waiting_quota', 'paused_budget'];
 
+// What a task loaded from the store becomes when a new process boots. Statuses not
+// listed are kept. An `executing` task lost its run with the previous process; its side
+// effects are unknown, so it fails instead of running twice. Quota windows live in
+// memory, so a `waiting_quota` task would never see its quota.reset and goes back to queued.
+const ON_BOOT = {
+  executing: { status: 'failed', extra: { result: 'interrupted' } },
+  assigned: { status: 'queued' },
+  waiting_quota: { status: 'queued' },
+};
+
 /**
  * Priority task queue.
  * Tasks are ordered by: priority (desc) → created_at (asc).
  * Only tasks with status 'queued' are eligible for execution.
+ *
+ * With a `store` (AgentForgeDB), every add and status change is written through,
+ * and construction reloads the queue the previous process left behind.
  */
 export class TaskQueue {
-  constructor() {
+  constructor({ store = null } = {}) {
     this._tasks = new Map();
     this._counter = 0;
+    this._store = store;
+    if (store) this._restore();
+  }
+
+  _restore() {
+    const { tasks, lastSeq } = this._store.loadQueue();
+    this._counter = lastSeq;
+    for (const task of tasks) {
+      this._tasks.set(task.id, task);
+      const boot = ON_BOOT[task.status];
+      if (!boot) continue;
+      if (task.status === 'executing') {
+        console.warn('[task-queue] Task %s was executing when the previous process stopped. Marked failed (interrupted).', task.id);
+      }
+      this.updateStatus(task.id, boot.status, boot.extra);
+    }
   }
 
   add(taskData) {
@@ -37,6 +66,7 @@ export class TaskQueue {
       model_used: null,
     };
     this._tasks.set(task.id, task);
+    this._store?.saveTask(task);
     eventBus.emit('task.queued', { task });
     return task;
   }
@@ -71,6 +101,7 @@ export class TaskQueue {
     Object.assign(task, extra);
     if (status === 'assigned') task.assigned_at = Date.now();
     if (status === 'completed' || status === 'failed') task.completed_at = Date.now();
+    this._store?.saveTask(task);
     return task;
   }
 

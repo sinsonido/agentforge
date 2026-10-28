@@ -21,8 +21,9 @@ export async function createAgentForge(configPath) {
   const config = loadConfig(configPath);
   const { models, agents, rules } = buildFromConfig(config);
 
-  // Task queue
-  const taskQueue = new TaskQueue();
+  // Database, then the task queue it restores and writes through to
+  const db = new AgentForgeDB(config.database?.path);
+  const taskQueue = new TaskQueue({ store: db });
 
   // Quota manager
   const quotaManager = new QuotaManager();
@@ -86,13 +87,7 @@ export async function createAgentForge(configPath) {
     agentPool.register({ id, ...agentConfig });
   }
 
-  // Database — persist events, tasks, costs
-  const db = new AgentForgeDB(config.database?.path);
-
   const TASK_EVENTS = ['task.queued', 'task.executing', 'task.completed', 'task.failed'];
-  for (const evt of TASK_EVENTS) {
-    eventBus.on(evt, ({ task }) => { if (task) db.saveTask(task); });
-  }
 
   eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
     db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);
