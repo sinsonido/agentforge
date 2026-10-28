@@ -59,6 +59,10 @@ function corsMiddleware(req, res, next) {
 // Route builder
 // ---------------------------------------------------------------------------
 
+function agentView({ id, name, role, model }) {
+  return { id, name, role, model };
+}
+
 /**
  * Build and return an Express Router wired to the forge instance.
  *
@@ -67,7 +71,7 @@ function corsMiddleware(req, res, next) {
  * @param {import('../core/quota-tracker.js').QuotaManager} forge.quotaManager
  * @param {import('../core/event-bus.js').default} forge.eventBus
  * @param {Object} forge.orchestrator
- * @param {Object} [forge.agentPool]   - May not exist yet; handled gracefully.
+ * @param {Object<string, Object>} forge.agents - Agent configs from buildFromConfig(), keyed by id.
  * @param {Object} [forge.costTracker] - May not exist yet; handled gracefully.
  * @returns {import('express').Router}
  */
@@ -82,7 +86,7 @@ function buildRouter(forge) {
     try {
       const taskStats = forge.taskQueue.stats();
       const quotas = forge.quotaManager.getAllStatuses();
-      const agentStatuses = forge.agentPool?.getAllStatuses?.() ?? {};
+      const agents = Object.fromEntries(Object.entries(forge.agents ?? {}).map(([id, a]) => [id, agentView(a)]));
 
       res.json({
         ok: true,
@@ -91,7 +95,7 @@ function buildRouter(forge) {
         },
         tasks: taskStats,
         quotas,
-        agents: agentStatuses,
+        agents,
       });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -188,12 +192,11 @@ function buildRouter(forge) {
 
   // ── GET /api/agents ──────────────────────────────────────────────────────
   /**
-   * List all agents and their lifecycle status.
+   * List the configured agents.
    */
   router.get('/agents', (req, res) => {
     try {
-      const statuses = forge.agentPool?.getAllStatuses?.() ?? {};
-      const agents = Object.values(statuses);
+      const agents = Object.values(forge.agents ?? {}).map(agentView);
       res.json({ ok: true, count: agents.length, agents });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
@@ -202,21 +205,20 @@ function buildRouter(forge) {
 
   // ── POST /api/agents/:id ─────────────────────────────────────────────────
   /**
-   * Update an agent's runtime config (model, systemPrompt).
+   * Update an agent's model or system prompt. The router and the context
+   * builder read the same agent object, so the next task uses the change.
    * Body: { model?, systemPrompt? }
    */
   router.post('/agents/:id', (req, res) => {
     try {
       const agentId = req.params.id;
       const { model, systemPrompt } = req.body ?? {};
-      const pool = forge.agentPool;
-      if (!pool) {
-        return res.status(503).json({ ok: false, error: 'Agent pool not available' });
-      }
-      const updated = pool.updateAgentConfig?.(agentId, { model, systemPrompt });
-      if (updated === false) {
+      const agent = forge.agents?.[agentId];
+      if (!agent) {
         return res.status(404).json({ ok: false, error: `Agent '${agentId}' not found` });
       }
+      if (model) agent.model = model;
+      if (systemPrompt) agent.system_prompt = systemPrompt;
       forge.eventBus.emit('agent.config_updated', { agentId, model, updatedAt: Date.now() });
       res.json({ ok: true, agentId, model, systemPrompt });
     } catch (err) {

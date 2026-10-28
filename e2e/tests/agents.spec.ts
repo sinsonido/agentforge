@@ -14,9 +14,8 @@ test.describe('Agents — list and edit', () => {
     }
   })
 
-  test('each agent card shows its state badge', async ({ page }) => {
-    const badges = page.getByText('idle')
-    await expect(badges.first()).toBeVisible()
+  test('each agent card shows its model', async ({ page }) => {
+    await expect(page.getByText('Model:')).toHaveCount(TEST_AGENTS.length)
   })
 
   test('settings button opens edit dialog for an agent', async ({ page }) => {
@@ -52,12 +51,5 @@ test.describe('Agents — list and edit', () => {
     for (const id of ['architect', 'developer', 'tester']) {
       await expect(page.getByText(id, { exact: true })).toBeVisible()
     }
-  })
-
-  test('each agent card shows state transitions count', async ({ page }) => {
-    // Fresh agents start with 0 state transitions
-    const transitionText = page.getByText('0 state transitions')
-    await expect(transitionText.first()).toBeVisible()
-    await expect(transitionText).toHaveCount(TEST_AGENTS.length)
   })
 })

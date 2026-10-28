@@ -30,8 +30,7 @@ test.describe('Agents — model override persistence', () => {
 
     const body = await (await request.get('/api/agents')).json()
     const developer = body.agents.find((a: { id: string }) => a.id === 'developer')
-    // The model field or modelOverride should reflect the update
-    expect(developer).toBeTruthy()
+    expect(developer.model).toBe('gemini-2.5-flash')
   })
 
   test('editing two agents independently does not cross-contaminate', async ({ request }) => {
@@ -42,9 +41,8 @@ test.describe('Agents — model override persistence', () => {
     const architect = body.agents.find((a: { id: string }) => a.id === 'architect')
     const tester    = body.agents.find((a: { id: string }) => a.id === 'tester')
 
-    // Both should exist without errors
-    expect(architect).toBeTruthy()
-    expect(tester).toBeTruthy()
+    expect(architect.model).toBe('model-for-architect')
+    expect(tester.model).toBe('model-for-tester')
   })
 })
 
@@ -89,25 +87,5 @@ test.describe('Agents — edit dialog state', () => {
     await expect(page.getByRole('dialog')).not.toBeVisible()
 
     expect(requests.some((url) => url.includes('/api/agents/tester'))).toBe(true)
-  })
-})
-
-test.describe('Agents — card displays state transitions', () => {
-  test('state transitions count stays at 0 after agent config update (config change is not a lifecycle transition)', async ({ page, request }) => {
-    await page.goto('/agents')
-    await page.waitForLoadState('networkidle')
-
-    // Read initial count
-    const countEls = page.getByText('0 state transitions')
-    const initialCount = await countEls.count()
-    expect(initialCount).toBeGreaterThan(0)
-
-    // Trigger an agent.config_updated event via API (does not change state transitions)
-    await request.post('/api/agents/architect', { data: { model: 'claude-haiku-4' } })
-
-    // State transition count itself should still be 0 (no lifecycle change happened)
-    await page.reload()
-    await page.waitForLoadState('networkidle')
-    await expect(page.getByText('0 state transitions').first()).toBeVisible()
   })
 })

@@ -29,8 +29,8 @@ function makeForge(overrides = {}) {
     taskQueue: new TaskQueue(),
     quotaManager: new QuotaManager(),
     eventBus,
-    agentPool: {
-      getAllStatuses: () => ({ dev: { agentId: 'dev', status: 'idle', model: 'claude-sonnet-5-5' } }),
+    agents: {
+      dev: { id: 'dev', name: 'Dev', role: 'Backend', model: 'claude-sonnet-5-5', system_prompt: 'secret' },
     },
     orchestrator: {
       _running: false,
@@ -79,7 +79,7 @@ describe('GET /api/status', () => {
     assert.equal(body.tasks.queued, 1);
     assert.equal(body.tasks.completed, 1);
     assert.deepEqual(Object.keys(body.quotas), ['anthropic']);
-    assert.equal(body.agents.dev.status, 'idle');
+    assert.deepEqual(body.agents, { dev: { id: 'dev', name: 'Dev', role: 'Backend', model: 'claude-sonnet-5-5' } });
   });
 });
 
@@ -183,11 +183,11 @@ describe('/api/tasks', () => {
 });
 
 describe('GET /api/agents', () => {
-  it('lists agent statuses from the pool', async (t) => {
+  it('lists the configured agents without their prompts', async (t) => {
     const { call } = await serve(t);
     const { body } = await call('GET', '/api/agents');
     assert.equal(body.count, 1);
-    assert.deepEqual(body.agents, [{ agentId: 'dev', status: 'idle', model: 'claude-sonnet-5-5' }]);
+    assert.deepEqual(body.agents, [{ id: 'dev', name: 'Dev', role: 'Backend', model: 'claude-sonnet-5-5' }]);
   });
 });
 

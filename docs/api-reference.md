@@ -81,12 +81,10 @@ System overview: orchestrator state, task stats from the in-memory queue, quota 
     }
   },
   "agents": {
-    "developer": { "id": "developer", "name": "Developer", "state": "idle", "currentTaskId": null, "historyLength": 0 }
+    "developer": { "id": "developer", "name": "Developer", "role": "Backend Developer", "model": "claude-sonnet-5-5" }
   }
 }
 ```
-
-Agent `state` is always `idle` today. The orchestrator never drives the agent lifecycle transitions.
 
 ---
 
@@ -261,7 +259,7 @@ The endpoint emits `task.status_changed` on the event bus. The WebSocket server 
 
 #### `GET /api/agents`
 
-List all agents from `team` and their lifecycle state.
+List all agents from `team`. `model` is `null` when the agent has none and routing rules pick the model.
 
 **Response**
 ```json
@@ -272,23 +270,19 @@ List all agents from `team` and their lifecycle state.
     {
       "id": "developer",
       "name": "Developer",
-      "state": "idle",
-      "currentTaskId": null,
-      "historyLength": 0
+      "role": "Backend Developer",
+      "model": "claude-sonnet-5-5"
     }
   ]
 }
 ```
 
-The orchestrator never drives the agent lifecycle, so `state` stays `idle`.
-
 ---
 
 #### `POST /api/agents/:id`
 
-Store a new model or system prompt on the agent's entry in the agent pool.
-The router and the orchestrator read agent settings from the config, not from the
-pool, so the change does not affect routing or prompts. It lasts until restart.
+Set the agent's model or system prompt. The next task routed to the agent uses
+them. A field the body leaves out keeps its value. The change lasts until restart.
 
 **Body**
 ```json

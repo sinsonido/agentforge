@@ -3,7 +3,6 @@ import { TaskQueue } from './core/task-queue.js';
 import { QuotaManager } from './core/quota-tracker.js';
 import { Router } from './routing/router.js';
 import { Orchestrator } from './core/orchestrator.js';
-import { AgentPool } from './core/agent-lifecycle.js';
 import { AgentForgeDB } from './persistence/db.js';
 import { ProviderRegistry, OllamaProvider } from './providers/interface.js';
 import { AnthropicProvider } from './providers/anthropic.js';
@@ -107,28 +106,14 @@ export async function createAgentForge(configPath) {
     intake,
   });
 
-  // Agent pool — register all agents from config
-  const agentPool = new AgentPool();
-  for (const [id, agentConfig] of Object.entries(agents)) {
-    agentPool.register({ id, ...agentConfig });
-  }
-
   const TASK_EVENTS = ['task.queued', 'task.executing', 'task.completed', 'task.failed'];
 
   eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
     db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);
   });
 
-  const AGENT_EVENTS = ['agent.assigned', 'agent.executing', 'agent.completed', 'agent.failed'];
-  for (const evt of AGENT_EVENTS) {
-    const toState = evt.split('.')[1];
-    eventBus.on(evt, (data) => {
-      db.logAgentActivity(data.agent, null, toState, data.taskId, data);
-    });
-  }
-
   // Log all events to DB
-  const ALL_LOG_EVENTS = [...TASK_EVENTS, ...AGENT_EVENTS, 'cost.recorded', 'quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning'];
+  const ALL_LOG_EVENTS = [...TASK_EVENTS, 'cost.recorded', 'quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning'];
   for (const evt of ALL_LOG_EVENTS) {
     eventBus.on(evt, (data) => db.logEvent(evt, data));
   }
@@ -146,7 +131,6 @@ export async function createAgentForge(configPath) {
     router,
     quotaManager,
     providerRegistry,
-    agentPool,
     db,
     eventBus,
     config,
