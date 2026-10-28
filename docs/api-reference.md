@@ -14,9 +14,16 @@ responses include `"ok": false` and an `"error"` string.
 
 ### Authentication
 
-No authentication is required in the default configuration. When binding to
-`0.0.0.0` for production, place the server behind a reverse proxy with
-authentication (nginx, Caddy, etc.).
+Authentication is off by default. To turn it on, set `server.auth.enabled: true`
+and `server.auth.secret` in `agentforge.yml`. Then every `/api/*` request except
+`GET /api/status` needs this header:
+
+```
+Authorization: Bearer <secret>
+```
+
+A missing or wrong token returns `401 { "ok": false, "error": "Unauthorized" }`.
+Auth is skipped when `NODE_ENV=test`.
 
 ### Security headers
 
@@ -40,7 +47,7 @@ All responses include `RateLimit-*` headers (RFC-compliant, no legacy headers).
 | All routes | 200 requests / minute per IP |
 | `POST /api/*` | 30 requests / minute per IP |
 
-Exceeding the limit returns `429 Too Many Requests`.
+Exceeding the limit returns `429 Too Many Requests`. Rate limits are off when `NODE_ENV=test`.
 
 ---
 
@@ -48,7 +55,7 @@ Exceeding the limit returns `429 Too Many Requests`.
 
 #### `GET /api/status`
 
-System overview: orchestrator state, task stats, quota states, agent count.
+System overview: orchestrator state, task stats from the in-memory queue, quota states, and agents.
 
 **Response**
 
@@ -61,16 +68,25 @@ System overview: orchestrator state, task stats, quota states, agent count.
     "queued": 3,
     "executing": 2,
     "completed": 18,
-    "failed": 1
+    "failed": 1,
+    "waiting": 0
   },
   "quotas": {
-    "anthropic": { "state": "available", "tokensUsed": 12000, "tokensLimit": 400000 }
+    "anthropic": {
+      "provider": "anthropic",
+      "state": "available",
+      "requests": { "used": 8, "max": 100, "pct": 0.08 },
+      "tokens": { "used": 12000, "max": 400000, "pct": 0.03 },
+      "estimatedResetMs": 0
+    }
   },
   "agents": {
-    "Developer": { "agentId": "Developer", "status": "executing", "model": "claude-sonnet-5-5" }
+    "developer": { "id": "developer", "name": "Developer", "state": "idle", "currentTaskId": null, "historyLength": 0 }
   }
 }
 ```
+
+Agent `state` is always `idle` today. The orchestrator never drives the agent lifecycle transitions.
 
 ---
 
@@ -105,7 +121,9 @@ Stop the orchestrator.
 
 #### `GET /api/tasks`
 
-List all tasks. Filter by status with `?status=queued|executing|completed|failed`.
+List tasks. The response merges the in-memory queue with up to 500 tasks from SQLite
+history. Filter by status with `?status=<status>`. Task statuses are `queued`,
+`assigned`, `executing`, `completed`, `failed`, `waiting_quota`, and `paused_budget`.
 
 ```bash
 curl http://localhost:4242/api/tasks
@@ -119,12 +137,12 @@ curl http://localhost:4242/api/tasks?status=executing
   "count": 3,
   "tasks": [
     {
-      "id": "t_abc123",
+      "id": "t3",
       "title": "Write unit tests for auth module",
       "type": "test",
       "priority": "high",
       "status": "queued",
-      "agent_id": "Tester",
+      "agent_id": "tester",
       "created_at": 1740000000000
     }
   ]
@@ -151,19 +169,21 @@ Add a new task to the queue.
 |---|---|---|
 | `title` | yes | Task description |
 | `type` | no | `architecture`, `implement`, `test`, `refactor`, `review`, etc. |
-| `priority` | no | `high`, `medium` (default), `low` |
-| `agent_id` | no | Assign to a specific agent |
+| `priority` | no | `critical`, `high`, `medium` (default), `low` |
+| `agent_id` | no | Agent ID: the agent's name in lowercase with spaces replaced by `-` |
+
+The endpoint ignores other fields. Task IDs are `t1`, `t2`, and so on. The counter starts again at `t1` when the server restarts.
 
 **Response `201`**
 ```json
-{ "ok": true, "task": { "id": "t_xyz", "title": "...", "status": "queued" } }
+{ "ok": true, "task": { "id": "t4", "title": "...", "status": "queued" } }
 ```
 
 ---
 
 #### `GET /api/tasks/:id`
 
-Get a single task by ID.
+Get a single task by ID from the in-memory queue. Tasks that exist only in SQLite history return `404`.
 
 **Response `200`**
 ```json
@@ -188,6 +208,8 @@ Update a task's status (used by the Kanban drag-and-drop).
 
 Valid values: `queued`, `executing`, `completed`, `failed`
 
+The endpoint emits `task.status_changed` on the event bus. The WebSocket server does not forward that event.
+
 **Response `200`**
 ```json
 { "ok": true, "taskId": "t_xyz", "status": "completed" }
@@ -199,7 +221,7 @@ Valid values: `queued`, `executing`, `completed`, `failed`
 
 #### `GET /api/agents`
 
-List all agents and their current lifecycle state.
+List all agents from `team` and their lifecycle state.
 
 **Response**
 ```json
@@ -208,24 +230,25 @@ List all agents and their current lifecycle state.
   "count": 3,
   "agents": [
     {
-      "agentId": "Developer",
-      "status": "executing",
-      "model": "claude-sonnet-5-5",
-      "tasksCompleted": 5,
-      "tokensIn": 42000,
-      "tokensOut": 18000,
-      "currentTask": "t_abc123"
+      "id": "developer",
+      "name": "Developer",
+      "state": "idle",
+      "currentTaskId": null,
+      "historyLength": 0
     }
   ]
 }
 ```
 
+The orchestrator never drives the agent lifecycle, so `state` stays `idle`.
+
 ---
 
 #### `POST /api/agents/:id`
 
-Update an agent's runtime configuration (model and/or system prompt).
-Changes take effect on the next task dispatched to that agent.
+Store a new model or system prompt on the agent's entry in the agent pool.
+The router and the orchestrator read agent settings from the config, not from the
+pool, so the change does not affect routing or prompts. It lasts until restart.
 
 **Body**
 ```json
@@ -237,12 +260,12 @@ Changes take effect on the next task dispatched to that agent.
 
 **Response `200`**
 ```json
-{ "ok": true, "agentId": "Developer", "model": "claude-haiku-5-5" }
+{ "ok": true, "agentId": "developer", "model": "claude-haiku-5-5", "systemPrompt": "You are a concise QA engineer." }
 ```
 
 **Response `404`** — agent not registered
 ```json
-{ "ok": false, "error": "Agent 'Developer' not found" }
+{ "ok": false, "error": "Agent 'developer' not found" }
 ```
 
 ---
@@ -251,7 +274,7 @@ Changes take effect on the next task dispatched to that agent.
 
 #### `GET /api/quotas`
 
-All provider quota states with usage windows.
+Quota state of every provider that has a `quota` block.
 
 **Response**
 ```json
@@ -259,16 +282,17 @@ All provider quota states with usage windows.
   "ok": true,
   "quotas": {
     "anthropic": {
+      "provider": "anthropic",
       "state": "available",
-      "tokensUsed": 12000,
-      "tokensLimit": 400000,
-      "requestsUsed": 8,
-      "requestsLimit": 100,
-      "windowResetAt": 1740000060000
+      "requests": { "used": 8, "max": 100, "pct": 0.08 },
+      "tokens": { "used": 12000, "max": 400000, "pct": 0.03 },
+      "estimatedResetMs": 0
     }
   }
 }
 ```
+
+`tokens` counts input tokens only. `estimatedResetMs` is non-zero only while the provider is `exhausted`.
 
 Quota `state` values: `"available"`, `"throttled"`, `"exhausted"`
 
@@ -280,37 +304,39 @@ Quota `state` values: `"available"`, `"throttled"`, `"exhausted"`
 
 Cost stats: budgets, spend by agent, spend by model, transaction log.
 
-**Response** (when cost tracking is active)
+**Response**
 ```json
 {
   "ok": true,
   "available": true,
   "costs": {
     "totalCostUSD": 3.42,
-    "totalTokensIn": 120000,
-    "totalTokensOut": 48000,
     "budgets": {
-      "default": { "spentUSD": 3.42, "limitUSD": 50.00 }
+      "My Project": {
+        "budget": 50, "spent": 3.42, "remaining": 46.58,
+        "remaining_pct": 0.93, "spent_pct": 0.07, "warning": false, "exceeded": false
+      }
     },
-    "byAgent": {
-      "Developer": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 0.48 }
-    },
-    "byModel": {
-      "claude-sonnet-5-5": { "tokensIn": 80000, "tokensOut": 32000, "costUSD": 0.48 }
-    },
+    "byAgent": { "developer": 3.42 },
+    "byModel": { "claude-sonnet-5-5": 3.42 },
     "transactions": [
       {
-        "agentId": "Developer",
+        "projectId": "My Project",
+        "agentId": "developer",
         "model": "claude-sonnet-5-5",
         "tokensIn": 1200,
         "tokensOut": 480,
-        "costUSD": 0.0072,
-        "timestamp": 1740000000000
+        "cost": 0.0072
       }
     ]
   }
 }
 ```
+
+`budgets` and `byModel` come from the in-memory cost tracker and reset on restart.
+`byAgent` and `totalCostUSD` come from SQLite for the current project, so they
+survive a restart while `budgets` does not. `transactions` lists the
+`cost.recorded` events among the last 200 logged events.
 
 ---
 
@@ -318,7 +344,10 @@ Cost stats: budgets, spend by agent, spend by model, transaction log.
 
 #### `GET /api/events`
 
-Recent events from the event bus. Pass `?limit=N` (default 50, max 1000).
+Recent events from the SQLite event log. Pass `?limit=N` (default 50, max 1000).
+The log holds `task.queued`, `task.executing`, `task.completed`, `task.failed`,
+`cost.recorded`, `quota.exhausted`, `quota.reset`, `budget.warning`, and
+`budget.exceeded`. Other events are not logged.
 
 ```bash
 curl http://localhost:4242/api/events?limit=10
@@ -341,7 +370,9 @@ curl http://localhost:4242/api/events?limit=10
 
 #### `POST /api/providers/test`
 
-Test connectivity for a named provider.
+Check that a provider is registered. No adapter implements a `test()` method, so
+the server makes no network call. Every registered provider reports `reachable`.
+An unknown provider returns `404`.
 
 **Body**
 ```json
@@ -353,18 +384,18 @@ Test connectivity for a named provider.
 { "ok": true, "provider": "anthropic", "status": "reachable" }
 ```
 
-**Response `200` (test failed)**
-```json
-{ "ok": false, "error": "connect ECONNREFUSED 127.0.0.1:11434" }
-```
-
 ---
 
 ### Reviews
 
+These two endpoints only emit `review.approved` or `review.rejected` on the event
+bus and forward them to WebSocket clients. Nothing acts on them: the `ReviewGate`
+in `src/git/review-gate.js` is present but not wired, and is scheduled for removal
+in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)).
+
 #### `POST /api/review/:prNumber/approve`
 
-Approve a PR review gate.
+Emit `review.approved` for a PR number.
 
 ```bash
 curl -X POST http://localhost:4242/api/review/42/approve
@@ -379,7 +410,7 @@ curl -X POST http://localhost:4242/api/review/42/approve
 
 #### `POST /api/review/:prNumber/reject`
 
-Reject a PR review gate. Requires a reason.
+Emit `review.rejected` for a PR number. Requires a reason.
 
 **Body**
 ```json
@@ -393,14 +424,26 @@ Reject a PR review gate. Requires a reason.
 
 ---
 
+### Test support
+
+#### `POST /api/test/reset`
+
+Mounted only when `NODE_ENV=test`. Clears the in-memory task queue, stops the
+orchestrator, and clears the event bus replay buffer. The E2E fixture uses it.
+
+---
+
 ## WebSocket
 
-Connect to `ws://localhost:4242/ws` to receive real-time events.
+Connect to `ws://localhost:4242/ws` to receive real-time events. When
+`server.auth.enabled` is `true`, add the secret as a query parameter:
+`ws://localhost:4242/ws?token=<secret>`. The server closes a connection with a
+missing or wrong token with code `4401`.
 
 ### Behaviour
 
-- On connect, the last **20 events** are replayed immediately.
-- All subsequent events are broadcast as they fire.
+- On connect, the server replays the last **20 events** from the event bus. The replay can include any event type, not only the ones in the catalogue below.
+- After that, the server broadcasts each event in the catalogue as it fires.
 - A server-initiated **ping** is sent every 30 seconds. The connection is
   closed if no pong is received before the next ping cycle.
 
@@ -411,35 +454,39 @@ All messages are JSON:
 ```json
 {
   "event": "task.completed",
-  "data": { "taskId": "t_abc123", "result": "..." },
+  "data": { "task": { "id": "t3", "status": "completed" }, "cost": 0.0108 },
   "timestamp": 1740000000000
 }
 ```
 
 ### Event catalogue
 
+The server forwards these events. Events marked **never emitted** come only from
+modules that are present but not wired (`src/git/`), so clients never see them today.
+
 | Event | Data |
 |---|---|
 | `task.queued` | `{ task }` |
-| `task.assigned` | `{ task, agent, model }` |
-| `task.executing` | `{ task, agent }` |
-| `task.completed` | `{ task, result, cost }` |
+| `task.assigned` | never emitted |
+| `task.executing` | `{ task, route }` |
+| `task.completed` | `{ task, cost, route, output }` |
 | `task.failed` | `{ task, error }` |
-| `task.status_changed` | `{ taskId, status, changedAt }` |
-| `quota.throttled` | `{ provider, usage_pct }` |
+| `quota.throttled` | `{ provider, pct }` |
 | `quota.exhausted` | `{ provider }` |
 | `quota.reset` | `{ provider }` |
 | `agent.paused` | `{ agent, reason }` |
 | `agent.resumed` | `{ agent }` |
-| `agent.config_updated` | `{ agentId, model, updatedAt }` |
-| `budget.warning` | `{ project, pct }` |
-| `budget.exceeded` | `{ project }` |
-| `git.committed` | `{ task, branch, sha }` |
-| `git.pr_created` | `{ task, pr_url }` |
-| `cost.recorded` | `{ agentId, model, costUSD }` |
-| `review.pending` | `{ prNumber }` |
+| `budget.warning` | `{ projectId, spent, budget, spent_pct }` |
+| `budget.exceeded` | `{ projectId, spent, budget, spent_pct }` |
+| `git.committed` | never emitted |
+| `git.pr_created` | never emitted |
+| `cost.recorded` | `{ projectId, agentId, model, tokensIn, tokensOut, cost }` |
+| `review.pending` | never emitted |
 | `review.approved` | `{ prNumber, approvedAt }` |
 | `review.rejected` | `{ prNumber, reason, rejectedAt }` |
+
+`task.status_changed` and `agent.config_updated` are emitted by the REST API but
+are not forwarded.
 
 ### Example client (Node.js)
 

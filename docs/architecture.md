@@ -1,80 +1,109 @@
 # Architecture
 
-## Design Principles
+This page describes the code on `master`. One path works end to end: a task enters an in-memory queue, the router picks a model, the provider answers one prompt, and the result text is stored. Agents have no tools, so they do not edit files, run commands, or use git.
 
-1. **Deterministic routing** — No AI decides which AI to use. Rules are explicit, auditable, configurable.
-2. **Fail gracefully** — Quota exhausted? Fallback. Budget exceeded? Pause. Provider down? Next in chain.
-3. **Config as code** — `agentforge.yml` is the source of truth. The UI reads/writes it. The repo travels with the config.
-4. **Agents are stateless** — An agent is a configuration, not a process. No persistent memory between tasks.
-5. **Everything is an event** — Components communicate via EventBus. Easy to log, debug, extend.
+Several modules exist in `src/` but nothing starts them. [Present but not wired](#present-but-not-wired) lists them. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)). [ROADMAP.md](../ROADMAP.md) describes the reorientation.
 
-## System Overview
+## Design principles
+
+1. **Deterministic routing.** No AI decides which AI to use. Rules are explicit, auditable, and configurable.
+2. **Fail predictably.** If a model's quota is exhausted, the router tries the next candidate. If the budget is spent, queued tasks pause. If a provider call throws, the task fails.
+3. **Config as code.** `agentforge.yml` is the source of truth. The server reads it at startup and never writes it.
+4. **Agents are configuration.** An agent is a model choice and a system prompt, not a process. There is no memory between tasks.
+5. **Everything is an event.** Components report state changes on the event bus. The database, the WebSocket server, and the orchestrator subscribe to it.
+
+## System overview
 
 ```mermaid
 flowchart TD
-    UI["CLI / API / Web UI"]
+    UI["API / Web UI"]
     CF["Config Loader\nagentforge.yml"]
-    UI --> CF
 
-    subgraph ORC["Orchestrator — main loop"]
-        TQ["TaskQueue\npriority queue"]
+    subgraph ORC["Orchestrator — 500 ms tick"]
+        TQ["TaskQueue\nin-memory priority queue"]
         RT["Router\nrule evaluation"]
-        EX["Executor\ncontext · call · collect"]
+        EX["Execution\ncontext · call · collect"]
         TQ --> RT --> EX
     end
 
+    UI --> TQ
     CF --> ORC
 
-    EX --> QT["QuotaTracker\nper-provider"]
-    EX --> DB["CostDB\nSQLite"]
-    EX --> GM["Git Manager\nbranches · PRs"]
+    RT --> QT["QuotaManager\nper-provider"]
+    EX --> CT["CostTracker\nper-project budget"]
+    EX --> EB["EventBus"]
+    EB --> DB["AgentForgeDB\nSQLite"]
+    EB --> WS["WebSocket /ws"]
 
     subgraph P["Provider Adapters"]
         direction LR
         AN["Anthropic"]
         GO["Google"]
         DS["DeepSeek"]
+        OR["OpenRouter"]
         OL["Ollama"]
     end
 
-    QT --> P
+    EX --> P
 ```
 
-## Component Details
+`createAgentForge()` in `src/index.js` builds every component and returns:
+
+```js
+{ orchestrator, taskQueue, router, quotaManager, providerRegistry,
+  agentPool, db, eventBus, config, agents, models }
+```
+
+The CLI's `start` command calls it, starts the orchestrator, and starts the HTTP server from `src/api/server.js`. The other CLI commands (`task add`, `task list`, `task show`, `status`) call `createAgentForge()` in their own process. They do not reach a running server.
+
+## Component details
 
 ### Orchestrator (`src/core/orchestrator.js`)
 
-The main loop. Runs continuously, pulling tasks and dispatching them.
+The main loop. `start()` runs `_tick()` every 500 ms. Each tick starts at most one task.
 
 ```mermaid
 flowchart TD
-    Start(["loop"]) --> Next["task = taskQueue.next()"]
+    Start(["tick"]) --> Next["task = taskQueue.next()"]
     Next --> HasTask{task?}
-    HasTask -- no --> Sleep["sleep 100ms"] --> Start
-    HasTask -- yes --> Route["route = router.resolve(task)"]
+    HasTask -- no --> End(["return"])
+    HasTask -- yes --> Route["route = router.resolve(task, budget_remaining_pct)"]
     Route --> CanExec{"action == execute?"}
-    CanExec -- no --> Wait["status = waiting_quota"] --> Start
-    CanExec -- yes --> Run["executor.run(task, route)"]
-    Run --> Record["costTracker.record()\nquotaTracker.record()"]
-    Record --> Review{"require_review?"}
-    Review -- yes --> AddReview["taskQueue.add(reviewTask)"] --> Emit
-    Review -- no --> Complete["status = completed\ngitManager.commit()"] --> Emit
-    Emit["eventBus.emit('task.completed')"] --> Start
+    CanExec -- no --> Wait["status = waiting_quota"] --> End
+    CanExec -- yes --> Run["contextBuilder.buildFull()\nproviderRegistry.execute()"]
+    Run --> Ok{"call succeeded?"}
+    Ok -- no --> Fail["status = failed\nemit task.failed"] --> End
+    Ok -- yes --> Record["quotaManager.recordUsage()\ncostTracker.recordCost()\nemit cost.recorded"]
+    Record --> Complete["outputCollector.parse()\nstatus = completed, result = text\nemit task.completed"] --> End
 ```
+
+`_resolveTools()` returns `[]`, so providers never receive tool definitions. There is no review step and no git step after a task completes.
+
+The orchestrator also listens to events:
+
+- `quota.exhausted` moves executing tasks on that provider to `waiting_quota` and emits `agent.paused`.
+- `quota.reset` moves every `waiting_quota` task back to `queued` and emits `agent.resumed`.
+- `budget.exceeded` moves queued tasks of the project to `paused_budget`. Nothing moves them back automatically.
+
+### TaskQueue (`src/core/task-queue.js`)
+
+An in-memory map of tasks. `next()` returns the `queued` task with the highest priority (`critical`, `high`, `medium`, `low`), oldest first, whose `depends_on` tasks are all `completed`. Task IDs are `t1`, `t2`, and so on, and the counter restarts with the process. A restart drops every task in the queue.
+
+Statuses: `queued`, `assigned`, `executing`, `completed`, `failed`, `waiting_quota`, `paused_budget`.
 
 ### Router (`src/routing/router.js`)
 
 Deterministic decision engine. No randomness, no AI.
 
-**Input:** Task metadata (type, priority, context_tokens, agent, project)
-**Output:** { model, provider, tier, fallback_chain }
+**Input:** the task (`type`, `agent_id`, `force_model`, `context_tokens_estimate`, `allow_tier_downgrade`) and `budget_remaining_pct`.
+**Output:** `{ action: 'execute', model, provider, tier, fallback_used }` or `{ action: 'wait', reason }`.
 
 **Evaluation order:**
 
 ```mermaid
 flowchart TD
     T(["task"]) --> F1{"force_model?"}
-    F1 -- yes --> TM["use forced model"] --> X(["execute"])
+    F1 -- yes --> TM["use forced model"] --> X(["execute or wait"])
     F1 -- no --> F2{"agent.model?"}
     F2 -- yes --> AM["try agent model"]
     AM --> AV1{"available?"}
@@ -83,97 +112,96 @@ flowchart TD
     FB --> AV2{"available?"}
     AV2 -- yes --> X
     AV2 -- no --> Rules
-    F2 -- no --> Rules["evaluate routing rules\nordered · first match wins"]
-    Rules --> AV3{"match available?"}
+    F2 -- no --> Rules["evaluate routing rules\nin order"]
+    Rules --> AV3{"a matching rule\nyields a model?"}
     AV3 -- yes --> X
     AV3 -- no --> Tier["resolve tier by task.type\nT1 strategy · T2 dev · T3 exec"]
     Tier --> Cheap["cheapest model in tier\nlocal-first"]
     Cheap --> AV4{"available?"}
     AV4 -- yes --> X
-    AV4 -- no --> Chain["fallback chain\ntry lower tiers"]
+    AV4 -- no --> Chain["try lower tiers"]
     Chain --> AV5{"any available?"}
     AV5 -- yes --> X
     AV5 -- no --> W(["wait: all_providers_exhausted"])
 ```
 
-### QuotaTracker (`src/core/quota-tracker.js`)
+A model is available when it is listed under `models`, its `context` fits `context_tokens_estimate`, and `quotaManager.canExecute()` allows its provider. The orchestrator sets `context_tokens_estimate` after routing, so the first routing of a task always sees `0`. The router ignores `routing.fallback_strategy` and `routing.cost_optimization`.
 
-Per-provider sliding window rate limiter.
+### QuotaManager (`src/core/quota-tracker.js`)
+
+One `ProviderQuotaTracker` per provider that has a `quota` block. Providers without one are never limited.
 
 ```
-QuotaTracker {
-  windows: Map<provider_id, SlidingWindow>
-
-  canExecute(provider, estimated_tokens): boolean
-  recordUsage(provider, tokens_in, tokens_out): void
-  getState(provider): "available" | "throttled" | "exhausted"
-  getResetEstimate(provider): seconds
+QuotaManager {
+  addProvider(providerId, quotaConfig)
+  canExecute(providerId, estimatedTokens): boolean
+  recordUsage(providerId, tokensIn, tokensOut)
+  getStatus(providerId) / getAllStatuses()
+  startWatcher(intervalMs = 1000) / stopWatcher()
 }
 
-SlidingWindow {
-  entries: Array<{ timestamp, value }>
-  window_size: Duration
-  max_value: number
-
-  add(value): void
-  prune(): void        // Remove entries older than window
-  sum(): number
-  count(): number
-  usage_pct(): number  // sum / max_value
+ProviderQuotaTracker {
+  requests: SlidingWindow   // max_requests_per_minute
+  tokensIn: SlidingWindow   // max_tokens_per_minute (input tokens only)
+  state: "available" | "throttled" | "exhausted"
 }
 ```
+
+The window length is `window_minutes` (default 1). Above 70% of either limit the state is `throttled`. Above 95% it is `exhausted`. `auto_pause: false` turns tracking off for that provider.
 
 **Auto-pause flow:**
 
 ```mermaid
 sequenceDiagram
-    participant E as Executor
+    participant ORC as Orchestrator
     participant QT as QuotaTracker
     participant EB as EventBus
-    participant ORC as Orchestrator
 
-    E->>QT: recordUsage(provider, tokens)
-    QT->>QT: prune old window entries
-    QT->>QT: recalculate usage_pct
+    ORC->>QT: recordUsage(provider, tokens)
+    QT->>QT: recalculate usage
 
-    alt usage_pct > 95%
+    alt usage > 95%
         QT->>EB: emit quota.exhausted
         EB->>ORC: quota.exhausted { provider }
-        ORC->>ORC: pause agents on provider
+        ORC->>ORC: executing tasks on provider → waiting_quota
     end
 
     loop every 1s
-        QT->>QT: prune window
-        alt usage_pct < threshold
+        QT->>QT: prune windows
+        alt exhausted → available (≤ 70%)
             QT->>EB: emit quota.reset
             EB->>ORC: quota.reset { provider }
-            ORC->>ORC: resume agents
+            ORC->>ORC: waiting_quota tasks → queued
         end
     end
 ```
 
-### Provider Adapters (`src/providers/`)
+`quota.reset` fires only on a direct change from `exhausted` to `available`. If the state passes through `throttled` on the way down, no `quota.reset` fires, and waiting tasks stay in `waiting_quota`.
 
-Unified interface, provider-specific implementation.
+### CostTracker (`src/core/cost-tracker.js`)
+
+The orchestrator creates it and registers the project with `project.budget`. After each call it adds the cost, computed from the model's `cost_in` and `cost_out` per million tokens. At `alerts.budget_warning_pct` it emits `budget.warning`. At `alerts.budget_pause_pct` it emits `budget.exceeded`. Spend lives in memory and resets on restart.
+
+### Provider adapters (`src/providers/`)
+
+Every adapter extends `BaseProvider` and is registered in `createAgentForge()`.
 
 ```typescript
 interface Provider {
   id: string
-  name: string
 
   execute(params: {
     model: string
-    messages: Message[]
-    tools?: Tool[]
-    max_tokens?: number
-    temperature?: number
-    stream?: boolean
+    messages: Message[]   // first message has role "system"
+    tools?: Tool[]        // always undefined or [] today
+    max_tokens?: number   // agent.max_tokens_per_task, default 4096
+    temperature?: number  // default 0.7
   }): Promise<{
     content: string
     tokens_in: number
     tokens_out: number
-    tool_calls?: ToolCall[]
-    raw_response?: any
+    tool_calls: ToolCall[]
+    finish_reason: string
   }>
 
   listModels(): Promise<string[]>
@@ -181,205 +209,162 @@ interface Provider {
 }
 ```
 
-### Agent Definition
+No adapter streams. `OllamaProvider` lives in `interface.js` and calls `/api/chat` with `stream: false`.
 
-Agents are pure configuration, not runtime objects.
+### Agent definition
+
+Agents are configuration, loaded from `team` by `buildFromConfig()` in `src/config/loader.js`.
 
 ```typescript
 interface AgentConfig {
-  id: string
+  id: string                       // name, lowercased, spaces → "-"
   name: string
   role: string
-  model: string                    // Default model
-  fallback_models?: string[]       // If default unavailable
-  allow_tier_downgrade?: boolean
+  model: string | null             // Tried before routing rules
+  fallback_models: string[]        // Tried next, in order
+  system_prompt: string            // Or loaded from system_prompt_file
+  system_prompt_file: string | null
+  max_tokens_per_task: number | null
 
-  system_prompt: string
-  system_prompt_file?: string      // Loaded from file
-  knowledge?: string[]             // Files injected into context
-
-  tools: string[]                  // Available tools
-  max_tokens_per_task?: number
-  max_cost_per_task?: number
-
-  require_review?: boolean
-  reviewer?: string                // Agent ID
+  // Loaded but not read by any running code:
+  tools: string[]
+  require_review: boolean
+  reviewer: string | null
+  max_cost_per_task: number | null
+  allow_tier_downgrade: boolean
 }
 ```
 
-**Agent lifecycle:**
+**Agent lifecycle.** `AgentLifecycle` in `src/core/agent-lifecycle.js` defines the state machine below, and `createAgentForge()` registers one per agent in an `AgentPool`. The orchestrator never calls the transitions, so every agent stays `idle`. The API reads the pool for `GET /api/agents`.
 
 ```mermaid
 stateDiagram-v2
     [*] --> idle
-    idle --> executing : task assigned
-    executing --> idle : task completed
-    executing --> paused : quota.exhausted
-    paused --> idle : quota.reset
-    executing --> failed : error
-    failed --> idle : retry / requeue
-    idle --> terminated : shutdown
-    paused --> terminated : shutdown
-    terminated --> [*]
+    idle --> assigned
+    idle --> paused
+    assigned --> executing
+    assigned --> idle
+    assigned --> failed
+    executing --> reviewing
+    executing --> completed
+    executing --> failed
+    executing --> paused
+    reviewing --> completed
+    reviewing --> failed
+    reviewing --> executing
+    completed --> idle
+    failed --> idle
+    paused --> idle
 ```
 
-### Tools (`src/tools/`)
+### Event bus (`src/core/event-bus.js`)
 
-Actions agents can perform. Each tool follows a standard interface.
-
-```typescript
-interface Tool {
-  name: string
-  description: string
-  parameters: JSONSchema
-
-  execute(params: any, context: TaskContext): Promise<ToolResult>
-}
-```
-
-Built-in tools:
-- `file_read` — Read files from the project repo
-- `file_write` — Write/modify files
-- `git_commit` — Stage and commit changes
-- `run_tests` — Execute test suite
-- `shell_exec` — Run shell commands (sandboxed)
-- `ask_agent` — Query another agent (via orchestrator)
-
-### Event Bus (`src/core/event-bus.js`)
-
-Simple pub/sub for decoupled communication.
+An `EventEmitter` singleton that also keeps the last 1000 events in memory. Events emitted by wired code:
 
 ```
-Events:
-  task.queued        { task }
-  task.assigned      { task, agent, model }
-  task.executing     { task, agent }
-  task.completed     { task, result, cost }
-  task.failed        { task, error }
-  quota.throttled    { provider, usage_pct }
-  quota.exhausted    { provider }
-  quota.reset        { provider }
-  agent.paused       { agent, reason }
-  agent.resumed      { agent }
-  budget.warning     { project, pct }
-  budget.exceeded    { project }
-  git.committed      { task, branch, sha }
-  git.pr_created     { task, pr_url }
+task.queued          { task }
+task.executing       { task, route }
+task.completed       { task, cost, route, output }
+task.failed          { task, error }
+task.status_changed  { taskId, status, changedAt }      (REST API)
+quota.throttled      { provider, pct }
+quota.exhausted      { provider }
+quota.reset          { provider }
+agent.paused         { agent, reason }
+agent.resumed        { agent }
+agent.config_updated { agentId, model, updatedAt }      (REST API)
+budget.warning       { projectId, spent, budget, spent_pct }
+budget.exceeded      { projectId, spent, budget, spent_pct }
+cost.recorded        { projectId, agentId, model, tokensIn, tokensOut, cost }
+review.approved      { prNumber, approvedAt }           (REST API, nothing listens)
+review.rejected      { prNumber, reason, rejectedAt }   (REST API, nothing listens)
 ```
 
-## Data Model
+## Data model
 
-```mermaid
-erDiagram
-    tasks {
-        TEXT id PK
-        TEXT title
-        TEXT type
-        TEXT status
-        TEXT agent_id
-        TEXT project_id
-        TEXT model_used
-        INTEGER tokens_in
-        INTEGER tokens_out
-        REAL cost
-        TEXT output
-        DATETIME created_at
-        DATETIME completed_at
-        TEXT depends_on
-    }
-    projects {
-        TEXT id PK
-        TEXT name
-        TEXT config_path
-        REAL budget
-        REAL spent
-        TEXT status
-    }
-    cost_log {
-        INTEGER id PK
-        TEXT project_id FK
-        TEXT task_id FK
-        TEXT model
-        TEXT provider
-        INTEGER tokens_in
-        INTEGER tokens_out
-        REAL cost
-        DATETIME timestamp
-    }
-    quota_usage {
-        INTEGER id PK
-        TEXT provider
-        DATETIME timestamp
-        INTEGER requests
-        INTEGER tokens_in
-        INTEGER tokens_out
-    }
-
-    projects ||--o{ tasks : "project_id"
-    tasks ||--o{ cost_log : "task_id"
-    projects ||--o{ cost_log : "project_id"
-```
+`AgentForgeDB` (`src/persistence/db.js`) opens `.agentforge/data.db` (or `database.path`) in WAL mode and creates these tables on startup:
 
 ```sql
--- Core tables (SQLite)
-CREATE TABLE projects (
+CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
-  name TEXT NOT NULL,
-  config_path TEXT,
-  budget REAL,
-  spent REAL DEFAULT 0,
-  status TEXT DEFAULT 'active'
-);
-
-CREATE TABLE tasks (
-  id TEXT PRIMARY KEY,
-  project_id TEXT REFERENCES projects(id),
   title TEXT NOT NULL,
-  type TEXT,               -- architecture, implement, test, etc.
-  priority TEXT DEFAULT 'medium',
-  status TEXT DEFAULT 'queued',
+  type TEXT,
+  status TEXT,
   agent_id TEXT,
+  project_id TEXT,
   model_used TEXT,
   tokens_in INTEGER DEFAULT 0,
   tokens_out INTEGER DEFAULT 0,
   cost REAL DEFAULT 0,
-  output TEXT,
-  created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-  completed_at DATETIME,
-  depends_on TEXT           -- JSON array of task IDs
+  result TEXT,
+  created_at INTEGER,
+  assigned_at INTEGER,
+  completed_at INTEGER
 );
 
-CREATE TABLE quota_usage (
+CREATE TABLE IF NOT EXISTS cost_records (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  provider TEXT NOT NULL,
-  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-  requests INTEGER DEFAULT 1,
-  tokens_in INTEGER DEFAULT 0,
-  tokens_out INTEGER DEFAULT 0
-);
-
-CREATE TABLE cost_log (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  project_id TEXT REFERENCES projects(id),
-  task_id TEXT REFERENCES tasks(id),
+  project_id TEXT,
+  agent_id TEXT,
   model TEXT,
-  provider TEXT,
-  tokens_in INTEGER,
-  tokens_out INTEGER,
-  cost REAL,
-  timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+  tokens_in INTEGER DEFAULT 0,
+  tokens_out INTEGER DEFAULT 0,
+  cost REAL DEFAULT 0,
+  recorded_at INTEGER DEFAULT (unixepoch() * 1000)
+);
+
+CREATE TABLE IF NOT EXISTS events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event TEXT NOT NULL,
+  data TEXT,
+  timestamp INTEGER DEFAULT (unixepoch() * 1000)
+);
+
+CREATE TABLE IF NOT EXISTS agent_activity (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  agent_id TEXT NOT NULL,
+  from_state TEXT,
+  to_state TEXT,
+  task_id TEXT,
+  data TEXT,
+  timestamp INTEGER DEFAULT (unixepoch() * 1000)
 );
 ```
 
-## File Structure
+`createAgentForge()` subscribes the database to the event bus:
+
+- `task.queued`, `task.executing`, `task.completed`, and `task.failed` upsert the task row.
+- Each `cost.recorded` event inserts a `cost_records` row.
+- `agent.assigned`, `agent.executing`, `agent.completed`, and `agent.failed` write `agent_activity`. They never fire, because the lifecycle is not driven.
+- The four `task.*` events above plus `cost.recorded`, `quota.exhausted`, `quota.reset`, `budget.warning`, and `budget.exceeded` write to `events`.
+
+Nothing reads the database back into the queue or the cost tracker at startup.
+
+## Present but not wired
+
+These modules exist in `src/`, but nothing in `createAgentForge()` or the CLI imports them. They are scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)).
+
+- `src/git/`: `GitManager`, `BranchStrategy`, `AutoCommit`, `AutoPR`, `ReviewGate`, `GitHubIntegration`. No branch, commit, or pull request is ever created.
+- `src/plugins/`: `PluginManager` and `BasePlugin`. `PluginManager` is never instantiated. See [Plugin System](plugins.md).
+- `src/execution/inter-agent-comm.js`: the `ask_agent` round trip.
+- `src/execution/task-decomposition.js`: splitting a task into subtasks.
+- `src/execution/review-workflow.js`: the review step between agents.
+- `src/execution/parallel-execution.js`: the concurrency gate.
+
+`src/core/dependency-graph.js` is also unused at runtime. The queue checks `depends_on` itself.
+
+## File structure
 
 ```
 agentforge/
 ├── agentforge.yml              # Project config (user creates this)
 ├── agentforge.example.yml      # Reference config
-├── Dockerfile                  # Multi-stage build (node:20-alpine, non-root)
-├── docker-compose.yml          # agentforge + ollama profile
-├── docker/entrypoint.sh        # Container entrypoint
+├── Dockerfile                  # Multi-stage build (node:24-alpine, non-root)
+├── docker-compose.yml          # agentforge + ollama (profile: local)
+├── docker/entrypoint.sh        # Container entrypoint (not referenced by the Dockerfile)
+├── scripts/
+│   ├── start.sh                # Start, optionally with a Cloudflare quick tunnel
+│   └── seed.sh                 # Seed test data through the REST API
 ├── src/
 │   ├── index.js                # createAgentForge() bootstrap
 │   ├── cli.js                  # Commander.js CLI entry point
@@ -387,14 +372,14 @@ agentforge/
 │   │   └── loader.js           # YAML parser + env var resolution
 │   ├── core/
 │   │   ├── orchestrator.js     # Main execution loop
-│   │   ├── task-queue.js       # Priority queue with dependencies
+│   │   ├── task-queue.js       # In-memory priority queue with dependencies
 │   │   ├── quota-tracker.js    # Sliding window per provider + QuotaManager
-│   │   ├── cost-tracker.js     # Budget management per project/agent
-│   │   ├── agent-lifecycle.js  # State machine (AgentLifecycle, AgentPool)
-│   │   ├── dependency-graph.js # Task DAG with topological sort
-│   │   └── event-bus.js        # EventEmitter singleton pub/sub
+│   │   ├── cost-tracker.js     # Budget per project, spend per agent and model
+│   │   ├── agent-lifecycle.js  # AgentLifecycle, AgentPool (transitions not driven)
+│   │   ├── dependency-graph.js # Task DAG with topological sort (not wired)
+│   │   └── event-bus.js        # EventEmitter singleton with recent-event log
 │   ├── routing/
-│   │   └── router.js           # Full decision engine: rules, tiers, fallback
+│   │   └── router.js           # Rules, tiers, fallback
 │   ├── providers/
 │   │   ├── interface.js        # BaseProvider + OllamaProvider + ProviderRegistry
 │   │   ├── anthropic.js        # @anthropic-ai/sdk adapter
@@ -402,58 +387,37 @@ agentforge/
 │   │   ├── deepseek.js         # OpenAI-compatible (DeepSeek endpoint)
 │   │   └── openrouter.js       # OpenAI-compatible + HTTP-Referer headers
 │   ├── execution/
-│   │   ├── context-builder.js  # Assembles prompts/messages for providers
+│   │   ├── context-builder.js  # Assembles messages for providers
 │   │   ├── output-collector.js # Parses provider responses
-│   │   ├── inter-agent-comm.js # ask_agent tool, subtask round-trips
-│   │   ├── parallel-execution.js # Concurrency gate, Promise.allSettled
-│   │   ├── review-workflow.js  # T1 approval gate via InterAgentComm
-│   │   ├── task-decomposition.js # T1 breaks tasks into subtasks
+│   │   ├── inter-agent-comm.js # not wired
+│   │   ├── parallel-execution.js # not wired
+│   │   ├── review-workflow.js  # not wired
+│   │   ├── task-decomposition.js # not wired
 │   │   └── index.js
-│   ├── git/
-│   │   ├── git-manager.js      # child_process git wrapper
-│   │   ├── branch-strategy.js  # Branch naming per agent/task
-│   │   ├── auto-commit.js      # Auto-commit on task completion
-│   │   ├── auto-pr.js          # GitHub PR creation
-│   │   ├── review-gate.js      # Approval gate (waitForApproval/approve/reject)
-│   │   ├── github-integration.js # GitHub API via octokit
-│   │   └── index.js            # Re-exports all git modules
+│   ├── git/                    # not wired (six modules + index.js)
+│   ├── plugins/                # not wired (plugin-manager.js + index.js)
+│   ├── auth/
+│   │   └── auth.js             # Optional Bearer-token middleware
 │   ├── api/
-│   │   ├── server.js           # Express REST API (15 routes)
-│   │   ├── ws.js               # WebSocket server (18+ event types, replay)
+│   │   ├── server.js           # Express REST API
+│   │   ├── ws.js               # WebSocket server (/ws, replay of 20 events)
 │   │   └── index.js
-│   ├── ui/
-│   │   ├── index.html          # SPA shell + sidebar nav
-│   │   ├── style.css           # Dark theme, Kanban, cards, toasts
-│   │   └── app.js              # Router + all 5 views (pure ES modules)
-│   ├── persistence/
-│   │   └── db.js               # SQLite via better-sqlite3 (WAL mode)
-│   └── plugins/
-│       ├── plugin-manager.js   # Dynamic import, load/unload, BasePlugin
-│       └── index.js
+│   ├── ui/                     # Vanilla dashboard, served only if ui/dist/ is absent
+│   └── persistence/
+│       └── db.js               # SQLite via better-sqlite3 (WAL mode)
+├── ui/                         # React 19 dashboard (Vite, Tailwind v4)
+├── e2e/                        # Playwright tests
 ├── tests/
-│   ├── api.test.js             # Integration tests for new REST endpoints
+│   ├── api.test.js
 │   ├── core.test.js
-│   ├── core/
-│   │   ├── task-queue.test.js
-│   │   ├── event-bus.test.js
-│   │   ├── quota-tracker.test.js
-│   │   ├── cost-tracker.test.js
-│   │   ├── agent-lifecycle.test.js
-│   │   └── dependency-graph.test.js
-│   ├── execution/
-│   │   ├── context-builder.test.js
-│   │   ├── output-collector.test.js
-│   │   └── parallel-execution.test.js
-│   └── routing/
-│       └── router.test.js
+│   ├── api/auth.test.js
+│   ├── core/                   # task-queue, event-bus, quota-tracker, cost-tracker,
+│   │                           # agent-lifecycle, dependency-graph
+│   ├── execution/              # context-builder, output-collector, parallel-execution
+│   ├── persistence/db.test.js
+│   └── routing/router.test.js
 ├── docs/
-│   ├── index.md                # Documentation hub
-│   ├── getting-started.md      # Installation and quickstart
-│   ├── configuration.md        # Full agentforge.yml reference
-│   ├── providers.md            # Provider setup guides
-│   ├── api-reference.md        # REST API + WebSocket event catalogue
-│   ├── plugins.md              # Plugin system
-│   ├── deployment.md           # Docker, production, security
-│   └── architecture.md         # This file
 └── package.json
 ```
+
+To list the test count, run `npm test` and read the `tests` line of the summary.

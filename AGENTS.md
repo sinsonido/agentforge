@@ -62,14 +62,18 @@ Files that multiple agents might need to touch simultaneously — coordinate car
 | `package.json` | MEDIUM | Coordinate `scripts` and `dependencies` additions. Use `npm install <pkg>` individually, not bulk edits. |
 | `ui/src/App.tsx` | MEDIUM | Route additions only — each view agent adds its own `<Route>`. |
 | `ui/src/types/api.ts` | MEDIUM | Additive only — never rename or remove existing types without updating all consumers. |
-| `ui/src/lib/api.ts` | LOW | Add new typed methods; do not change the `fetchJSON` base helper. |
+| `ui/src/lib/api.ts` | LOW | Add new typed methods; do not change the `request` base helper. |
 
 **Safe to work in parallel (no coordination needed):**
 - `src/providers/<new-provider>.js` — independent files
 - `ui/src/views/<ViewName>.tsx` — each view is isolated
 - `ui/src/components/<feature>/` — isolated by feature folder
 - `tests/<anything>.test.js` — independent test files
-- `src/git/*.js` — each git module is independent
+
+**Do not build on unwired modules.** `src/git/`, `src/plugins/`, and
+`src/execution/{inter-agent-comm,parallel-execution,review-workflow,task-decomposition}.js`
+are present but not wired. Nothing in `createAgentForge()` or the CLI imports them, and
+they are scheduled for removal in v0.9 (see #190).
 
 ---
 
@@ -107,9 +111,9 @@ Types: `feat` `fix` `test` `chore` `docs` `refactor` `perf`
 
 1. Create `src/providers/<name>.js` — extend `BaseProvider` from `interface.js`.
 2. Return `{ content, tokens_in, tokens_out, tool_calls, finish_reason }`.
-3. Register in `src/providers/interface.js` → `ProviderRegistry.register()`.
+3. Register it in `createAgentForge()` in `src/index.js` with `providerRegistry.register()`, next to the other providers.
 4. Add provider block to `agentforge.example.yml`.
-5. Add tests in `tests/providers/<name>.test.js` using a mocked HTTP layer.
+5. Add tests in `tests/providers/<name>.test.js` using a mocked HTTP layer. The `tests/providers/` folder does not exist yet; create it.
 
 ## Adding a new REST endpoint
 

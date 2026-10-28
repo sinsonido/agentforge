@@ -3,7 +3,7 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-user/agentforge.git
+git clone https://github.com/sinsonido/agentforge.git
 cd agentforge
 npm install
 cp agentforge.example.yml agentforge.yml
@@ -29,9 +29,15 @@ ollama pull deepseek-r1:32b  # Reasoning model
 - `src/core/` — Orchestrator, queue, quota, events. **Start here.**
 - `src/routing/` — Router, rules, fallback. The decision engine.
 - `src/providers/` — One file per AI provider. Unified interface.
-- `src/tools/` — Agent capabilities (file ops, git, shell).
-- `src/config/` — YAML loading and validation.
-- `tests/` — Mirror of src/ structure.
+- `src/execution/` — `context-builder.js` builds prompts, `output-collector.js` parses replies.
+- `src/persistence/` — SQLite storage for tasks, costs, and events.
+- `src/api/` — REST API and WebSocket server for the dashboard.
+- `src/config/` — YAML loading and `${ENV_VAR}` substitution.
+- `ui/` — React dashboard (separate package).
+- `tests/` — Tests for `src/core`, `src/execution`, `src/routing`, `src/persistence`, and the API.
+
+There is no `src/tools/`. Agents have no tools today: the orchestrator sends one prompt per task and stores the reply.
+`src/git/`, `src/plugins/`, and four modules in `src/execution/` are present but not wired, and are scheduled for removal in v0.9 (see #190). Do not build on them.
 
 ## Conventions
 

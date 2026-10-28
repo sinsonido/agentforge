@@ -1,7 +1,10 @@
 # Provider Setup
 
-Each AI provider needs an API key and quota configuration in `agentforge.yml`.
-This guide covers obtaining credentials and recommended settings for each provider.
+Each AI provider needs an API key and, optionally, quota configuration in `agentforge.yml`.
+This guide covers how to get credentials and how to configure each provider.
+
+AgentForge has adapters for five providers: Anthropic, Google, DeepSeek, OpenRouter, and Ollama.
+Each task is one non-streaming request. The orchestrator sends no tool definitions, so models only return text.
 
 ---
 
@@ -23,26 +26,18 @@ providers:
     enabled: true
     api_key: ${ANTHROPIC_API_KEY}
     quota:
-      max_requests_per_minute: 100    # Tier 1 default; adjust to your plan
-      max_tokens_per_minute: 400000
+      max_requests_per_minute: 100    # Adjust to your plan
+      max_tokens_per_minute: 400000   # Input tokens only
       auto_pause: true
-      auto_resume: true
 ```
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-### Quota tiers
+### Quota limits
 
-| Plan | Requests/min | Tokens/min |
-|---|---|---|
-| Free | 5 | 25,000 |
-| Tier 1 | 50 | 50,000 |
-| Tier 2 | 1,000 | 400,000 |
-| Tier 4 | 4,000 | 400,000 |
-
-Set `max_requests_per_minute` and `max_tokens_per_minute` to match your tier.
+Set `max_requests_per_minute` and `max_tokens_per_minute` to the rate limits that the Anthropic console shows for your organization. AgentForge counts only input tokens against `max_tokens_per_minute`.
 
 ### Custom endpoint (proxy)
 
@@ -72,20 +67,19 @@ providers:
     enabled: true
     api_key: ${GOOGLE_AI_KEY}
     quota:
-      max_requests_per_minute: 60     # Free tier default
+      max_requests_per_minute: 60     # Adjust to your plan
       auto_pause: true
-      auto_resume: true
 ```
 
 ```bash
 export GOOGLE_AI_KEY=AIza...
 ```
 
+The Google adapter ignores `endpoint`.
+
 ### Why use Gemini?
 
-Gemini 4 Argon has a **1 million token context window** — the only model in the
-default registry that can handle prompts exceeding 200K tokens. The router
-automatically routes large-context tasks to Gemini:
+Gemini 4 Argon has a **1 million token context window**. A routing rule can send large-context tasks to it:
 
 ```yaml
 routing:
@@ -94,12 +88,11 @@ routing:
       force: gemini-4-argon
 ```
 
-### Quota tiers
+This rule does not fire on a task's first dispatch today, because the orchestrator estimates context size only after it routes the task. See [Configuration Reference → routing](configuration.md#matchers).
 
-| Plan | Requests/min |
-|---|---|
-| Free (AI Studio) | 15 |
-| Pay-as-you-go | 1,000 |
+### Quota limits
+
+Set `max_requests_per_minute` to the limit that Google AI Studio shows for your project.
 
 ---
 
@@ -107,7 +100,7 @@ routing:
 
 **Models:** deepseek-flash, deepseek-v4-pro
 
-DeepSeek uses an OpenAI-compatible API, making it easy to integrate.
+DeepSeek uses an OpenAI-compatible API. The adapter uses the `openai` SDK with DeepSeek's endpoint.
 
 ### Get an API key
 
@@ -125,7 +118,6 @@ providers:
     quota:
       max_requests_per_minute: 120
       auto_pause: true
-      auto_resume: true
 ```
 
 ```bash
@@ -192,11 +184,13 @@ models:
 
 ### Docker + Ollama
 
-Use the `ollama` profile in docker-compose to run both services:
+Use the `local` profile in `docker-compose.yml` to start the Ollama service:
 
 ```bash
-docker-compose --profile ollama up
+docker compose --profile local up -d ollama
 ```
+
+Start AgentForge itself as [Deployment](deployment.md#docker) describes.
 
 Ollama is accessible at `http://ollama:11434` from inside the compose network.
 Update your config endpoint accordingly:
@@ -211,8 +205,8 @@ providers:
 
 ## OpenRouter
 
-OpenRouter proxies hundreds of models through a single API key — useful as a
-universal fallback or to access models not directly supported.
+OpenRouter proxies many models through a single API key. Use it for models that
+have no direct adapter.
 
 ### Get an API key
 
@@ -226,10 +220,12 @@ providers:
   openrouter:
     enabled: true
     api_key: ${OPENROUTER_API_KEY}
-    endpoint: https://openrouter.ai/api
+    endpoint: https://openrouter.ai/api/v1   # Default
     quota:
-      max_spend_per_day: 10.00    # Hard dollar cap per calendar day
+      max_requests_per_minute: 60
 ```
+
+AgentForge has no daily spend cap per provider. Use `project.budget` to cap spend.
 
 ```bash
 export OPENROUTER_API_KEY=sk-or-...
@@ -256,62 +252,34 @@ models:
 
 ---
 
-## OpenAI
+## Other providers
 
-**Models:** gpt-6-astra, gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna
-
-### Get an API key
-
-1. Sign in at [platform.openai.com](https://platform.openai.com)
-2. Go to **API Keys** → **Create new secret key**
-
-### Configure
-
-```yaml
-providers:
-  openai:
-    enabled: true
-    api_key: ${OPENAI_API_KEY}
-    quota:
-      max_requests_per_minute: 500
-      auto_pause: true
-      auto_resume: true
-```
-
----
-
-## Moonshot (Kimi)
-
-OpenAI-compatible API from Moonshot AI.
-
-```yaml
-providers:
-  moonshot:
-    enabled: true
-    api_key: ${MOONSHOT_API_KEY}
-    endpoint: https://api.moonshot.cn
-```
+There is no OpenAI or Moonshot adapter. `createAgentForge()` ignores `providers.openai`, `providers.moonshot`, and any other provider ID. To reach OpenAI models, register them under the `openrouter` provider.
 
 ---
 
 ## Provider priority and fallback
 
-The router tries providers in this order when a task is dispatched:
+The router tries models in this order when a task is dispatched:
 
-1. Agent's configured `model` (if quota available)
-2. Agent's `fallback_models` list (in order)
-3. Rule-based `fallback` list
-4. `fallback_strategy: same_tier_then_downgrade` — same tier, different provider → tier downgrade
-5. Local Ollama (if enabled and tier downgrade is permitted)
-6. Task is re-queued and waits for quota to reset
+1. The task's `force_model`, if set. The API and CLI do not set it.
+2. The agent's `model`, then its `fallback_models` in order.
+3. Each routing rule that matches, in order: `force`, or `prefer`, then `fallback`, then any model in the rule's `tier`.
+4. The cheapest available model in the tier for the task type, local (cost 0) models first.
+5. Each lower tier, in the same order.
+6. If no model is available, the task moves to `waiting_quota`.
 
-Configure `allow_tier_downgrade: true` on agents that can safely use cheaper models when budget or quota is tight.
+A task returns from `waiting_quota` to the queue on the `quota.reset` event. The quota tracker emits that event only when a provider goes straight from `exhausted` to `available`. A provider that passes through `throttled` on its way down does not emit it, and its waiting tasks stay in `waiting_quota`.
+
+The agent setting `allow_tier_downgrade` is not read. The router checks `allow_tier_downgrade` on the task, and neither the API nor the CLI sets it, so tier downgrade is always allowed.
 
 ---
 
 ## Testing provider connectivity
 
-From the dashboard → **Providers** → click **Test** on any provider card.
+From the dashboard → **Providers** → click **Test Connection** on any provider card.
+
+This check confirms only that the provider is registered. No adapter implements a `test()` method, so the server makes no network call and reports `reachable` for every registered provider. The startup log shows the real Ollama health check.
 
 Or via API:
 
