@@ -225,6 +225,25 @@ intake:
   interval_seconds: 60
   default_playbook: feature  # bug-fix, feature, refactoring, investigation, perf-issue
 
+# ─── EXECUTOR ──────────────────────────────────────────
+# Coding tasks run `claude -p` in a per-task container (src/execution/coding-executor.js).
+# Not wired into the orchestrator yet.
+
+executor:
+  image: node:24
+  state_dir: .agentforge/workspaces      # per-task clones and HOMEs
+  pstack_dir: ~/.claude/plugins/cache/cursor-plugins/pstack/0.15.30   # pinned pstack, mounted read-only
+  claude_bin: ~/.local/share/claude/versions/2.1.312                   # default: realpath of ~/.local/bin/claude
+  model: sonnet
+  effort: medium
+  budget_usd: 2.00         # --max-budget-usd when a task has no budget
+  timeout_minutes: 30      # then SIGTERM and `docker stop -t 10`
+  oauth_token: ${CLAUDE_CODE_OAUTH_TOKEN}   # preferred; from `claude setup-token`
+  credentials_file: ~/.claude/.credentials.json   # fallback, copied into the task HOME and removed after
+  git_author:
+    name: agentforge
+    email: agentforge@localhost
+
 # ─── ALERTS ────────────────────────────────────────────
 
 alerts:
