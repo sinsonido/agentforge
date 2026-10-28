@@ -19,7 +19,6 @@ providers: ...   # AI provider credentials and quotas
 models:    ...   # Model registry with tier and pricing
 routing:   ...   # Rules for automatic model selection
 team:      ...   # Agent definitions
-git:       ...   # Not read (git integration is not wired)
 alerts:    ...   # Budget alert thresholds
 server:    ...   # HTTP/WebSocket server settings and auth
 database:  ...   # SQLite file location
@@ -34,14 +33,12 @@ project:
   name: "My Project"       # Display name in UI and logs
   budget: 50.00            # Total spend in USD. Queued tasks pause at
                            # alerts.budget_pause_pct of this amount.
-  currency: USD            # Not read
 ```
 
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | string | `AgentForge Project` | Project display name and the ID that costs are recorded under |
 | `budget` | number | `100` | USD limit for the project |
-| `currency` | string | `USD` | Not read |
 
 Spend lives in memory and starts at zero on every restart. The cost records in SQLite are not read back into the budget.
 
@@ -213,12 +210,7 @@ routing:
   rules:
     - match: { <matcher>: <value> }
       <action>: <value>
-
-  fallback_strategy: same_tier_then_downgrade   # Not read
-  cost_optimization: true                       # Not read
 ```
-
-The router always behaves as `same_tier_then_downgrade`. It ignores `fallback_strategy` and `cost_optimization`.
 
 ### Matchers
 
@@ -307,24 +299,11 @@ team:
     system_prompt_file: prompts/agent.md    # Or load from file (replaces system_prompt)
 
     max_tokens_per_task: 4096               # max_tokens for each call (default 4096)
-
-    # Accepted by the loader, not read by any running code:
-    allow_tier_downgrade: true | false
-    tools: [...]
-    max_cost_per_task: 5.00
-    require_review: true | false
-    reviewer: <agent name>
 ```
 
 If an agent has no `system_prompt`, the context builder writes one from `name` and `role`.
 
-Agents have no tools. The orchestrator resolves every `tools` list to an empty list, so the model never receives tool definitions. Names such as `file_read`, `file_write`, `git_commit`, `run_tests`, `shell_exec`, and `ask_agent` do nothing. The review settings and the per-task cost limit are not enforced either. The loader also drops `knowledge`.
-
----
-
-## `git`
-
-Not read. The git integration in `src/git/` (`GitManager`, `BranchStrategy`, `AutoCommit`, `AutoPR`, `ReviewGate`, `GitHubIntegration`) is present but not wired. Nothing in `createAgentForge()` or the CLI starts it, so no branch, commit, or pull request is ever created. It is scheduled for removal in v0.9 (see [#190](https://github.com/sinsonido/agentforge/issues/190)). The example config still contains a `git` block, and the server ignores it.
+Agents have no tools. The orchestrator sends no tool definitions, so the model only returns text. The loader drops any other key on an agent, such as `tools` or `knowledge`.
 
 ---
 

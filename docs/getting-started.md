@@ -162,8 +162,6 @@ team:
 
 The agent ID is the lowercased name with spaces replaced by `-`, for example `architect`. Restart the server after you edit the file.
 
-The loader also accepts `tools`, `require_review`, `reviewer`, `max_cost_per_task`, and `allow_tier_downgrade` on an agent. Nothing acts on them today. See [Configuration Reference → team](configuration.md#team).
-
 ---
 
 ## 6. Develop against the dashboard

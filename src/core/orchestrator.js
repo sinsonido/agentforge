@@ -175,7 +175,6 @@ export class Orchestrator {
     return this.providers.execute(route.provider, {
       model: route.model,
       messages,
-      tools: agent.tools?.length ? this._resolveTools(agent.tools) : undefined,
       max_tokens: agent.max_tokens_per_task || 4096,
     });
   }
@@ -186,12 +185,6 @@ export class Orchestrator {
     // Pricing is per 1M tokens
     return (tokensIn * (model.cost_in || 0) / 1_000_000)
          + (tokensOut * (model.cost_out || 0) / 1_000_000);
-  }
-
-  /** Resolve tool names to tool definitions (placeholder — tools registry TBD) */
-  _resolveTools(_toolNames) {
-    // For now return empty — tool registry comes in a future issue
-    return [];
   }
 
   _setupEventHandlers() {

@@ -113,23 +113,22 @@ describe('loadConfig defaults and env vars', () => {
   it('returns defaults for an empty file', () => {
     const cfg = loadConfig(write('empty.yml', ''));
     assert.equal(cfg.project.budget, 100);
-    assert.equal(cfg.routing.fallback_strategy, 'same_tier_then_downgrade');
+    assert.equal(cfg.alerts.budget_pause_pct, 0.95);
   });
 
   it('overrides only the keys the file sets and keeps sibling defaults', () => {
     const cfg = loadConfig(write('partial.yml', `
 project:
   name: My Project
-routing:
-  fallback_strategy: cheapest
+alerts:
+  budget_warning_pct: 0.5
 server:
   port: 3000
 `));
     assert.equal(cfg.project.name, 'My Project');
     assert.equal(cfg.project.budget, 100);
-    assert.equal(cfg.project.currency, 'USD');
-    assert.equal(cfg.routing.fallback_strategy, 'cheapest');
-    assert.equal(cfg.routing.cost_optimization, true);
+    assert.equal(cfg.alerts.budget_warning_pct, 0.5);
+    assert.equal(cfg.alerts.budget_pause_pct, 0.95);
     assert.equal(cfg.server.port, 3000);
     assert.equal(cfg.server.host, 'localhost');
   });
@@ -224,19 +223,16 @@ describe('buildFromConfig', () => {
     assert.equal(agent.model, null);
     assert.deepEqual(agent.fallback_models, []);
     assert.equal(agent.system_prompt, '');
-    assert.deepEqual(agent.tools, []);
-    assert.equal(agent.require_review, false);
-    assert.equal(agent.reviewer, null);
-    assert.equal(agent.allow_tier_downgrade, true);
+    assert.equal(agent.max_tokens_per_task, null);
   });
 
-  it('keeps explicit agent settings, including allow_tier_downgrade: false', () => {
+  it('keeps explicit agent settings', () => {
     const { agents } = buildFromConfig({
-      team: [{ name: 'Dev', require_review: true, reviewer: 'qa-lead', allow_tier_downgrade: false }],
+      team: [{ name: 'Dev', model: 'm1', fallback_models: ['m2'], max_tokens_per_task: 8192 }],
     });
-    assert.equal(agents.dev.require_review, true);
-    assert.equal(agents.dev.reviewer, 'qa-lead');
-    assert.equal(agents.dev.allow_tier_downgrade, false);
+    assert.equal(agents.dev.model, 'm1');
+    assert.deepEqual(agents.dev.fallback_models, ['m2']);
+    assert.equal(agents.dev.max_tokens_per_task, 8192);
   });
 
   it('loads system_prompt from system_prompt_file', () => {
