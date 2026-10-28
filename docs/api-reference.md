@@ -153,9 +153,12 @@ curl http://localhost:4242/api/tasks?status=executing
 
 #### `POST /api/tasks`
 
-Add a new task to the queue.
+Add a new task to the queue. A task has a `kind`:
 
-**Body**
+- `text` (default): one provider call that stores the result text.
+- `coding`: a poteto-mode playbook run against a repository.
+
+**Text task body**
 ```json
 {
   "title": "Implement OAuth login",
@@ -167,16 +170,53 @@ Add a new task to the queue.
 
 | Field | Required | Description |
 |---|---|---|
-| `title` | yes | Task description |
+| `kind` | no | `text` (default) or `coding` |
+| `title` | yes for `text` | Task description. A coding task without one takes the first line of `instruction` |
 | `type` | no | `architecture`, `implement`, `test`, `refactor`, `review`, etc. |
 | `priority` | no | `critical`, `high`, `medium` (default), `low` |
 | `agent_id` | no | Agent ID: the agent's name in lowercase with spaces replaced by `-` |
 
+**Coding task body**
+```json
+{
+  "kind": "coding",
+  "repo": "sinsonido/agentforge",
+  "base": "master",
+  "instruction": "Add task model v2",
+  "issue": 195,
+  "playbook": "feature",
+  "budget": 5
+}
+```
+
+| Field | Required | Description |
+|---|---|---|
+| `repo` | yes | `owner/name` |
+| `base` | yes | Branch the work starts from |
+| `instruction` | yes | What the agent must do |
+| `playbook` | yes | `bug-fix`, `feature`, `refactoring`, `investigation`, or `perf-issue` |
+| `issue` | no | GitHub issue number (positive integer) |
+| `budget` | no | Spend cap in USD (positive number) |
+
+A coding task also carries `step`, the playbook step it is on. It starts as `null`.
+
 The endpoint ignores other fields. Task IDs are `t1`, `t2`, and so on. The counter continues after a restart, so new IDs never reuse a stored task.
+
+At most one coding task per `repo`, `issue`, and `playbook` is live (not `completed` or `failed`). A POST that matches a live task returns that task with `200` and `"created": false` and adds nothing. Coding tasks without an `issue` are never matched.
 
 **Response `201`**
 ```json
-{ "ok": true, "task": { "id": "t4", "title": "...", "status": "queued" } }
+{ "ok": true, "created": true, "task": { "id": "t4", "kind": "text", "title": "...", "status": "queued" } }
+```
+
+**Response `200`** (duplicate coding task)
+```json
+{ "ok": true, "created": false, "task": { "id": "t2", "kind": "coding", "...": "..." } }
+```
+
+**Response `400`**
+```json
+{ "ok": false, "error": "a coding task requires `base`, `instruction`, `playbook`" }
 ```
 
 ---

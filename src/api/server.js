@@ -17,6 +17,7 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { startWebSocketServer } from './ws.js';
 import { createAuthMiddleware } from '../auth/auth.js';
+import { parseTaskInput } from '../core/task-model.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -118,17 +119,18 @@ function buildRouter(forge) {
 
   // ── POST /api/tasks ──────────────────────────────────────────────────────
   /**
-   * Add a new task.
-   * Body: { title, type, priority, agent_id }
+   * Add a new task. A text task needs `title`; a coding task (`kind: "coding"`)
+   * needs `repo`, `base`, `instruction` and `playbook`. Posting a coding task whose
+   * (repo, issue, playbook) matches a live one returns that task with 200.
    */
   router.post('/tasks', (req, res) => {
     try {
-      const { title, type, priority, agent_id } = req.body ?? {};
-      if (!title) {
-        return res.status(400).json({ ok: false, error: '`title` is required' });
+      const parsed = parseTaskInput(req.body);
+      if (!parsed.ok) {
+        return res.status(400).json({ ok: false, error: parsed.error });
       }
-      const task = forge.taskQueue.add({ title, type, priority, agent_id });
-      res.status(201).json({ ok: true, task });
+      const { task, created } = forge.taskQueue.admit(parsed.value);
+      res.status(created ? 201 : 200).json({ ok: true, created, task });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

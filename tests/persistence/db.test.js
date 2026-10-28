@@ -229,13 +229,85 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 1);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 2);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
       assert.deepEqual(task.depends_on, []);
       assert.equal(task.allow_tier_downgrade, true);
       upgraded.close();
+    });
+
+    it('upgrades a DB file at the #240 schema to coding tasks, keeping its rows as text tasks', async () => {
+      const { default: Database } = await import('better-sqlite3');
+      const path = `${TEST_DIR}/v1.db`;
+      const v1 = new Database(path);
+      v1.exec(`CREATE TABLE tasks (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, type TEXT, status TEXT, agent_id TEXT, project_id TEXT,
+        model_used TEXT, tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, cost REAL DEFAULT 0,
+        result TEXT, created_at INTEGER, assigned_at INTEGER, completed_at INTEGER,
+        priority TEXT NOT NULL DEFAULT 'medium', depends_on TEXT NOT NULL DEFAULT '[]', force_model TEXT,
+        allow_tier_downgrade INTEGER NOT NULL DEFAULT 1, context_tokens_estimate INTEGER NOT NULL DEFAULT 0)`);
+      v1.pragma('user_version = 1');
+      v1.prepare("INSERT INTO tasks (id, title, status, priority, created_at) VALUES ('t3', 'Old', 'queued', 'high', 1)").run();
+      v1.close();
+
+      const upgraded = new AgentForgeDB(path);
+
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 2);
+      const [task] = upgraded.loadQueue().tasks;
+      assert.equal(task.kind, 'text');
+      assert.equal(task.priority, 'high');
+      assert.equal('repo' in task, false);
+      upgraded.saveTask({ id: 't4', kind: 'coding', title: 'New', status: 'queued', repo: 'o/r', base: 'main', instruction: 'go', issue: 1, playbook: 'feature' });
+      assert.equal(upgraded.getTask('t4').playbook, 'feature');
+      upgraded.close();
+    });
+  });
+
+  describe('coding tasks', () => {
+    const coding = (id, over = {}) => ({
+      id, kind: 'coding', title: 'Fix', status: 'queued', created_at: 1,
+      repo: 'o/r', base: 'master', instruction: 'Fix it', issue: 9, playbook: 'bug-fix', step: null, budget: 4, ...over,
+    });
+
+    it('round-trips the coding fields and updates the step', () => {
+      db.saveTask(coding('t1'));
+      db.saveTask(coding('t1', { status: 'executing', step: '3. root-cause' }));
+      const [task] = db.loadQueue().tasks;
+      assert.equal(task.kind, 'coding');
+      assert.equal(task.repo, 'o/r');
+      assert.equal(task.issue, 9);
+      assert.equal(task.budget, 4);
+      assert.equal(task.step, '3. root-cause');
+      assert.equal(db.getTaskHistory(1)[0].playbook, 'bug-fix');
+    });
+
+    it('refuses a second live row for the same repo, issue and playbook', () => {
+      db.saveTask(coding('t1'));
+      assert.throws(() => db.saveTask(coding('t2')), /UNIQUE constraint failed/);
+      db.saveTask(coding('t1', { status: 'completed' }));
+      assert.doesNotThrow(() => db.saveTask(coding('t2')));
+      assert.doesNotThrow(() => db.saveTask(coding('t3', { issue: null })));
+      assert.doesNotThrow(() => db.saveTask(coding('t4', { issue: null })));
+    });
+  });
+
+  describe('TaskQueue on a DB file', () => {
+    it('restores a coding task after a restart and still refuses its duplicate', async () => {
+      const { TaskQueue } = await import('../../src/core/task-queue.js');
+      const input = { kind: 'coding', title: 'Model v2', repo: 'o/r', base: 'master', instruction: 'Do it', issue: 195, playbook: 'feature', budget: 5 };
+      const before = new TaskQueue({ store: db }).add(input);
+      db.close();
+
+      db = new AgentForgeDB(DB_PATH);
+      const queue = new TaskQueue({ store: db });
+
+      assert.deepEqual(queue.get(before.id), before);
+      const again = queue.admit(input);
+      assert.equal(again.created, false);
+      assert.equal(again.task.id, before.id);
+      assert.equal(queue.add({ title: 'text' }).id, 't2');
     });
   });
 

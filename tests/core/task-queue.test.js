@@ -301,6 +301,58 @@ describe('TaskQueue', () => {
     });
   });
 
+  describe('admit()', () => {
+    const coding = (over = {}) => ({
+      kind: 'coding', title: 'Fix it', repo: 'o/r', base: 'master', instruction: 'Fix it',
+      issue: 12, playbook: 'bug-fix', budget: 3, ...over,
+    });
+
+    it('creates a text task by default with no coding fields', () => {
+      const { task, created } = q.admit({ title: 'Plain' });
+      assert.equal(created, true);
+      assert.equal(task.kind, 'text');
+      assert.equal('repo' in task, false);
+    });
+
+    it('creates a coding task with step null', () => {
+      const { task } = q.admit(coding());
+      assert.equal(task.kind, 'coding');
+      assert.equal(task.playbook, 'bug-fix');
+      assert.equal(task.issue, 12);
+      assert.equal(task.step, null);
+      assert.equal(task.budget, 3);
+    });
+
+    it('returns the live task for the same repo, issue and playbook, without emitting', () => {
+      const first = q.admit(coding()).task;
+      let emitted = 0;
+      const onQueued = () => emitted++;
+      eventBus.on('task.queued', onQueued);
+      const again = q.admit(coding({ instruction: 'reworded' }));
+      eventBus.off('task.queued', onQueued);
+
+      assert.equal(again.created, false);
+      assert.equal(again.task, first);
+      assert.equal(emitted, 0);
+      assert.equal(q.getAll().length, 1);
+    });
+
+    it('admits a new task once the previous one is terminal', () => {
+      const first = q.admit(coding()).task;
+      q.updateStatus(first.id, 'failed');
+      const second = q.admit(coding());
+      assert.equal(second.created, true);
+      assert.notEqual(second.task.id, first.id);
+    });
+
+    it('keeps tasks apart when the playbook, issue or repo differs, or the issue is absent', () => {
+      q.admit(coding());
+      for (const over of [{ playbook: 'feature' }, { issue: 13 }, { repo: 'o/other' }, { issue: null }, { issue: null }]) {
+        assert.equal(q.admit(coding(over)).created, true, JSON.stringify(over));
+      }
+    });
+  });
+
   describe('with a store', () => {
     function memoryStore(rows = [], lastSeq = 0) {
       const saved = new Map(rows.map(r => [r.id, { ...r }]));
