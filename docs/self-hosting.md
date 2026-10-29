@@ -24,7 +24,7 @@ Every command converges to the same end state when you run it again:
 - `upgrade` to the SHA that is already running does not restart anything.
 - `stop` does nothing when no container exists.
 
-`stop` sends `SIGINT`, so AgentForge closes its database before it exits. Tasks that were executing come back as failed (interrupted) on the next boot, because the queue is persisted in SQLite (#240).
+`stop` sends `SIGINT` and allows 30 seconds before Docker kills the instance. On `SIGINT` or `SIGTERM`, AgentForge cancels every running coding task. It runs `docker stop -t 10` on each `af-task-*` container, records the task as `cancelled` (no PR is opened), and closes its database before it exits. After the instance is gone, `stop` also stops any `af-task-*` container that is still running. `upgrade` uses the same `stop`. A task can still come back as failed (interrupted) on the next boot when the instance dies without that shutdown, for example on a host crash, because the queue is persisted in SQLite (#240).
 
 ## Layout
 

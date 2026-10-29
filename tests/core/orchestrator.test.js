@@ -306,6 +306,34 @@ describe('Orchestrator coding tasks', () => {
     assert.equal(orchestrator.cancelTask('nope'), false);
   });
 
+  it('stop() cancels every running coding task and resolves once they settle', async () => {
+    const { orchestrator, taskQueue, runs } = setup(2);
+    const a = taskQueue.add({ ...CODING, issue: 1 });
+    const b = taskQueue.add({ ...CODING, issue: 2 });
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 2);
+    await orchestrator.stop();
+
+    assert.ok(runs.every((r) => r.signal.aborted));
+    assert.equal(taskQueue.get(a.id).status, 'cancelled');
+    assert.equal(taskQueue.get(b.id).status, 'cancelled');
+    assert.equal(orchestrator.cancelTask(a.id), false);
+  });
+
+  it('stop() gives up waiting on a run that ignores the abort after graceMs', async () => {
+    const { orchestrator, taskQueue } = makeOrchestrator({
+      coding: { concurrency: 1, run: () => new Promise(() => {}) },
+    });
+    taskQueue.add({ ...CODING, issue: 1 });
+
+    start(orchestrator);
+    await waitFor(() => orchestrator._codingRuns.size === 1);
+    const t0 = Date.now();
+    await orchestrator.stop({ graceMs: 50 });
+    assert.ok(Date.now() - t0 < 1000);
+  });
+
   it('leaves coding tasks queued without a coding runner', async () => {
     const { orchestrator, taskQueue, calls } = makeOrchestrator();
     const task = taskQueue.add({ ...CODING, issue: 1 });

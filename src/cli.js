@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
-import { createAgentForge } from './index.js';
+import { createAgentForge, exitOnSignals } from './index.js';
 import { loadConfig } from './config/loader.js';
 
 const VERSION = '0.1.0';
@@ -67,13 +67,7 @@ program
         );
       }, 30_000);
 
-      process.on('SIGINT', () => {
-        console.log('\n[agentforge] Shutting down...');
-        clearInterval(statusInterval);
-        orchestrator.stop();
-        forge.db?.close();
-        process.exit(0);
-      });
+      exitOnSignals(forge, () => clearInterval(statusInterval));
 
     } catch (err) {
       console.error('[error]', err.message);

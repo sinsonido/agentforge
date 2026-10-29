@@ -334,13 +334,22 @@ cmd_start() {
   launch "$sha"
 }
 
+# The instance cancels its running tasks on SIGINT: each task container gets
+# 'docker stop -t 10', and the orchestrator waits up to 20s for them. The 30s
+# here outlasts both. Any af-task-* container still running after that is stopped.
 cmd_stop() {
+  local leftover=()
   if docker inspect "$AGENTFORGE_CONTAINER" >/dev/null 2>&1; then
-    docker stop "$AGENTFORGE_CONTAINER" >/dev/null
+    docker stop -t 30 "$AGENTFORGE_CONTAINER" >/dev/null
     docker rm "$AGENTFORGE_CONTAINER" >/dev/null
     log "stopped $AGENTFORGE_CONTAINER"
   else
     log "not running"
+  fi
+  mapfile -t leftover < <(docker ps --format '{{.Names}}' --filter 'name=^af-task-')
+  if (( ${#leftover[@]} )); then
+    docker stop -t 10 "${leftover[@]}" >/dev/null
+    log "stopped leftover task containers: ${leftover[*]}"
   fi
 }
 

@@ -51,7 +51,11 @@ export class Orchestrator {
     this.intake?.start();
   }
 
-  stop() {
+  /**
+   * Stop the loop and abort every running coding task, which stops its container
+   * and ends it `cancelled`. Resolves once those runs settle, or after `graceMs`.
+   */
+  stop({ graceMs = 20_000 } = {}) {
     this._running = false;
     this.quotaManager.stopWatcher();
     this.intake?.stop();
@@ -59,7 +63,12 @@ export class Orchestrator {
       clearInterval(this._loopInterval);
       this._loopInterval = null;
     }
-    console.log('[orchestrator] Stopped.');
+    const runs = [...this._codingRuns.values()];
+    for (const run of runs) run.controller.abort();
+    console.log('[orchestrator] Stopped. Cancelling %d coding task(s).', runs.length);
+    let timer;
+    const grace = new Promise((r) => { timer = setTimeout(r, graceMs).unref(); });
+    return Promise.race([Promise.all(runs.map((run) => run.done)), grace]).finally(() => clearTimeout(timer));
   }
 
   async _tick() {
@@ -129,7 +138,7 @@ export class Orchestrator {
   /** Abort a running coding task. It ends `cancelled` and never opens a PR. */
   cancelTask(id) {
     const run = this._codingRuns.get(id);
-    run?.abort();
+    run?.controller.abort();
     return Boolean(run);
   }
 
@@ -139,11 +148,11 @@ export class Orchestrator {
       const task = this.taskQueue.next(t => t.kind === 'coding');
       if (!task) return;
       const controller = new globalThis.AbortController();
-      this._codingRuns.set(task.id, controller);
-      this.coding.run(task, controller.signal)
+      const done = this.coding.run(task, controller.signal)
         .then(() => this._recordCodingCost(this.taskQueue.get(task.id)))
         .catch((err) => console.error('[orchestrator] Coding task %s: %s', task.id, err.message))
         .finally(() => this._codingRuns.delete(task.id));
+      this._codingRuns.set(task.id, { controller, done });
     }
   }
 
