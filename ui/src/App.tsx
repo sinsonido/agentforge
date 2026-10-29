@@ -8,6 +8,7 @@ import AgentsView from '@/views/AgentsView'
 import ProvidersView from '@/views/ProvidersView'
 import CostsView from '@/views/CostsView'
 import LoginView from '@/views/LoginView'
+import TaskView from '@/views/TaskView'
 
 function ProtectedRoute() {
   const { isAuthenticated } = useAuth()
@@ -31,6 +32,7 @@ export default function App() {
                 <Route index element={<Navigate to="/dashboard" replace />} />
                 <Route path="/dashboard" element={<DashboardView />} />
                 <Route path="/kanban" element={<KanbanView />} />
+                <Route path="/tasks/:id" element={<TaskView />} />
                 <Route path="/agents" element={<AgentsView />} />
                 <Route path="/providers" element={<ProvidersView />} />
                 <Route path="/costs" element={<CostsView />} />
