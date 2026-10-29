@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApprovalCard } from '@/components/tasks/ApprovalCard'
+import { CiRounds, babysitOf } from '@/components/tasks/CiRounds'
 import { TaskTrail } from '@/components/tasks/TaskTrail'
 import { TranscriptEntry } from '@/components/tasks/TranscriptEntry'
 import { useApi } from '@/hooks/useApi'
@@ -13,9 +14,8 @@ import { useWebSocket } from '@/hooks/useWebSocket'
 import { useWebSocketContext } from '@/contexts/WebSocketContext'
 import { api, pendingApproval } from '@/lib/api'
 import { concernsTask } from '@/lib/ws'
-import type { Task } from '@/types/api'
 
-const CANCELLABLE: Task['status'][] = ['queued', 'executing']
+const CANCELLABLE: string[] = ['queued', 'executing', 'ci-watch', 'fixing']
 
 function TaskDetail({ id }: { id: string }) {
   const { data, error: taskError, loading, refresh } = useApi(() => api.task(id), [id])
@@ -62,6 +62,7 @@ function TaskDetail({ id }: { id: string }) {
   if (!task) return <p className="text-sm text-red-600">{taskError ?? `Task ${id} not found`}</p>
 
   const coding = task.kind === 'coding' ? task : null
+  const babysit = coding && babysitOf(coding)
   const cancel = async () => {
     setCancelling(true)
     setCancelError(null)
@@ -106,6 +107,8 @@ function TaskDetail({ id }: { id: string }) {
           <p className="text-xs text-muted-foreground break-words">{task.result}</p>
         )}
       </header>
+
+      {babysit && <CiRounds babysit={babysit} fixing={(task.status as string) === 'fixing'} />}
 
       {coding && waiting && (
         <div ref={approvalBox} className="scroll-mt-4">

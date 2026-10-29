@@ -4,6 +4,7 @@ import { Orchestrator } from '../../src/core/orchestrator.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
 import eventBus from '../../src/core/event-bus.js';
+import { SHUTDOWN } from '../../src/execution/coding-runner.js';
 
 const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
 const OK = { content: 'result text', tokens_in: 10, tokens_out: 20, tool_calls: [], finish_reason: 'stop' };
@@ -332,6 +333,36 @@ describe('Orchestrator coding tasks', () => {
     const t0 = Date.now();
     await orchestrator.stop({ graceMs: 50 });
     assert.ok(Date.now() - t0 < 1000);
+  });
+
+  it('gives a task left in ci-watch its next leg before any queued task, and records only what each leg spent', async () => {
+    const { orchestrator, taskQueue, runs } = setup(1);
+    const watched = taskQueue.add({ ...CODING, issue: 1 });
+    taskQueue.updateStatus(watched.id, 'ci-watch', { cost: 0.5, tokens_in: 100, tokens_out: 7 });
+    const queued = taskQueue.add({ ...CODING, issue: 2 });
+    const costs = [];
+    const onCost = (d) => costs.push(d.cost);
+    eventBus.on('cost.recorded', onCost);
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 1);
+    assert.equal(runs[0].task.id, watched.id);
+    runs[0].finish('needs-approval', { cost: 0.75, tokens_in: 150, tokens_out: 9 });
+    await waitFor(() => runs.length === 2);
+    eventBus.off('cost.recorded', onCost);
+
+    assert.equal(runs[1].task.id, queued.id);
+    assert.deepEqual(costs, [0.25]);
+  });
+
+  it('stop() aborts with the shutdown reason, so a CI watch can stay for the next process', async () => {
+    const { orchestrator, taskQueue, runs } = setup();
+    taskQueue.add({ ...CODING, issue: 1 });
+
+    start(orchestrator);
+    await waitFor(() => runs.length === 1);
+    await orchestrator.stop();
+    assert.equal(runs[0].signal.reason, SHUTDOWN);
   });
 
   it('leaves coding tasks queued without a coding runner', async () => {

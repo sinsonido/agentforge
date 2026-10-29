@@ -4,8 +4,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { decideTask, type Approval, type ApprovalChoice } from '@/lib/api'
 
-const ACTION_TITLE: Record<Approval['action'], string> = {
+const ACTION_TITLE: Record<string, string> = {
   publish: 'Publish needs your approval',
+  'push-fix': 'Fix push needs your approval',
   merge: 'Merge needs your approval',
 }
 
@@ -40,7 +41,7 @@ export function ApprovalCard({ taskId, approval, onDecided }: {
       <div className="flex items-start gap-2">
         <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0" />
         <div className="min-w-0 space-y-1">
-          <h3 className="text-sm font-semibold">{ACTION_TITLE[approval.action]}</h3>
+          <h3 className="text-sm font-semibold">{ACTION_TITLE[approval.action] ?? `${approval.action} needs your approval`}</h3>
           <p className="text-sm break-words">{approval.summary}</p>
           <p className="text-xs opacity-75">Waiting since {since(approval.requested_at)}</p>
         </div>
