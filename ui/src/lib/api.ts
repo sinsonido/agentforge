@@ -54,3 +54,16 @@ export const api = {
   testProvider: (provider: string) =>
     request<{ ok: boolean; error?: string }>('/providers/test', { method: 'POST', body: JSON.stringify({ provider }) }),
 }
+
+export type TrailKind = 'status' | 'step' | 'gate' | 'decision' | 'evidence'
+
+export interface TrailEntry {
+  seq: number
+  at: number
+  kind: TrailKind
+  summary: string
+  evidence: Record<string, unknown> | null
+}
+
+export const taskTrail = (taskId: string) =>
+  request<{ ok: boolean; trail: TrailEntry[] }>(`/tasks/${encodeURIComponent(taskId)}/trail`)
