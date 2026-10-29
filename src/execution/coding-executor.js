@@ -273,6 +273,8 @@ function playbookTitle(playbook) {
   return words[0].toUpperCase() + words.slice(1);
 }
 
+const DECISION_LOG_HEADER = ['ts', 'phase', 'decision', 'why', 'evidence', 'result'].join('\t');
+
 /** The harness prompt for a coding task. */
 export function buildPrompt(task) {
   const title = playbookTitle(task.playbook);
@@ -281,6 +283,8 @@ export function buildPrompt(task) {
     `/pstack:poteto-mode Work this task with the **${title}** playbook, fully autonomous.`,
     '',
     'Full-autonomy grant: you are running headless under AgentForge. No human will answer. Do not ask questions; decide, act, and report. "Run until done."',
+    '',
+    `Decision log (required by the AgentForge host): keep a show-me-your-work decision trail in \`decisions.tsv\` at the clone root, a TSV whose first line is exactly \`${DECISION_LOG_HEADER}\`, one row per decision. Leave it untracked: never \`git add\` or commit it. The clean-tree check ignores untracked files.`,
     '',
     `Task${issue}: ${task.instruction}`,
     '',

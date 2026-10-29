@@ -13,6 +13,7 @@ import {
   createStreamParser,
   run,
 } from '../../src/execution/coding-executor.js';
+import { parseDecisionLog } from '../../src/core/trail.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const stream = (name) => join(fixtures, 'agent-streams', `${name}.jsonl`);
@@ -185,6 +186,17 @@ describe('buildDockerArgs', () => {
     assert.match(prompt, /^\/pstack:poteto-mode Work this task with the \*\*Bug fix\*\* playbook/);
     assert.match(prompt, /issue #7/);
     assert.match(prompt, /Do NOT push/);
+  });
+
+  it('asks for an untracked decisions.tsv whose header the trail parser reads', () => {
+    const prompt = buildPrompt(task);
+    const header = prompt.match(/`decisions\.tsv` at the clone root, a TSV whose first line is exactly `([^`]+)`/)?.[1];
+    assert.equal(header, 'ts\tphase\tdecision\twhy\tevidence\tresult');
+    assert.deepEqual(parseDecisionLog(`${header}\nt1\tfix\tfixed the sign\troot cause\tsrc/sum.js\tgreen`, 'decisions.tsv'), [{
+      kind: 'decision', summary: 'fixed the sign',
+      evidence: { source: 'decisions.tsv', ts: 't1', phase: 'fix', why: 'root cause', evidence: 'src/sum.js', result: 'green' },
+    }]);
+    assert.match(prompt, /never `git add` or commit it/);
   });
 
   it('names the repository setup and test commands the gate will require', () => {
