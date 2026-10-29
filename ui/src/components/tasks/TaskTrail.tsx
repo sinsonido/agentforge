@@ -3,6 +3,7 @@ import { useApi } from '@/hooks/useApi'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { taskTrail, type TrailEntry, type TrailKind } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { concernsTask } from '@/lib/ws'
 
 const KIND_STYLES: Record<TrailKind, string> = {
   status: 'bg-gray-100 text-gray-800',
@@ -63,14 +64,14 @@ function Gates({ gates }: { gates: TrailEntry[] }) {
 
 /**
  * The decision trail of one task: the evidence gate's checks on top, then every
- * entry in order. Refreshes when the task changes status over the WebSocket.
+ * entry in order. Refreshes when the task changes status or step over the WebSocket.
  */
 export function TaskTrail({ taskId }: { taskId: string }) {
   const { data, loading, error, refresh } = useApi(() => taskTrail(taskId), [taskId])
 
   useWebSocket(
     () => { void refresh() },
-    (msg) => msg.event.startsWith('task.') && (msg.data as { task?: { id?: string } } | null)?.task?.id === taskId,
+    (msg) => msg.event.startsWith('task.') && msg.event !== 'task.agent_event' && concernsTask(msg.data, taskId),
   )
 
   if (loading && !data) return <p className="text-sm text-muted-foreground">Loading trail…</p>

@@ -156,7 +156,7 @@ function buildRouter(forge) {
    */
   router.get('/tasks/:id', (req, res) => {
     try {
-      const task = forge.taskQueue.get(req.params.id);
+      const task = forge.taskQueue.get(req.params.id) ?? forge.db?.findTask(req.params.id);
       if (!task) {
         return res.status(404).json({ ok: false, error: `Task '${req.params.id}' not found` });
       }
@@ -178,6 +178,30 @@ function buildRouter(forge) {
         return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
       }
       res.json({ ok: true, trail: forge.db?.getTrail(id) ?? [] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/tasks/:id/events ────────────────────────────────────────────
+  /**
+   * Replay a task's agent transcript: stored events with seq > `after` (default 0),
+   * oldest first, one page at a time. `more` says another page follows; ask again
+   * with `after` set to the last seq received. Live events arrive over the
+   * WebSocket as `task.agent_event` with the same seq.
+   */
+  router.get('/tasks/:id/events', (req, res) => {
+    try {
+      const { id } = req.params;
+      const after = req.query.after === undefined ? 0 : Number(req.query.after);
+      if (!Number.isInteger(after) || after < 0) {
+        return res.status(400).json({ ok: false, error: 'after must be a non-negative integer' });
+      }
+      if (!forge.taskQueue.get(id) && !forge.db?.getTask(id)) {
+        return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
+      }
+      const page = forge.db ? forge.db.taskEventsAfter(id, after) : { events: [], more: false };
+      res.json({ ok: true, ...page });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }

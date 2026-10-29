@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { Badge } from '@/components/ui/badge'
@@ -42,7 +43,9 @@ export function KanbanCard({ task }: KanbanCardProps) {
             PRIORITY_DOT[task.priority ?? 'medium'] ?? 'bg-muted'
           )}
         />
-        <p className="flex-1 text-sm font-medium leading-tight line-clamp-2">{task.title}</p>
+        <Link to={`/tasks/${task.id}`} className="flex-1 text-sm font-medium leading-tight line-clamp-2 hover:underline">
+          {task.title}
+        </Link>
       </div>
       {(task.agent_id || task.model_used) && (
         <div className="mt-2 flex flex-wrap gap-1">

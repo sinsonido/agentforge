@@ -84,7 +84,7 @@ export async function createAgentForge(configPath) {
       concurrency,
       run: (task, signal) => runCodingTask(task, {
         queue: taskQueue,
-        execute: (t, opts) => runExecutor(t, { ...options, ...opts }),
+        execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
         publish,
         signal,
       }),

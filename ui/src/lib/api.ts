@@ -41,6 +41,10 @@ export const api = {
   tasks: (status?: string) => request<{ ok: boolean; tasks: import('../types/api').Task[] }>(`/tasks${status ? `?status=${status}` : ''}`),
   createTask: (body: { title: string; type?: string; priority?: string; agent_id?: string }) =>
     request<{ ok: boolean; task: import('../types/api').Task }>('/tasks', { method: 'POST', body: JSON.stringify(body) }),
+  task: (id: string) => request<{ ok: boolean; task: import('../types/api').Task }>(`/tasks/${encodeURIComponent(id)}`),
+  taskEvents: (id: string, after: number) =>
+    request<{ ok: boolean; events: import('../types/api').TaskEvent[]; more: boolean }>(`/tasks/${encodeURIComponent(id)}/events?after=${after}`),
+  cancelTask: (id: string) => request<{ ok: boolean }>(`/tasks/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   updateTaskStatus: (id: string, status: string) =>
     request<{ ok: boolean }>(`/tasks/${id}/status`, { method: 'POST', body: JSON.stringify({ status }) }),
   agents: () => request<{ ok: boolean; agents: import('../types/api').AgentStatus[] }>('/agents'),

@@ -269,6 +269,27 @@ describe('run (fake docker)', () => {
     assert.equal(existsSync(join(tmp, 'state', 'tasks', 'replay1', 'home', '.claude', '.credentials.json')), false);
   });
 
+  it('announces each event with the entry recordEvent stored', async () => {
+    fake({ mode: 'replay', stream: stream('no-commit') });
+    const bus = new EventEmitter();
+    const seen = [];
+    bus.on('task.agent_event', (e) => seen.push(e));
+    const stored = [];
+    const recordEvent = (taskId, event) => {
+      const entry = { seq: stored.length + 1, at: 7, event: { ...event, recorded: taskId } };
+      stored.push(entry);
+      return entry;
+    };
+
+    await run({ ...task, id: 'rec1' }, {
+      stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
+      repoUrl: upstream, oauthToken: 'tok', eventBus: bus, recordEvent,
+    });
+
+    assert.ok(stored.length > 5);
+    assert.deepEqual(seen, stored.map((entry) => ({ taskId: 'rec1', ...entry })));
+  });
+
   it('prefers the OAuth token and never puts it in argv', async () => {
     fake({ mode: 'replay', stream: stream('no-commit') });
     const result = await run({ ...task, id: 'token1', budget: 0.5 }, {

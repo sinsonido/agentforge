@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { cn } from '@/lib/utils'
@@ -30,7 +31,9 @@ export function RecentTasksTable({ tasks }: RecentTasksTableProps) {
       <TableBody>
         {tasks.slice(0, 20).map((task) => (
           <TableRow key={task.id}>
-            <TableCell className="max-w-[200px] truncate font-medium">{task.title}</TableCell>
+            <TableCell className="max-w-[200px] truncate font-medium">
+              <Link to={`/tasks/${task.id}`} className="hover:underline">{task.title}</Link>
+            </TableCell>
             <TableCell>
               <Badge className={cn('text-xs', STATUS_STYLES[task.status] ?? 'bg-muted')}>
                 {task.status}

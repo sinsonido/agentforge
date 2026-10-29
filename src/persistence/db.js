@@ -29,7 +29,14 @@ const MIGRATIONS = [
   `ALTER TABLE tasks ADD COLUMN setup_command TEXT;
    ALTER TABLE tasks ADD COLUMN test_command TEXT;
    UPDATE tasks SET setup_command = 'npm ci', test_command = 'npm test' WHERE kind = 'coding';`,
-  `CREATE TABLE IF NOT EXISTS task_trail (
+  `CREATE TABLE task_events (
+     task_id TEXT NOT NULL,
+     seq INTEGER NOT NULL,
+     at INTEGER NOT NULL,
+     event TEXT NOT NULL,
+     PRIMARY KEY (task_id, seq)
+   ) WITHOUT ROWID;`,
+  `CREATE TABLE task_trail (
      task_id TEXT NOT NULL,
      seq INTEGER NOT NULL,
      at INTEGER NOT NULL,
@@ -39,6 +46,25 @@ const MIGRATIONS = [
      PRIMARY KEY (task_id, seq)
    );`,
 ];
+
+/** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
+export const TASK_EVENTS_CAP = 5000;
+/** Any string inside a stored agent event is clipped to this many characters. */
+export const EVENT_STRING_MAX = 4000;
+/** Page size of taskEventsAfter(). */
+export const TASK_EVENTS_PAGE = 500;
+
+/** Copy of `value` with every string longer than `max` cut, saying how much was cut. */
+export function clipStrings(value, max = EVENT_STRING_MAX) {
+  if (typeof value === 'string') {
+    return value.length > max ? `${value.slice(0, max)}… [clipped ${value.length - max} chars]` : value;
+  }
+  if (Array.isArray(value)) return value.map((v) => clipStrings(v, max));
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clipStrings(v, max)]));
+  }
+  return value;
+}
 
 /**
  * AgentForgeDB — SQLite persistence layer using better-sqlite3.
@@ -152,6 +178,13 @@ export class AgentForgeDB {
       costByAgent: this.db.prepare('SELECT agent_id, COALESCE(SUM(cost), 0) as total FROM cost_records WHERE project_id = ? GROUP BY agent_id'),
       insertEvent: this.db.prepare('INSERT INTO events (event, data) VALUES (?, ?)'),
       recentEvents: this.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
+      appendTaskEvent: this.db.prepare(`
+        INSERT INTO task_events (task_id, seq, at, event)
+        SELECT @task_id, COALESCE(MAX(seq), 0) + 1, @at, @event FROM task_events WHERE task_id = @task_id
+        RETURNING seq
+      `),
+      pruneTaskEvents: this.db.prepare('DELETE FROM task_events WHERE task_id = ? AND seq <= ?'),
+      taskEventsAfter: this.db.prepare('SELECT seq, at, event FROM task_events WHERE task_id = ? AND seq > ? ORDER BY seq LIMIT ?'),
       insertActivity: this.db.prepare(`
         INSERT INTO agent_activity (agent_id, from_state, to_state, task_id, data)
         VALUES (@agent_id, @from_state, @to_state, @task_id, @data)
@@ -220,6 +253,12 @@ export class AgentForgeDB {
   /** Get a task by ID */
   getTask(id) {
     return this._stmts.getTask.get(id) || null;
+  }
+
+  /** A stored task in the shape the queue holds it, or null */
+  findTask(id) {
+    const row = this.getTask(id);
+    return row ? rowToTask(row) : null;
   }
 
   /** Get tasks by status */
@@ -291,6 +330,29 @@ export class AgentForgeDB {
       ...e,
       data: e.data ? JSON.parse(e.data) : null,
     }));
+  }
+
+  // ─── Task events (agent transcript) ──────────────────
+
+  /**
+   * Append one agent event to a task's transcript under the next per-task `seq`,
+   * clipping long strings and pruning past TASK_EVENTS_CAP.
+   * @returns {{ seq: number, at: number, event: object }} the stored entry
+   */
+  appendTaskEvent(taskId, event, at = Date.now()) {
+    const clipped = clipStrings(event);
+    const { seq } = this._stmts.appendTaskEvent.get({ task_id: taskId, at, event: JSON.stringify(clipped) });
+    if (seq > TASK_EVENTS_CAP) this._stmts.pruneTaskEvents.run(taskId, seq - TASK_EVENTS_CAP);
+    return { seq, at, event: clipped };
+  }
+
+  /** Up to TASK_EVENTS_PAGE stored events of a task with seq > `after`, oldest first. */
+  taskEventsAfter(taskId, after = 0) {
+    const rows = this._stmts.taskEventsAfter.all(taskId, after, TASK_EVENTS_PAGE + 1);
+    return {
+      events: rows.slice(0, TASK_EVENTS_PAGE).map((r) => ({ seq: r.seq, at: r.at, event: JSON.parse(r.event) })),
+      more: rows.length > TASK_EVENTS_PAGE,
+    };
   }
 
   // ─── Agent activity ──────────────────────────────────

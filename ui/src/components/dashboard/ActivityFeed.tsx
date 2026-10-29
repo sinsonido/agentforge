@@ -25,7 +25,7 @@ export function ActivityFeed({ initialEvents = [] }: ActivityFeedProps) {
       { id: Date.now(), event: msg.event, data: msg.data, timestamp: msg.timestamp },
       ...prev.slice(0, 49),
     ])
-  })
+  }, (msg) => msg.event !== 'task.agent_event')
 
   useEffect(() => {
     setEvents(initialEvents.slice(0, 50))

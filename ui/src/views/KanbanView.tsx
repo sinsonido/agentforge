@@ -30,7 +30,7 @@ export default function KanbanView() {
 
   useWebSocket(
     () => { void refresh() },
-    (msg) => msg.event.startsWith('task.')
+    (msg) => msg.event.startsWith('task.') && msg.event !== 'task.agent_event'
   )
 
   const handleDragEnd = useCallback(async (event: DragEndEvent) => {

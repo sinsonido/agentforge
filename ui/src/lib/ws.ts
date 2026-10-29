@@ -6,6 +6,12 @@ export type WsMessage = {
   timestamp: number
 }
 
+/** Whether a task.* event's payload is about task `id` (`{ taskId }` or `{ task: { id } }`). */
+export function concernsTask(data: unknown, id: string): boolean {
+  const d = data as { taskId?: string; task?: { id?: string } } | null
+  return d?.taskId === id || d?.task?.id === id
+}
+
 export type WsListener = (msg: WsMessage) => void
 
 // Module-level callback invoked on 4401 close code (unauthorized)
