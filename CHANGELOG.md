@@ -7,10 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-29
+
+AgentForge is now a self-hosted control plane for coding agents grounded on
+poteto-mode (#212). This release covers the v0.7.1, v0.8.0 and v0.9.0
+milestones. v0.7.1 and v0.8.0 were not tagged on their own.
+
+### Added
+
+- Coding tasks. An issue labelled `agentforge` becomes exactly one coding task
+  (#251, #254). The harness runs `claude -p` with poteto-mode in a per-task
+  container on a per-task clone (#250, #255). It never holds push or `gh`
+  credentials.
+- Evidence gate. A run is done only with commits ahead of base, the
+  repository's configured test command seen passing after the last edit, and
+  a clean tree (#256, #265). Cancelled runs never publish.
+- AgentForge pushes and opens the PR from the host after the gate (#253). The
+  loop is wired end to end (#259). AgentForge opened #258 on itself.
+- `scripts/self-host.sh` runs the instance from immutable releases (#252) on
+  its own scoped GitHub token (#264). See `docs/self-hosting.md`.
+- The task queue is restored from SQLite on boot (#240).
+- `POST /api/tasks/:id/cancel` (#270).
+- Live task view at `/tasks/:id` with the agent's transcript, replay on
+  reconnect, the PR link and a Cancel button (#273).
+- Decision trail per task: status changes, playbook steps, gate checks,
+  agent decisions and evidence. It shows in the task view and is attached to
+  the PR description (#272).
+
+### Changed
+
+- Stopping the instance cancels running task containers. Tasks end
+  `cancelled` instead of `failed (interrupted)` (#271).
+- Current model IDs, and config validation of model references (#225).
+- CI tests and packs on Node 24 only (#221).
+- README, CLAUDE.md, AGENTS.md and `docs/` describe the code as it is (#242,
+  #247).
+
+### Removed
+
+- The vanilla dashboard in `src/ui/`. The server serves only `ui/dist` (#266).
+- Unwired modules, the `/api/review/*` routes and config keys nothing read
+  (#267), `AgentPool` and `DependencyGraph` (#268, #269).
+
+### Fixed
+
+- A fully spent budget (0%) was routed as healthy (#258).
+- `task.queued` payload, so queued tasks persist (#217).
+- `cost.recorded` is emitted only by the orchestrator (#220).
+- The E2E job no longer hangs on the Playwright install (#219).
+
 ### Security
 
-- Bump path-to-regexp to 8.4.0 (#112) and picomatch in `ui/` to 4.0.4
-  (#107). Both merged after #103, so they are not in the `v0.7.0` tag.
+- Production `npm audit` findings cleared in root and `ui/` (#223).
+- path-to-regexp 8.4.0 (#112) and picomatch 4.0.4 in `ui/` (#107).
 
 ## [0.7.0] - 2026-03-30
 
@@ -115,7 +164,8 @@ have unit tests but nothing in the running app calls them; those entries say
   creates the pool but does not drive its states.
 - Plugin system (`src/plugins`). Added but not wired.
 
-[Unreleased]: https://github.com/sinsonido/agentforge/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/sinsonido/agentforge/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/sinsonido/agentforge/compare/v0.7.0...v0.9.0
 [0.7.0]: https://github.com/sinsonido/agentforge/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/sinsonido/agentforge/compare/4cb358f...v0.6.0
 [0.1.0 - 0.5.0]: https://github.com/sinsonido/agentforge/commits/4cb358f
