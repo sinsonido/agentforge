@@ -400,6 +400,10 @@ function runContainer({ dockerBin, args, env, name, timeoutMs, signal, onLine })
  * done is decided from `commits` and `observedTestRuns` by the evidence gate.
  * A 'cancelled' run must never open a PR.
  *
+ * Each parsed event is announced as `task.agent_event`. With `opts.recordEvent`
+ * (taskId, event) => { seq, at, event }, the announcement carries the stored entry,
+ * so listeners see the same per-task `seq` a replay returns.
+ *
  * @returns {Promise<{
  *   outcome: 'stopped'|'cancelled'|'error', cancelReason: null|'timeout'|'signal', error: string|null,
  *   exitCode: number|null, sessionId: string|null, usage: object, costUsd: number|null,
@@ -455,7 +459,7 @@ export async function run(task, opts = {}) {
         dockerBin: o.dockerBin, args, env, name, timeoutMs: o.timeoutMs, signal: o.signal,
         onLine: (line) => {
           for (const event of parser.push(line)) {
-            eventBus.emit('task.agent_event', { taskId: task.id, event });
+            eventBus.emit('task.agent_event', { taskId: task.id, ...(o.recordEvent?.(task.id, event) ?? { event }) });
             if (steps.push(event)) {
               task.step = steps.step;
               eventBus.emit('task.step_changed', { taskId: task.id, step: steps.step });
