@@ -255,6 +255,30 @@ The endpoint emits `task.status_changed` on the event bus. The WebSocket server 
 
 ---
 
+#### `POST /api/tasks/:id/approve` and `POST /api/tasks/:id/reject`
+
+The operator's decision on a coding task in `needs-approval`. The task's `approval` field holds the pending action (`publish` or `merge`), a `summary`, and `requested_at`. Both routes need the same Bearer token as other mutating routes. The decision, with `decided_by: "operator"` and the reason, goes to the task's `approval` and its decision trail.
+
+**Body** (optional)
+```json
+{ "reason": "CI is green" }
+```
+
+`reason` is a string of at most 500 characters.
+
+Approve runs the parked action and answers after it ran. Reject ends the task: `pr-opened` for a merge, `cancelled` for a publish.
+
+**Response `200`**
+```json
+{ "ok": true, "status": "completed", "task": { ... } }
+```
+
+**Response `502`**: the approved action failed. The task waits again, with the error in `task.approval.error`.
+
+**Response `409`**: the task has no pending approval. **`404`**: unknown task. **`503`**: no coding loop is configured.
+
+---
+
 ### Agents
 
 #### `GET /api/agents`
@@ -465,6 +489,7 @@ no emitter, so clients never see them today.
 | `task.queued` | `{ task }` |
 | `task.assigned` | never emitted |
 | `task.executing` | `{ task, route }` |
+| `task.needs_approval` | `{ task, status }` |
 | `task.completed` | `{ task, cost, route, output }` |
 | `task.failed` | `{ task, error }` |
 | `quota.throttled` | `{ provider, pct }` |
