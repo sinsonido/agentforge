@@ -13,7 +13,8 @@ import eventBus from './core/event-bus.js';
 import { createIntake } from './core/intake.js';
 import { run as runExecutor } from './execution/coding-executor.js';
 import { decideApproval, executorConfig, runCodingTask } from './execution/coding-runner.js';
-import { merge, publish } from './execution/publish.js';
+import { merge, publish, pushFix } from './execution/publish.js';
+import { BABYSIT_DEFAULTS, ghCiReader } from './execution/babysit.js';
 
 /**
  * Bootstrap AgentForge from config.
@@ -80,14 +81,15 @@ export async function createAgentForge(configPath) {
   let intake = null;
   if (config.executor && config.intake?.repos?.length) {
     const { concurrency, options } = executorConfig(config.executor);
-    const host = { queue: taskQueue, publish, merge, policy: config.autonomy };
+    const babysit = config.babysit ?? BABYSIT_DEFAULTS;
+    const host = {
+      queue: taskQueue, publish, merge, pushFix, policy: config.autonomy,
+      execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
+      babysit: { ci: ghCiReader({ checks: babysit.checks }), maxRounds: babysit.max_rounds, timeoutMs: babysit.timeout_minutes * 60_000 },
+    };
     coding = {
       concurrency,
-      run: (task, signal) => runCodingTask(task, {
-        ...host,
-        execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
-        signal,
-      }),
+      run: (task, signal) => runCodingTask(task, { ...host, signal }),
       decide: (task, choice) => decideApproval(task, choice, host),
     };
     intake = createIntake({ intake: config.intake, queue: taskQueue });
@@ -107,7 +109,7 @@ export async function createAgentForge(configPath) {
     intake,
   });
 
-  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.completed', 'task.failed'];
+  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.completed', 'task.failed'];
 
   eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
     db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);

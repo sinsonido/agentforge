@@ -232,7 +232,18 @@ intake:
 
 autonomy:
   publish: allow    # push agentforge/<task> and open the PR; allow, approve or deny
+  push-fix: allow   # push a fix round's commits to the PR branch; allow, approve or deny
   merge: approve    # squash-merge the PR; approve or deny, never allow
+
+# ─── BABYSIT ───────────────────────────────────────────
+# After AgentForge pushes a PR head, it watches that head's CI with gh on the host.
+# Green offers the merge. Red runs a fix round: a fresh harness run on a fresh
+# clone of the PR branch, told which checks failed and their log tails.
+
+babysit:
+  max_rounds: 2        # fix rounds per task; red after the last one fails the task
+  timeout_minutes: 60  # how long one head's CI may run before the task fails
+  checks: all          # all, or required (only the checks branch protection requires)
 
 # ─── ALERTS ────────────────────────────────────────────
 

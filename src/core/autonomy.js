@@ -13,12 +13,16 @@
  * ends the task where the previous action left it (`stopsAt`). With no previous
  * action, a denial fails the task and a rejection cancels it.
  *
+ * A `watched` action pushes a PR head. With a babysitter (see babysit.js),
+ * AgentForge watches that head's CI before it reaches `next`: green goes on,
+ * red starts a fix round whose commits `push-fix` pushes, then CI is watched again.
+ *
  * Force-push, deploys, data deletion and customer messages are on poteto-mode's
  * Always-pause list but are not actions AgentForge performs, so the policy
  * cannot name them.
  *
  * @typedef {'allow'|'approve'|'deny'} Rule
- * @typedef {'publish'|'merge'} Action
+ * @typedef {'publish'|'push-fix'|'merge'} Action
  * @typedef {Record<Action, Rule>} Policy
  * @typedef {{
  *   action: Action, summary: string, payload: object, requested_at: number,
@@ -37,14 +41,25 @@ export const ACTIONS = Object.freeze({
     default: 'allow',
     stopsAt: null,
     next: 'merge',
+    watched: true,
     summary: (task, { verdict }) =>
       `push agentforge/${task.id} and open a PR into ${task.base} (${commits(verdict.commits.length)})`,
+  },
+  'push-fix': {
+    rules: RULES,
+    default: 'allow',
+    stopsAt: 'failed',
+    next: 'merge',
+    watched: true,
+    summary: (task, { verdict, branch, round }) =>
+      `push ${commits(verdict.commits.length)} to ${branch} for fix round ${round} of ${task.pr_url}`,
   },
   merge: {
     rules: ['approve', 'deny'],
     default: 'approve',
     stopsAt: 'pr-opened',
     next: null,
+    watched: false,
     summary: (task, { pr_url }) => `merge ${pr_url} into ${task.base}`,
   },
 });

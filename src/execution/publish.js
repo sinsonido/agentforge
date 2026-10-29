@@ -55,6 +55,22 @@ export async function publish({ task, clone, verdict, queue, trail = [], run = h
 }
 
 /**
+ * Push a fix round's commits onto the PR branch that already exists. A plain
+ * push, so it only fast-forwards: a branch someone else moved is refused, never
+ * overwritten.
+ * @param {{ task: { id: string, repo: string }, clone: { dir: string }, verdict: Verdict, branch: string, run?: Runner }} opts
+ * @returns {Promise<string>} the sha now at the head of `branch`
+ */
+export async function pushFix({ task, clone, verdict, branch, run = hostRunner }) {
+  if (verdict.cancelled !== false) throw new Error(`task ${task.id}: refusing to push a cancelled run`);
+  if (verdict.pass !== true) throw new Error(`task ${task.id}: refusing to push, the evidence gate did not pass`);
+  if (!verdict.commits.length) throw new Error(`task ${task.id}: refusing to push, no commits`);
+  const sha = verdict.commits.at(-1).sha;
+  await run('git', ['push', `https://github.com/${task.repo}.git`, `${sha}:refs/heads/${branch}`], { cwd: clone.dir });
+  return sha;
+}
+
+/**
  * Squash-merge the task's PR, or do nothing when it is already merged.
  * AgentForge calls this only after the operator approved the merge.
  * @param {{ url: string, run?: Runner }} opts
