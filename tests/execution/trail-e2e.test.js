@@ -2,7 +2,7 @@ import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,25 +49,25 @@ describe('decision trail of a coding task', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('records status, steps, decisions, gates and evidence, serves them in order and attaches them to the PR', async () => {
-    const upstream = join(tmp, 'upstream.git');
-    git(tmp, 'init', '--bare', '--initial-branch=master', upstream);
-    const seed = join(tmp, 'seed');
-    git(tmp, 'clone', upstream, seed);
+  async function runFixTask(name, fakeDocker) {
+    const root = join(tmp, name);
+    mkdirSync(root);
+    const upstream = join(root, 'upstream.git');
+    git(root, 'init', '--bare', '--initial-branch=master', upstream);
+    const seed = join(root, 'seed');
+    git(root, 'clone', upstream, seed);
     writeFileSync(join(seed, 'README.md'), 'hello\n');
     git(seed, 'add', 'README.md');
     git(seed, 'commit', '-m', 'initial');
     git(seed, 'push', 'origin', 'HEAD:master');
 
-    const bin = join(tmp, 'bin');
+    const bin = join(root, 'bin');
     mkdirSync(bin);
     const docker = join(bin, 'docker');
     copyFileSync(join(fixtures, 'fake-docker.mjs'), docker);
     chmodSync(docker, 0o755);
-    writeFileSync(join(bin, 'fake-docker.json'), JSON.stringify({
-      mode: 'replay', stream: join(fixtures, 'agent-streams', 'two-commits.jsonl'), leave: { 'decisions.tsv': DECISIONS },
-    }));
-    const credentialsFile = join(tmp, 'creds.json');
+    writeFileSync(join(bin, 'fake-docker.json'), JSON.stringify({ mode: 'replay', ...fakeDocker }));
+    const credentialsFile = join(root, 'creds.json');
     writeFileSync(credentialsFile, '{}');
 
     const queue = new TaskQueue({ store: db });
@@ -88,10 +88,17 @@ describe('decision trail of a coding task', () => {
       queue,
       eventBus: bus,
       execute: (t, opts) => runExecutor(t, {
-        ...opts, stateDir: join(tmp, 'state'), pstackDir: join(fixtures, 'pstack'), claudeBin: '/bin/claude',
+        ...opts, stateDir: join(root, 'state'), pstackDir: join(fixtures, 'pstack'), claudeBin: '/bin/claude',
         dockerBin: docker, repoUrl: upstream, credentialsFile, eventBus: bus,
       }),
       publish: (opts) => publish({ ...opts, run: gh }),
+    });
+    return { status, task, body };
+  }
+
+  it('records status, steps, decisions, gates and evidence, serves them in order and attaches them to the PR', async () => {
+    const { status, task, body } = await runFixTask('with-log', {
+      stream: join(fixtures, 'agent-streams', 'two-commits.jsonl'), leave: { 'decisions.tsv': DECISIONS },
     });
 
     assert.equal(status, 'pr-opened');
@@ -121,5 +128,20 @@ describe('decision trail of a coding task', () => {
     assert.match(body, /- \*\*fix\*\* fixed the sign in sum\. Why: root cause is a subtraction\. Evidence: src\/sum\.js:2\. Result: tests green\./);
     assert.match(body, /- skipped step 6: Run Opening a PR\./);
     assert.match(body, /<details><summary>Full trail \(13 entries\)<\/summary>/);
+  });
+
+  it('publishes a run that left no decision log and says so in the PR body', async () => {
+    const skip = 'toolu_01G66aMohEcCD8oqBwcGB7wg';
+    const noSkip = join(tmp, 'no-skip.jsonl');
+    writeFileSync(noSkip, readFileSync(join(fixtures, 'agent-streams', 'two-commits.jsonl'), 'utf8')
+      .split('\n').filter((l) => !l.includes(skip)).join('\n'));
+
+    const { status, task, body } = await runFixTask('without-log', { stream: noSkip });
+
+    assert.equal(status, 'pr-opened');
+    const trail = db.getTrail(task.id);
+    assert.deepEqual(trail.filter((e) => e.kind === 'decision'), []);
+    assert.ok(trail.filter((e) => e.kind === 'gate').every((e) => e.evidence.pass), 'every gate passes');
+    assert.match(body, /\*\*Decisions\*\*\n\nThe agent left no decision log\./);
   });
 });
