@@ -22,6 +22,8 @@ const EVENTS = [
   'task.executing',
   'task.completed',
   'task.failed',
+  'task.step_changed',
+  'task.agent_event',
   'quota.throttled',
   'quota.exhausted',
   'quota.reset',

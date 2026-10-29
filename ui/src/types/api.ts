@@ -4,7 +4,7 @@ interface TaskBase {
   id: string
   title: string
   type: string
-  status: 'queued' | 'executing' | 'completed' | 'failed' | 'waiting_quota' | 'paused_budget'
+  status: 'queued' | 'assigned' | 'executing' | 'completed' | 'failed' | 'waiting_quota' | 'paused_budget' | 'pr-opened' | 'cancelled'
   priority?: 'critical' | 'high' | 'medium' | 'low'
   agent_id?: string
   project_id?: string
@@ -31,9 +31,27 @@ export interface CodingTask extends TaskBase {
   playbook: Playbook
   step: string | null
   budget: number | null
+  pr_url: string | null
 }
 
 export type Task = TextTask | CodingTask
+
+/** One event the coding executor parsed from the harness stream (see createStreamParser). */
+export type AgentEvent =
+  | { type: 'init'; sessionId: string; model: string; cwd: string; version: string }
+  | { type: 'text'; text: string }
+  | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result'; id: string; name: string | null; isError: boolean; output: string }
+  | { type: 'harness_task'; op: 'create' | 'update'; taskId: string; subject?: string; status?: string }
+  | { type: 'rate_limit'; status: string }
+  | { type: 'result'; subtype: string; isError: boolean; costUsd: number | null; numTurns: number; durationMs: number; text: string }
+
+/** A stored transcript entry: `seq` counts up from 1 per task. */
+export interface TaskEvent {
+  seq: number
+  at: number
+  event: AgentEvent
+}
 
 export interface AgentStatus {
   id: string

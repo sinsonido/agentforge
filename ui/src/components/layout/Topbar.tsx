@@ -18,7 +18,7 @@ interface TopbarProps {
 export function Topbar({ onMenuClick }: TopbarProps) {
   const location = useLocation()
   const { status } = useWebSocketContext()
-  const title = ROUTE_TITLES[location.pathname] ?? 'AgentForge'
+  const title = ROUTE_TITLES[location.pathname] ?? (location.pathname.startsWith('/tasks/') ? 'Task' : 'AgentForge')
 
   return (
     <header className="flex h-14 items-center gap-4 border-b bg-card px-4">
