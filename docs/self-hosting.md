@@ -24,7 +24,15 @@ Every command converges to the same end state when you run it again:
 - `upgrade` to the SHA that is already running does not restart anything.
 - `stop` does nothing when no container exists.
 
-`stop` sends `SIGINT` and allows 30 seconds before Docker kills the instance. On `SIGINT` or `SIGTERM`, AgentForge cancels every running coding task. It runs `docker stop -t 10` on each `af-task-*` container, records the task as `cancelled` (no PR is opened), and closes its database before it exits. After the instance is gone, `stop` also stops any `af-task-*` container that is still running. `upgrade` uses the same `stop`. A task can still come back as failed (interrupted) on the next boot when the instance dies without that shutdown, for example on a host crash, because the queue is persisted in SQLite (#240).
+`stop` sends `SIGINT` and allows 30 seconds before Docker kills the instance. On `SIGINT` or `SIGTERM`, AgentForge cancels every running coding task. It runs `docker stop -t 10` on each of its task containers, records the task as `cancelled` (no PR is opened), and closes its database before it exits. After the instance is gone, `stop` also stops any task container labelled `agentforge.instance=$AGENTFORGE_CONTAINER` that is still running. Other instances' task containers are left alone. `upgrade` uses the same `stop`. A task can still come back as failed (interrupted) on the next boot when the instance dies without that shutdown, for example on a host crash, because the queue is persisted in SQLite (#240).
+
+## Several instances on one repo
+
+Every database numbers its tasks from `t1`, so the task id is not a name AgentForge uses outside its database. Each coding task gets a handle, its id plus 8 random hex digits (`t1-3f9c02ab`). The handle names the branch (`agentforge/t1-3f9c02ab`) and the task container (`af-task-t1-3f9c02ab`). Two instances, or one instance before and after a database reset, can share a GitHub repo and a Docker daemon. `start` passes the container name as `AGENTFORGE_INSTANCE`, and each task container carries it as the `agentforge.instance` label.
+
+Tasks from a database older than this change keep their id as handle when they already ran, so their clone, branch and PR still match. Queued tasks get a fresh handle.
+
+`publish` refuses to push when the remote branch is at a commit the run did not make, and refuses when the branch already had a closed or merged PR. The task fails with that reason, or, when the operator approved the publish, waits in `needs-approval` with the error. It never adopts another task's PR.
 
 ## Layout
 

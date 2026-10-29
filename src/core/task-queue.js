@@ -1,5 +1,5 @@
 import eventBus from './event-bus.js';
-import { TERMINAL_STATUSES, admissionKey } from './task-model.js';
+import { TERMINAL_STATUSES, admissionKey, newHandle } from './task-model.js';
 import { statusEntry } from './trail.js';
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -62,8 +62,9 @@ export class TaskQueue {
     const existing = key && this.getAll().find(t => !TERMINAL_STATUSES.includes(t.status) && admissionKey(t) === key);
     if (existing) return { task: existing, created: false };
 
+    const id = taskData.id || `t${++this._counter}`;
     const task = {
-      id: taskData.id || `t${++this._counter}`,
+      id,
       kind: taskData.kind || 'text',
       title: taskData.title,
       type: taskData.type || 'implement',
@@ -95,6 +96,7 @@ export class TaskQueue {
         approval: null,
         setup_command: taskData.setup_command,
         test_command: taskData.test_command,
+        handle: newHandle(id),
       }),
     };
     this._store?.saveTask(task);

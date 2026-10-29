@@ -7,7 +7,8 @@
  * - `coding`: a poteto-mode playbook run against a repository. Adds
  *   `repo`, `base`, `instruction`, `issue`, `playbook`, `step`, `budget` and `pr_url`,
  *   plus `setup_command` and `test_command`: what the harness runs to install the
- *   repo's dependencies and the one test command the evidence gate accepts.
+ *   repo's dependencies and the one test command the evidence gate accepts, and
+ *   `handle`, the task's name outside this database (see newHandle).
  *   Its lifecycle: queued → executing → pr-opened | completed | failed | cancelled, with
  *   `needs-approval` while a host action waits for the operator (see autonomy.js).
  *
@@ -19,6 +20,8 @@
  * @typedef {TextTaskInput|CodingTaskInput} TaskInput
  */
 
+import { randomBytes } from 'node:crypto';
+
 export const PLAYBOOKS = Object.freeze(['bug-fix', 'feature', 'refactoring', 'investigation', 'perf-issue']);
 
 export const TASK_KINDS = Object.freeze(['text', 'coding']);
@@ -26,8 +29,15 @@ export const TASK_KINDS = Object.freeze(['text', 'coding']);
 export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed', 'pr-opened', 'cancelled']);
 
 export const CODING_FIELDS = Object.freeze([
-  'repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url', 'setup_command', 'test_command', 'approval',
+  'repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url', 'setup_command', 'test_command', 'approval', 'handle',
 ]);
+
+/**
+ * A coding task's handle: its id plus 32 random bits. Every database numbers
+ * tasks from t1, so the id alone collides on a GitHub repo or Docker daemon that
+ * another instance, or this one before a database reset, also uses.
+ */
+export const newHandle = (id) => `${id}-${randomBytes(4).toString('hex')}`;
 
 /** Commands a coding task runs when its repository configures none. */
 export const DEFAULT_COMMANDS = Object.freeze({ setup_command: 'npm ci', test_command: 'npm test' });

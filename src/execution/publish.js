@@ -1,5 +1,6 @@
 import { renderTrail } from '../core/trail.js';
 import { hostRunner } from './host-runner.js';
+import { branchFor } from './names.js';
 
 /** @typedef {import('./host-runner.js').Runner} Runner */
 
@@ -14,8 +15,10 @@ import { hostRunner } from './host-runner.js';
  */
 
 /**
- * Push agentforge/<taskId> to GitHub and open its PR, or return the PR that
+ * Push the task's branch to GitHub and open its PR, or return the open PR that
  * already exists for that branch. Pushes the last commit the gate checked.
+ * Refuses when the remote branch holds a commit this run did not make, or when
+ * the branch already had a PR that is closed or merged.
  *
  * @param {{
  *   task: { id: string, title: string, repo: string, base: string, issue: number|null,
@@ -33,19 +36,24 @@ export async function publish({ task, clone, verdict, queue, trail = [], run = h
   if (verdict.pass !== true) throw new Error(`task ${task.id}: refusing to publish, the evidence gate did not pass`);
   if (!verdict.commits.length) throw new Error(`task ${task.id}: refusing to publish, no commits`);
 
-  const branch = `agentforge/${task.id}`;
+  const branch = branchFor(task);
   const remote = `https://github.com/${task.repo}.git`;
   const sha = verdict.commits.at(-1).sha;
 
   const remoteSha = (await run('git', ['ls-remote', remote, `refs/heads/${branch}`], { cwd: clone.dir })).split('\t')[0];
+  if (remoteSha && !verdict.commits.some((c) => c.sha === remoteSha)) {
+    throw new Error(`task ${task.id}: refusing to publish, ${branch} on GitHub is at ${remoteSha.slice(0, 7)}, a commit this run did not make`);
+  }
+  const prs = JSON.parse(await run('gh', [
+    'pr', 'list', '--repo', task.repo, '--head', branch, '--state', 'all', '--json', 'url,state',
+  ]));
+  const ended = prs.find((pr) => pr.state !== 'OPEN');
+  if (ended) throw new Error(`task ${task.id}: refusing to publish, ${branch} already had ${ended.url} (${String(ended.state).toLowerCase()})`);
+
   if (remoteSha !== sha) {
     await run('git', ['push', `--force-with-lease=refs/heads/${branch}:${remoteSha}`, remote, `${sha}:refs/heads/${branch}`], { cwd: clone.dir });
   }
-
-  const existing = JSON.parse(await run('gh', [
-    'pr', 'list', '--repo', task.repo, '--head', branch, '--state', 'all', '--json', 'url', '--limit', '1',
-  ]));
-  const url = existing[0]?.url ?? (await run('gh', [
+  const url = prs[0]?.url ?? (await run('gh', [
     'pr', 'create', '--repo', task.repo, '--base', task.base, '--head', branch,
     '--title', task.title, '--body', prBody(task, verdict, trail),
   ])).split('\n').at(-1).trim();
