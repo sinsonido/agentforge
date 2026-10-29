@@ -1,12 +1,13 @@
 import { execFile, spawn } from 'node:child_process';
 import { copyFile, mkdir, realpath, rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
+import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { promisify } from 'node:util';
 import defaultEventBus from '../core/event-bus.js';
 import { createStepTracker, readPlaybook } from '../core/playbook.js';
 import { createWorkspaceManager } from './workspace.js';
+import { INSTANCE_LABEL, branchFor, containerFor } from './names.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -304,7 +305,7 @@ export function buildPrompt(task) {
  * `docker run` arguments for one harness run. The container sees the task
  * clone at its host path, a per-task HOME, and read-only pstack and claude.
  */
-export function buildDockerArgs({ task, dir, home, uid, gid, image, claudeBin, pstackDir, model, effort, budgetUsd, gitAuthor, withToken }) {
+export function buildDockerArgs({ task, instance, dir, home, uid, gid, image, claudeBin, pstackDir, model, effort, budgetUsd, gitAuthor, withToken }) {
   const env = {
     HOME: CONTAINER_HOME,
     CLAUDE_CODE_TMPDIR: `${CONTAINER_HOME}/tmp`,
@@ -315,7 +316,7 @@ export function buildDockerArgs({ task, dir, home, uid, gid, image, claudeBin, p
     GIT_COMMITTER_EMAIL: gitAuthor.email,
   };
   return [
-    'run', '--rm', '--name', containerName(task.id),
+    'run', '--rm', '--name', containerFor(task), '--label', `${INSTANCE_LABEL}=${instance}`,
     '--user', `${uid}:${gid}`,
     ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     ...(withToken ? ['-e', 'CLAUDE_CODE_OAUTH_TOKEN'] : []),
@@ -336,8 +337,6 @@ export function buildDockerArgs({ task, dir, home, uid, gid, image, claudeBin, p
     '--permission-mode', 'bypassPermissions',
   ];
 }
-
-export const containerName = (taskId) => `af-task-${taskId}`;
 
 /**
  * Pick the harness credential. An OAuth token reaches the container by name
@@ -408,6 +407,9 @@ function runContainer({ dockerBin, args, env, name, timeoutMs, signal, onLine })
  * (taskId, event) => { seq, at, event }, the announcement carries the stored entry,
  * so listeners see the same per-task `seq` a replay returns.
  *
+ * The container is labelled with `opts.instance` (default: the hostname), so
+ * stopping one instance's leftover task containers never stops another's.
+ *
  * @returns {Promise<{
  *   outcome: 'stopped'|'cancelled'|'error', cancelReason: null|'timeout'|'signal', error: string|null,
  *   exitCode: number|null, sessionId: string|null, usage: object, costUsd: number|null,
@@ -426,6 +428,7 @@ export async function run(task, opts = {}) {
   const workspace = createWorkspaceManager({ stateDir: o.stateDir });
   const { dir, home, branch } = await workspace.prepare({
     taskId: task.id,
+    branch: branchFor(task),
     repo: { slug: task.repo, ...(o.repoUrl && { url: o.repoUrl }) },
     base: task.base,
   });
@@ -433,7 +436,7 @@ export async function run(task, opts = {}) {
 
   const parser = createStreamParser({ testCommand: task.test_command });
   const steps = createStepTracker(await readPlaybook(o.pstackDir, task.playbook));
-  const name = containerName(task.id);
+  const name = containerFor(task);
   const credentials = await stageCredentials(home, {
     oauthToken: o.oauthToken ?? process.env.CLAUDE_CODE_OAUTH_TOKEN,
     credentialsFile: o.credentialsFile ?? join(homedir(), '.claude', '.credentials.json'),
@@ -448,6 +451,7 @@ export async function run(task, opts = {}) {
       await new Promise((r) => execFile(o.dockerBin, ['rm', '-f', name], { env }, () => r()));
       const args = buildDockerArgs({
         task, dir, home,
+        instance: o.instance ?? hostname(),
         uid: o.uid ?? process.getuid(),
         gid: o.gid ?? process.getgid(),
         image: o.image,

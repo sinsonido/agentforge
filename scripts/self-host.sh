@@ -306,6 +306,7 @@ launch() {
     -e 'GIT_CONFIG_VALUE_0=!gh auth git-credential' \
     -e AGENTFORGE_STATE_DIR="$AGENTFORGE_STATE_DIR" -e AGENTFORGE_PSTACK_DIR="$AGENTFORGE_PSTACK_DIR" \
     -e AGENTFORGE_CLAUDE_BIN="$AGENTFORGE_CLAUDE_BIN" -e AGENTFORGE_CLAUDE_CREDENTIALS="$AGENTFORGE_CLAUDE_CREDENTIALS" \
+    -e AGENTFORGE_INSTANCE="$AGENTFORGE_CONTAINER" \
     -p "$AGENTFORGE_BIND:$AGENTFORGE_PORT:$CONTAINER_PORT" \
     -v "$RELEASES/$sha":/app:ro -v "$DATA_DIR":/data -v "$CONFIG_DIR":/config:ro \
     -v "$AGENTFORGE_DOCKER_SOCKET":/var/run/docker.sock \
@@ -336,7 +337,8 @@ cmd_start() {
 
 # The instance cancels its running tasks on SIGINT: each task container gets
 # 'docker stop -t 10', and the orchestrator waits up to 20s for them. The 30s
-# here outlasts both. Any af-task-* container still running after that is stopped.
+# here outlasts both. Any task container this instance labelled that is still
+# running after that is stopped. Other instances' task containers are left alone.
 cmd_stop() {
   local leftover=()
   if docker inspect "$AGENTFORGE_CONTAINER" >/dev/null 2>&1; then
@@ -346,7 +348,7 @@ cmd_stop() {
   else
     log "not running"
   fi
-  mapfile -t leftover < <(docker ps --format '{{.Names}}' --filter 'name=^af-task-')
+  mapfile -t leftover < <(docker ps --format '{{.Names}}' --filter "label=agentforge.instance=$AGENTFORGE_CONTAINER")
   if (( ${#leftover[@]} )); then
     docker stop -t 10 "${leftover[@]}" >/dev/null
     log "stopped leftover task containers: ${leftover[*]}"

@@ -85,7 +85,11 @@ export async function createAgentForge(configPath) {
       concurrency,
       run: (task, signal) => runCodingTask(task, {
         ...host,
-        execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
+        execute: (t, opts) => runExecutor(t, {
+          ...options, ...opts,
+          instance: process.env.AGENTFORGE_INSTANCE,
+          recordEvent: (id, event) => db.appendTaskEvent(id, event),
+        }),
         signal,
       }),
       decide: (task, choice) => decideApproval(task, choice, host),

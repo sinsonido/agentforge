@@ -94,7 +94,7 @@ describe('agentforge start shutdown', () => {
         child.kill('SIGKILL');
       }
 
-      assert.ok(calls().some((c) => c.args?.join(' ') === `stop -t 10 af-task-${task.id}`), 'the task container was stopped');
+      assert.ok(calls().some((c) => c.args?.join(' ') === `stop -t 10 af-task-${task.handle}`), 'the task container was stopped');
       const db = new AgentForgeDB(dbPath);
       const row = db.getTask(task.id);
       db.close();

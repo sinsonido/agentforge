@@ -9,6 +9,10 @@ const TASK_ID = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const BASE = /^(?!.*\.\.)[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const SLUG = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/;
 
+// Keyed by mirror path and shared by every workspace manager in the process:
+// each task run makes its own manager, and concurrent tasks on one repo share a mirror.
+const mirrorLocks = new Map();
+
 async function git(args, cwd) {
   try {
     const { stdout } = await execFileAsync('git', args, {
@@ -44,14 +48,12 @@ async function succeeds(args, cwd) {
  * Per-task git workspaces under one state directory:
  *
  *   <stateDir>/mirrors/<owner>__<name>.git   bare mirror, fetched before each prepare
- *   <stateDir>/tasks/<taskId>/repo           self-contained clone, origin = the mirror
+ *   <stateDir>/tasks/<taskId>/repo           self-contained clone on the task's branch, origin = the mirror
  *   <stateDir>/tasks/<taskId>/home           empty HOME for the harness
  *
  * Every step derives what to do from what is on disk, so a rerun after a crash converges.
  */
 export function createWorkspaceManager({ stateDir }) {
-  const mirrorLocks = new Map();
-
   const taskDir = (taskId) => join(stateDir, 'tasks', taskId);
 
   function withMirrorLock(mirror, fn) {
@@ -80,18 +82,18 @@ export function createWorkspaceManager({ stateDir }) {
   }
 
   /**
-   * @param {{ taskId: string, repo: { slug: string, url?: string }, base: string }} opts
+   * @param {{ taskId: string, branch: string, repo: { slug: string, url?: string }, base: string }} opts
    * @returns {Promise<{ dir: string, home: string, branch: string }>}
    */
-  async function prepare({ taskId, repo, base }) {
+  async function prepare({ taskId, branch, repo, base }) {
     if (!TASK_ID.test(taskId)) throw new Error(`invalid taskId: ${taskId}`);
+    if (!BASE.test(branch ?? '')) throw new Error(`invalid branch: ${branch}`);
     if (!SLUG.test(repo?.slug ?? '')) throw new Error(`invalid repo slug: ${repo?.slug}`);
     if (!BASE.test(base)) throw new Error(`invalid base: ${base}`);
 
     const root = taskDir(taskId);
     const dir = join(root, 'repo');
     const home = join(root, 'home');
-    const branch = `agentforge/${taskId}`;
     await mkdir(home, { recursive: true });
 
     const mirror = await syncMirror(repo);

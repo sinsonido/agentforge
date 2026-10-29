@@ -46,6 +46,10 @@ const MIGRATIONS = [
      PRIMARY KEY (task_id, seq)
    );`,
   `ALTER TABLE tasks ADD COLUMN approval TEXT;`,
+  // A task that already ran keeps its id as handle, so its clone, branch and PR still match.
+  `ALTER TABLE tasks ADD COLUMN handle TEXT;
+   UPDATE tasks SET handle = CASE WHEN status = 'queued' THEN id || '-' || lower(hex(randomblob(4))) ELSE id END
+     WHERE kind = 'coding';`,
 ];
 
 /** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
@@ -144,10 +148,10 @@ export class AgentForgeDB {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
                            priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
-                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command, approval)
+                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command, approval, handle)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
                 @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
-                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command, @approval)
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command, @approval, @handle)
         ON CONFLICT(id) DO UPDATE SET
           status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, approval=excluded.approval, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
