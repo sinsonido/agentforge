@@ -30,6 +30,7 @@ if (config.mode === 'hang') {
 } else {
   const dir = args[args.indexOf('-w') + 1];
   writeFileSync(join(dir, 'fix.txt'), 'fixed\n');
+  for (const [file, text] of Object.entries(config.leave ?? {})) writeFileSync(join(dir, file), text);
   execFileSync('git', ['add', 'fix.txt'], { cwd: dir });
   execFileSync('git', ['-c', 'user.name=Agent', '-c', 'user.email=agent@example.com', 'commit', '-m', 'fix: the bug'], { cwd: dir });
   for (const line of lines) process.stdout.write(line + '\n');

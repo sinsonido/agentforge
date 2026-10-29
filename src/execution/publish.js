@@ -1,3 +1,4 @@
+import { renderTrail } from '../core/trail.js';
 import { hostRunner } from './host-runner.js';
 
 /** @typedef {import('./host-runner.js').Runner} Runner */
@@ -22,11 +23,12 @@ import { hostRunner } from './host-runner.js';
  *   clone: { dir: string },
  *   verdict: Verdict,
  *   queue: { updateStatus(id: string, status: string, extra: object): object },
+ *   trail?: import('../core/trail.js').TrailEntry[],
  *   run?: Runner,
  * }} opts
  * @returns {Promise<string>} the PR URL
  */
-export async function publish({ task, clone, verdict, queue, run = hostRunner }) {
+export async function publish({ task, clone, verdict, queue, trail = [], run = hostRunner }) {
   if (verdict.cancelled !== false) throw new Error(`task ${task.id}: refusing to publish a cancelled run`);
   if (verdict.pass !== true) throw new Error(`task ${task.id}: refusing to publish, the evidence gate did not pass`);
   if (!verdict.commits.length) throw new Error(`task ${task.id}: refusing to publish, no commits`);
@@ -45,7 +47,7 @@ export async function publish({ task, clone, verdict, queue, run = hostRunner })
   ]));
   const url = existing[0]?.url ?? (await run('gh', [
     'pr', 'create', '--repo', task.repo, '--base', task.base, '--head', branch,
-    '--title', task.title, '--body', prBody(task, verdict),
+    '--title', task.title, '--body', prBody(task, verdict, trail),
   ])).split('\n').at(-1).trim();
 
   queue.updateStatus(task.id, task.status, { pr_url: url });
@@ -54,7 +56,7 @@ export async function publish({ task, clone, verdict, queue, run = hostRunner })
 
 const passSummary = (counts) => (counts?.pass != null ? `: ${counts.pass} passed, ${counts.fail ?? 0} failed` : '');
 
-function prBody(task, verdict) {
+function prBody(task, verdict, trail) {
   const short = (sha) => sha.slice(0, 7);
   const { testRun } = verdict;
   return [
@@ -70,6 +72,7 @@ function prBody(task, verdict) {
     '## Cost',
     `$${(task.cost ?? 0).toFixed(2)}, ${task.tokens_in ?? 0} tokens in, ${task.tokens_out ?? 0} tokens out.`,
     '',
+    ...(trail.length ? [renderTrail(trail), ''] : []),
     '---',
     `Opened by AgentForge for task \`${task.id}\`.`,
   ].join('\n');

@@ -17,6 +17,7 @@ import { Orchestrator } from '../../src/core/orchestrator.js';
 import defaultEventBus from '../../src/core/event-bus.js';
 import { runCodingTask } from '../../src/execution/coding-runner.js';
 import { startServer } from '../../src/api/server.js';
+import { AgentForgeDB } from '../../src/persistence/db.js';
 
 const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
 
@@ -184,6 +185,26 @@ describe('/api/tasks', () => {
     const missing = await call('GET', '/api/tasks/no-such-task');
     assert.equal(missing.status, 404);
     assert.equal(missing.body.ok, false);
+  });
+});
+
+describe('GET /api/tasks/:id/trail', () => {
+  it('returns the task trail in order, and 404 for an unknown task', async (t) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'af-trail-api-'));
+    const db = new AgentForgeDB(path.join(dir, 'data.db'));
+    t.after(() => { db.close(); fs.rmSync(dir, { recursive: true, force: true }); });
+    const { forge, call } = await serve(t, makeForge({ db, taskQueue: new TaskQueue({ store: db }) }));
+    const task = forge.taskQueue.add({ title: 'trailed' });
+    forge.taskQueue.updateStatus(task.id, 'failed', { result: 'boom' });
+
+    const res = await call('GET', `/api/tasks/${task.id}/trail`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(res.body.trail.map((e) => [e.seq, e.kind, e.summary]), [
+      [1, 'status', 'queued'],
+      [2, 'status', 'queued → failed: boom'],
+    ]);
+
+    assert.equal((await call('GET', '/api/tasks/nope/trail')).status, 404);
   });
 });
 

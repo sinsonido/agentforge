@@ -214,6 +214,30 @@ describe('AgentForgeDB', () => {
     });
   });
 
+  describe('appendTrail() / getTrail()', () => {
+    it('numbers entries per task from 1 and returns them in order with evidence parsed', () => {
+      const a1 = db.appendTrail('ta', { kind: 'status', summary: 'queued', evidence: { from: null, to: 'queued' } });
+      db.appendTrail('tb', { kind: 'status', summary: 'queued', evidence: null });
+      db.appendTrail('ta', { kind: 'gate', summary: 'pass clean tree', evidence: { gate: 'clean tree', pass: true } });
+
+      assert.equal(a1.seq, 1);
+      assert.ok(a1.at > 0);
+      assert.deepEqual(db.getTrail('ta').map(e => [e.seq, e.kind, e.evidence]), [
+        [1, 'status', { from: null, to: 'queued' }],
+        [2, 'gate', { gate: 'clean tree', pass: true }],
+      ]);
+      assert.deepEqual(db.getTrail('tb').map(e => e.seq), [1]);
+      assert.deepEqual(db.getTrail('none'), []);
+    });
+
+    it('survives reopening the database', () => {
+      db.appendTrail('ta', { kind: 'step', summary: 'step 2', evidence: { step: 2 } });
+      db.close();
+      db = new AgentForgeDB(DB_PATH);
+      assert.deepEqual(db.getTrail('ta').map(e => e.summary), ['step 2']);
+    });
+  });
+
   describe('schema migration', () => {
     it('upgrades a DB file created before the queue columns existed, once', async () => {
       const { default: Database } = await import('better-sqlite3');
@@ -229,7 +253,7 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 4);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 5);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
@@ -254,7 +278,7 @@ describe('AgentForgeDB', () => {
 
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 4);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 5);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.kind, 'text');
       assert.equal(task.priority, 'high');

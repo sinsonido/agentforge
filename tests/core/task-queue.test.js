@@ -356,9 +356,17 @@ describe('TaskQueue', () => {
   describe('with a store', () => {
     function memoryStore(rows = [], lastSeq = 0) {
       const saved = new Map(rows.map(r => [r.id, { ...r }]));
+      const trails = new Map();
       return {
         saved,
         saveTask: (task) => saved.set(task.id, { ...task }),
+        appendTrail: (id, entry) => {
+          const list = trails.get(id) ?? [];
+          const stored = { seq: list.length + 1, at: Date.now(), ...entry };
+          trails.set(id, [...list, stored]);
+          return stored;
+        },
+        getTrail: (id) => trails.get(id) ?? [],
         loadQueue: () => ({ tasks: [...saved.values()].map(r => ({ ...r })), lastSeq }),
       };
     }
@@ -387,6 +395,27 @@ describe('TaskQueue', () => {
       );
       assert.equal(store.saved.get('x').result, 'interrupted');
       assert.equal(sq.add({ title: 'next' }).id, 't10');
+      assert.deepEqual(sq.trail('x').map(e => e.summary), ['executing → failed: interrupted']);
+    });
+
+    it('records each status transition in the trail, with the reason for a bad end', () => {
+      const sq = new TaskQueue({ store: memoryStore() });
+      const task = sq.add({ title: 'Trail' });
+      sq.updateStatus(task.id, 'executing');
+      sq.updateStatus(task.id, 'executing', { step: 2 });
+      sq.updateStatus(task.id, 'failed', { result: 'evidence gate: no commit ahead of base' });
+
+      assert.deepEqual(sq.trail(task.id).map(e => [e.kind, e.summary]), [
+        ['status', 'queued'],
+        ['status', 'queued → executing'],
+        ['status', 'executing → failed: evidence gate: no commit ahead of base'],
+      ]);
+    });
+
+    it('keeps no trail without a store', () => {
+      const task = q.add({ title: 'No store' });
+      assert.equal(q.appendTrail(task.id, { kind: 'step', summary: 'step 1', evidence: null }), null);
+      assert.deepEqual(q.trail(task.id), []);
     });
   });
 });
