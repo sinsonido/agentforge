@@ -15,7 +15,7 @@ import { QuotaManager } from '../../src/core/quota-tracker.js';
 import { CostTracker } from '../../src/core/cost-tracker.js';
 import { Orchestrator } from '../../src/core/orchestrator.js';
 import defaultEventBus from '../../src/core/event-bus.js';
-import { runCodingTask } from '../../src/execution/coding-runner.js';
+import { decideApproval, runCodingTask } from '../../src/execution/coding-runner.js';
 import { startServer } from '../../src/api/server.js';
 import { AgentForgeDB } from '../../src/persistence/db.js';
 
@@ -317,6 +317,99 @@ describe('POST /api/tasks/:id/cancel', () => {
     const { status } = await call('POST', `/api/tasks/${task.id}/cancel`);
     assert.equal(status, 409);
     assert.equal(forge.taskQueue.get(task.id).status, 'executing');
+  });
+});
+
+describe('POST /api/tasks/:id/approve and /reject', () => {
+  const PR = 'https://github.com/o/r/pull/3';
+  const coding = {
+    kind: 'coding', title: 'Fix it', repo: 'o/r', base: 'master', instruction: 'Fix it', issue: 3, playbook: 'bug-fix', test_command: 'npm test',
+  };
+
+  async function parked(t, { mergeError = null } = {}) {
+    const forge = makeForge();
+    const merged = [];
+    const host = {
+      queue: forge.taskQueue,
+      eventBus: forge.eventBus,
+      publish: async () => PR,
+      merge: async ({ url }) => {
+        if (mergeError) throw new Error(mergeError);
+        merged.push(url);
+      },
+    };
+    forge.orchestrator = new Orchestrator({
+      taskQueue: forge.taskQueue,
+      router: { models: {}, resolve: () => ({ action: 'wait', reason: 'none' }) },
+      quotaManager: forge.quotaManager,
+      providerRegistry: null,
+      config: {},
+      coding: { concurrency: 1, run: () => {}, decide: (task, choice) => decideApproval(task, choice, host) },
+    });
+    const task = forge.taskQueue.add(coding);
+    await runCodingTask(task, {
+      ...host,
+      execute: async () => ({
+        outcome: 'stopped', commits: [{ sha: 'a'.repeat(40), subject: 'fix' }], uncommitted: false,
+        observedTestRuns: [{ seq: 2, command: 'npm test', passed: true }], lastEditSeq: 1, dir: '/clone',
+      }),
+    });
+    const { call } = await serve(t, forge);
+    return { forge, call, task, merged };
+  }
+
+  afterEach(() => {
+    for (const evt of ORCHESTRATOR_EVENTS) defaultEventBus.removeAllListeners(evt);
+  });
+
+  it('approves the pending merge: 200, merged, completed', async (t) => {
+    const { forge, call, task, merged } = await parked(t);
+    assert.equal(task.status, 'needs-approval');
+
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/approve`, { body: { reason: 'looks good' } });
+
+    assert.equal(status, 200);
+    assert.equal(body.status, 'completed');
+    assert.equal(body.task.approval.decided_by, 'operator');
+    assert.equal(body.task.approval.reason, 'looks good');
+    assert.deepEqual(merged, [PR]);
+    assert.equal(forge.taskQueue.get(task.id).status, 'completed');
+  });
+
+  it('rejects the pending merge: 200, pr-opened, not merged', async (t) => {
+    const { call, task, merged } = await parked(t);
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/reject`, { body: { reason: 'wait for review' } });
+
+    assert.equal(status, 200);
+    assert.equal(body.status, 'pr-opened');
+    assert.equal(body.task.result, 'merge rejected: wait for review');
+    assert.deepEqual(merged, []);
+  });
+
+  it('answers 502 and keeps the task waiting when the approved merge fails', async (t) => {
+    const { call, task } = await parked(t, { mergeError: 'checks pending' });
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/approve`);
+
+    assert.equal(status, 502);
+    assert.equal(body.error, 'merge: checks pending');
+    assert.equal(body.task.status, 'needs-approval');
+    assert.equal(body.task.approval.error, 'checks pending');
+  });
+
+  it('answers 409 once decided, 404 for an unknown task, 400 for a bad reason', async (t) => {
+    const { call, task } = await parked(t);
+    assert.equal((await call('POST', `/api/tasks/${task.id}/approve`, { body: { reason: 5 } })).status, 400);
+    assert.equal((await call('POST', `/api/tasks/${task.id}/reject`)).status, 200);
+    const again = await call('POST', `/api/tasks/${task.id}/approve`);
+    assert.equal(again.status, 409);
+    assert.match(again.body.error, /no pending approval/);
+    assert.equal((await call('POST', '/api/tasks/nope/approve')).status, 404);
+  });
+
+  it('answers 503 without a coding loop', async (t) => {
+    const { forge, call } = await serve(t);
+    const task = forge.taskQueue.add({ title: 'plain' });
+    assert.equal((await call('POST', `/api/tasks/${task.id}/approve`)).status, 503);
   });
 });
 

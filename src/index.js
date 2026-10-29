@@ -12,8 +12,8 @@ import { OpenRouterProvider } from './providers/openrouter.js';
 import eventBus from './core/event-bus.js';
 import { createIntake } from './core/intake.js';
 import { run as runExecutor } from './execution/coding-executor.js';
-import { executorConfig, runCodingTask } from './execution/coding-runner.js';
-import { publish } from './execution/publish.js';
+import { decideApproval, executorConfig, runCodingTask } from './execution/coding-runner.js';
+import { merge, publish } from './execution/publish.js';
 
 /**
  * Bootstrap AgentForge from config.
@@ -80,14 +80,15 @@ export async function createAgentForge(configPath) {
   let intake = null;
   if (config.executor && config.intake?.repos?.length) {
     const { concurrency, options } = executorConfig(config.executor);
+    const host = { queue: taskQueue, publish, merge, policy: config.autonomy };
     coding = {
       concurrency,
       run: (task, signal) => runCodingTask(task, {
-        queue: taskQueue,
+        ...host,
         execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
-        publish,
         signal,
       }),
+      decide: (task, choice) => decideApproval(task, choice, host),
     };
     intake = createIntake({ intake: config.intake, queue: taskQueue });
     eventBus.on('task.agent_event', ({ taskId, event }) => console.log('[coding] %s %s', taskId, describeAgentEvent(event)));
@@ -106,7 +107,7 @@ export async function createAgentForge(configPath) {
     intake,
   });
 
-  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.completed', 'task.failed'];
+  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.completed', 'task.failed'];
 
   eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
     db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);

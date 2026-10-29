@@ -45,6 +45,7 @@ const MIGRATIONS = [
      evidence TEXT,
      PRIMARY KEY (task_id, seq)
    );`,
+  `ALTER TABLE tasks ADD COLUMN approval TEXT;`,
 ];
 
 /** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
@@ -143,12 +144,12 @@ export class AgentForgeDB {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
                            priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
-                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command)
+                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command, approval)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
                 @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
-                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command)
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command, @approval)
         ON CONFLICT(id) DO UPDATE SET
-          status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, model_used=excluded.model_used,
+          status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, approval=excluded.approval, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
           cost=excluded.cost, result=excluded.result,
           assigned_at=excluded.assigned_at, completed_at=excluded.completed_at
@@ -230,6 +231,7 @@ export class AgentForgeDB {
       ...Object.fromEntries(CODING_FIELDS.map(f => [f, task[f] ?? null])),
       // better-sqlite3 binds a JS number as REAL, which the TEXT column would keep as '5.0'.
       step: task.step == null ? null : String(task.step),
+      approval: task.approval ? JSON.stringify(task.approval) : null,
     });
   }
 
@@ -382,6 +384,7 @@ function rowToTask(row) {
     ...row,
     depends_on: JSON.parse(row.depends_on),
     allow_tier_downgrade: row.allow_tier_downgrade === 1,
+    approval: row.approval ? JSON.parse(row.approval) : null,
   };
   if (task.kind !== 'coding') for (const f of CODING_FIELDS) delete task[f];
   return task;

@@ -54,7 +54,19 @@ export async function publish({ task, clone, verdict, queue, trail = [], run = h
   return url;
 }
 
-const passSummary = (counts) => (counts?.pass != null ? `: ${counts.pass} passed, ${counts.fail ?? 0} failed` : '');
+/**
+ * Squash-merge the task's PR, or do nothing when it is already merged.
+ * AgentForge calls this only after the operator approved the merge.
+ * @param {{ url: string, run?: Runner }} opts
+ */
+export async function merge({ url, run = hostRunner }) {
+  const { state } = JSON.parse(await run('gh', ['pr', 'view', url, '--json', 'state']));
+  if (state === 'MERGED') return;
+  if (state !== 'OPEN') throw new Error(`${url} is ${String(state).toLowerCase()}`);
+  await run('gh', ['pr', 'merge', url, '--squash']);
+}
+
+const passSummary =(counts) => (counts?.pass != null ? `: ${counts.pass} passed, ${counts.fail ?? 0} failed` : '');
 
 function prBody(task, verdict, trail) {
   const short = (sha) => sha.slice(0, 7);

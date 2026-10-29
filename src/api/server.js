@@ -258,6 +258,38 @@ function buildRouter(forge) {
     }
   });
 
+  // ── POST /api/tasks/:id/approve, /reject ─────────────────────────────────
+  /**
+   * The operator's decision on a coding task in `needs-approval`. Body: { reason? }.
+   * Approve runs the parked host action and answers when it has run (200); if the
+   * action fails the task waits again and the answer is 502. Reject ends the task (200).
+   * 404 for an unknown task, 409 when nothing waits for approval, 503 without a coding loop.
+   */
+  const decideApproval = (decision) => async (req, res) => {
+    try {
+      const { id } = req.params;
+      const reason = req.body?.reason ?? null;
+      if (reason != null && (typeof reason !== 'string' || reason.length > 500)) {
+        return res.status(400).json({ ok: false, error: '`reason` must be a string of at most 500 characters' });
+      }
+      if (!forge.taskQueue.get(id)) {
+        return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
+      }
+      const pending = forge.orchestrator?.decideApproval?.(id, { decision, by: 'operator', reason: reason?.trim() || null });
+      if (!pending) {
+        return res.status(503).json({ ok: false, error: 'No coding loop is configured' });
+      }
+      const out = await pending;
+      const task = forge.taskQueue.get(id);
+      if (!out.ok) return res.status(out.conflict ? 409 : 502).json({ ok: false, error: out.error, task });
+      res.json({ ok: true, status: out.status, task });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  };
+  router.post('/tasks/:id/approve', decideApproval('approved'));
+  router.post('/tasks/:id/reject', decideApproval('rejected'));
+
   // ── GET /api/agents ──────────────────────────────────────────────────────
   /**
    * List the configured agents.

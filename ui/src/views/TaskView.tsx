@@ -4,13 +4,14 @@ import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { ApprovalCard } from '@/components/tasks/ApprovalCard'
 import { TaskTrail } from '@/components/tasks/TaskTrail'
 import { TranscriptEntry } from '@/components/tasks/TranscriptEntry'
 import { useApi } from '@/hooks/useApi'
 import { useTaskTranscript } from '@/hooks/useTaskTranscript'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useWebSocketContext } from '@/contexts/WebSocketContext'
-import { api } from '@/lib/api'
+import { api, pendingApproval } from '@/lib/api'
 import { concernsTask } from '@/lib/ws'
 import type { Task } from '@/types/api'
 
@@ -46,6 +47,15 @@ function TaskDetail({ id }: { id: string }) {
   useEffect(() => {
     if (following.current) bottom.current?.scrollIntoView({ block: 'end' })
   }, [events.length])
+
+  const waiting = data?.task ? pendingApproval(data.task) : null
+  const waitingKey = waiting && `${waiting.action}@${waiting.requested_at}`
+  const approvalBox = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!waitingKey) return
+    following.current = false
+    approvalBox.current?.scrollIntoView({ block: 'start' })
+  }, [waitingKey])
 
   const task = data?.task
   if (loading && !task) return <Skeleton className="h-40 w-full" />
@@ -92,10 +102,16 @@ function TaskDetail({ id }: { id: string }) {
           )}
         </div>
         {cancelError && <p className="text-xs text-red-600">{cancelError}</p>}
-        {task.result && task.status !== 'pr-opened' && (
+        {task.result && task.status !== 'pr-opened' && !waiting && (
           <p className="text-xs text-muted-foreground break-words">{task.result}</p>
         )}
       </header>
+
+      {coding && waiting && (
+        <div ref={approvalBox} className="scroll-mt-4">
+          <ApprovalCard key={waitingKey} taskId={id} approval={waiting} onDecided={refresh} />
+        </div>
+      )}
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-muted-foreground">Decision trail</h3>

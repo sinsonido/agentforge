@@ -19,6 +19,7 @@ providers: ...   # AI provider credentials and quotas
 models:    ...   # Model registry with tier and pricing
 routing:   ...   # Rules for automatic model selection
 team:      ...   # Agent definitions
+autonomy:  ...   # Which host actions run, wait for the operator, or never run
 alerts:    ...   # Budget alert thresholds
 server:    ...   # HTTP/WebSocket server settings and auth
 database:  ...   # SQLite file location
@@ -304,6 +305,31 @@ team:
 If an agent has no `system_prompt`, the context builder writes one from `name` and `role`.
 
 Agents have no tools. The orchestrator sends no tool definitions, so the model only returns text. The loader drops any other key on an agent, such as `tools` or `knowledge`.
+
+---
+
+## `autonomy`
+
+What AgentForge may do on the host after a coding task passes the evidence gate. This is poteto-mode's Autonomy section, enforced in code: reversible work proceeds, and merge waits for the operator. The agent never pushes, opens PRs or merges. It has no push or `gh` credentials. AgentForge performs these actions itself, in this order:
+
+| Action | What it does | Rules | Default |
+|---|---|---|---|
+| `publish` | Push `agentforge/<task>` and open the PR | `allow`, `approve`, `deny` | `allow` |
+| `merge` | Squash-merge the PR with `gh pr merge` | `approve`, `deny` | `approve` |
+
+```yaml
+autonomy:
+  publish: allow
+  merge: approve
+```
+
+- `allow`: the action runs.
+- `approve`: the task moves to `needs-approval` with a pending approval record. The task view shows an approval card with Approve and Reject. Approve runs the action. If the approved action fails, the task waits again with the error on the card, and Approve retries it.
+- `deny`: the action never runs.
+
+An action that does not run, denied by the policy or rejected by the operator, ends the task where the action before it left it. A denied or rejected `merge` leaves the task `pr-opened`. A denied `publish` fails the task, and a rejected `publish` cancels it. After an approved merge the task is `completed`.
+
+A task in `needs-approval` keeps its issue: intake creates no second task for it. It survives a restart and waits for the operator. Every policy and operator decision goes to the task's decision trail. A missing action takes its default. An unknown action, or `merge: allow`, stops startup with an error.
 
 ---
 

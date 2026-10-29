@@ -3,13 +3,15 @@ import { TERMINAL_STATUSES, admissionKey } from './task-model.js';
 import { statusEntry } from './trail.js';
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
-const BAD_ENDS = ['failed', 'cancelled'];
-const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', ...TERMINAL_STATUSES];
+// Statuses whose trail entry carries the task's `result` as the reason.
+const REASONED = ['failed', 'cancelled', 'needs-approval'];
+const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', 'needs-approval', ...TERMINAL_STATUSES];
 
 // What a task loaded from the store becomes when a new process boots. Statuses not
 // listed are kept. An `executing` task lost its run with the previous process; its side
 // effects are unknown, so it fails instead of running twice. Quota windows live in
 // memory, so a `waiting_quota` task would never see its quota.reset and goes back to queued.
+// A `needs-approval` task keeps waiting: its pending approval is stored with it.
 const ON_BOOT = {
   executing: { status: 'failed', extra: { result: 'interrupted' } },
   assigned: { status: 'queued' },
@@ -90,6 +92,7 @@ export class TaskQueue {
         step: null,
         budget: taskData.budget ?? null,
         pr_url: null,
+        approval: null,
         setup_command: taskData.setup_command,
         test_command: taskData.test_command,
       }),
@@ -133,7 +136,7 @@ export class TaskQueue {
     if (status === 'assigned') task.assigned_at = Date.now();
     if (TERMINAL_STATUSES.includes(status)) task.completed_at = Date.now();
     this._store?.saveTask(task);
-    if (from !== status) this.appendTrail(id, statusEntry(from, status, BAD_ENDS.includes(status) ? extra.result ?? null : null));
+    if (from !== status) this.appendTrail(id, statusEntry(from, status, REASONED.includes(status) ? extra.result ?? null : null));
     return task;
   }
 

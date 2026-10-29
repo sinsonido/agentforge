@@ -11,7 +11,8 @@ import { CostTracker } from './cost-tracker.js';
 export class Orchestrator {
   /**
    * `coding` runs `kind: 'coding'` tasks: `run(task, signal)` drives one task to a
-   * terminal status, at most `concurrency` at a time. Without it coding tasks stay queued.
+   * terminal status or `needs-approval`, at most `concurrency` at a time; `decide(task, choice)`
+   * applies the operator's approve or reject. Without it coding tasks stay queued.
    * `intake` polls for new coding tasks while the orchestrator runs.
    */
   constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config, coding = null, intake = null }) {
@@ -140,6 +141,15 @@ export class Orchestrator {
     const run = this._codingRuns.get(id);
     run?.controller.abort();
     return Boolean(run);
+  }
+
+  /**
+   * Apply the operator's decision to a coding task in `needs-approval`.
+   * @returns {Promise<object>|null} the coding loop's answer, or null without one
+   */
+  decideApproval(id, choice) {
+    const task = this.taskQueue.get(id);
+    return task && this.coding?.decide ? this.coding.decide(task, choice) : null;
   }
 
   _dispatchCoding() {

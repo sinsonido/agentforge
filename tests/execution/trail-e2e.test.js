@@ -49,7 +49,7 @@ describe('decision trail of a coding task', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  async function runFixTask(name, fakeDocker) {
+  async function runFixTask(name, fakeDocker, issue = 7) {
     const root = join(tmp, name);
     mkdirSync(root);
     const upstream = join(root, 'upstream.git');
@@ -73,7 +73,7 @@ describe('decision trail of a coding task', () => {
     const queue = new TaskQueue({ store: db });
     const task = queue.admit({
       kind: 'coding', title: 'Fix sum', repo: 'acme/widget', base: 'master', instruction: 'sum(2, 3) returns -1',
-      issue: 7, playbook: 'bug-fix', setup_command: 'npm ci', test_command: 'npm test',
+      issue, playbook: 'bug-fix', setup_command: 'npm ci', test_command: 'npm test',
     }).task;
     const bus = new EventEmitter();
     let body = null;
@@ -101,7 +101,7 @@ describe('decision trail of a coding task', () => {
       stream: join(fixtures, 'agent-streams', 'two-commits.jsonl'), leave: { 'decisions.tsv': DECISIONS },
     });
 
-    assert.equal(status, 'pr-opened');
+    assert.equal(status, 'needs-approval');
     const trail = db.getTrail(task.id);
     assert.deepEqual(trail.map((e) => e.seq), trail.map((_, i) => i + 1), 'seq counts from 1 without gaps');
     const sha = trail.find((e) => e.kind === 'evidence').evidence.sha.slice(0, 7);
@@ -119,15 +119,18 @@ describe('decision trail of a coding task', () => {
       ['gate', 'pass tests after last edit: `npm test` passed after the last edit (314 passed, 0 failed)'],
       ['evidence', 'commit <sha> fix: the bug'],
       ['evidence', '`npm test` passed at <sha>'],
+      ['decision', 'publish allowed by policy'],
       ['evidence', 'PR https://github.com/acme/widget/pull/9'],
-      ['status', 'executing → pr-opened'],
+      ['decision', 'merge needs approval by policy'],
+      ['status', 'executing → needs-approval: awaiting approval: merge https://github.com/acme/widget/pull/9 into master'],
     ]);
 
     assert.match(body, /## Decision trail/);
     assert.match(body, /- pass clean tree: no uncommitted tracked changes/);
     assert.match(body, /- \*\*fix\*\* fixed the sign in sum\. Why: root cause is a subtraction\. Evidence: src\/sum\.js:2\. Result: tests green\./);
     assert.match(body, /- skipped step 6: Run Opening a PR\./);
-    assert.match(body, /<details><summary>Full trail \(13 entries\)<\/summary>/);
+    assert.match(body, /\*\*Autonomy\*\*\n\n- publish allowed by policy\n/);
+    assert.match(body, /<details><summary>Full trail \(14 entries\)<\/summary>/);
   });
 
   it('publishes a run that left no decision log and says so in the PR body', async () => {
@@ -136,11 +139,11 @@ describe('decision trail of a coding task', () => {
     writeFileSync(noSkip, readFileSync(join(fixtures, 'agent-streams', 'two-commits.jsonl'), 'utf8')
       .split('\n').filter((l) => !l.includes(skip)).join('\n'));
 
-    const { status, task, body } = await runFixTask('without-log', { stream: noSkip });
+    const { status, task, body } = await runFixTask('without-log', { stream: noSkip }, 8);
 
-    assert.equal(status, 'pr-opened');
+    assert.equal(status, 'needs-approval');
     const trail = db.getTrail(task.id);
-    assert.deepEqual(trail.filter((e) => e.kind === 'decision'), []);
+    assert.deepEqual(trail.filter((e) => e.kind === 'decision' && e.evidence.source !== 'policy'), []);
     assert.ok(trail.filter((e) => e.kind === 'gate').every((e) => e.evidence.pass), 'every gate passes');
     assert.match(body, /\*\*Decisions\*\*\n\nThe agent left no decision log\./);
   });

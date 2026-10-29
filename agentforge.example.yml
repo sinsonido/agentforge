@@ -223,6 +223,17 @@ intake:
 #     name: agentforge
 #     email: agentforge@localhost
 
+# ─── AUTONOMY ──────────────────────────────────────────
+# What AgentForge may do on the host after a coding task passes the evidence
+# gate, per poteto-mode's Autonomy section. The agent itself never pushes,
+# opens PRs or merges. Rules: allow (run it), approve (the task waits in
+# needs-approval until the operator approves or rejects it in the task view),
+# deny (never run it).
+
+autonomy:
+  publish: allow    # push agentforge/<task> and open the PR; allow, approve or deny
+  merge: approve    # squash-merge the PR; approve or deny, never allow
+
 # ─── ALERTS ────────────────────────────────────────────
 
 alerts:

@@ -9,8 +9,9 @@ import { join } from 'node:path';
  * - status: every TaskQueue transition, with the reason when it ended badly.
  * - step: the playbook step tracker.
  * - gate: each check of the evidence gate, pass or fail and why.
- * - decision: rows of the agent's show-me-your-work log in the clone, and
- *   playbook steps the agent skipped.
+ * - decision: rows of the agent's show-me-your-work log in the clone,
+ *   playbook steps the agent skipped, and the autonomy policy's and the
+ *   operator's decisions on host actions (evidence.source 'policy' or 'operator').
  * - evidence: commits, the accepted test run, the PR.
  *
  * @typedef {'status'|'step'|'gate'|'decision'|'evidence'} TrailKind
@@ -24,6 +25,8 @@ const SUMMARY_MAX = 300;
 const VALUE_MAX = 500;
 const DECISION_ROWS_MAX = 100;
 const KEY_DECISIONS = 10;
+// Decisions the host made on its own actions, kept apart from the agent's.
+const HOST_SOURCES = ['policy', 'operator'];
 
 const clip = (s, max) => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
 
@@ -170,11 +173,16 @@ export function renderTrail(entries) {
   if (!entries.length) return '';
   const of = (kind) => entries.filter((e) => e.kind === kind);
   const gates = of('gate');
-  const decisions = of('decision');
+  const isHost = (e) => HOST_SOURCES.includes(e.evidence?.source);
+  const autonomy = of('decision').filter(isHost);
+  const decisions = of('decision').filter((e) => !isHost(e));
   const lines = ['## Decision trail', ''];
 
   if (gates.length) {
     lines.push('**Evidence gate**', '', ...gates.map((g) => `- ${g.evidence?.pass ? 'pass' : '**fail**'} ${inert(g.summary.replace(/^(pass|fail) /, ''))}`), '');
+  }
+  if (autonomy.length) {
+    lines.push('**Autonomy**', '', ...autonomy.map((e) => `- ${inert(e.summary)}`), '');
   }
   lines.push('**Decisions**', '');
   if (!decisions.length) lines.push('The agent left no decision log.');

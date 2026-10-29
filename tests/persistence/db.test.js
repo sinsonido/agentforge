@@ -253,7 +253,7 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 6);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 7);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
@@ -278,7 +278,7 @@ describe('AgentForgeDB', () => {
 
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 6);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 7);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.kind, 'text');
       assert.equal(task.priority, 'high');
@@ -291,7 +291,7 @@ describe('AgentForgeDB', () => {
     it('gives coding tasks saved before the command columns the default setup and test commands', async () => {
       const path = `${TEST_DIR}/v3.db`;
       const v3 = new AgentForgeDB(path);
-      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; DROP TABLE task_events; DROP TABLE task_trail');
+      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; ALTER TABLE tasks DROP COLUMN approval; DROP TABLE task_events; DROP TABLE task_trail');
       v3.db.pragma('user_version = 3');
       v3.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook)
         VALUES ('t1', 'coding', 'Fix', 'queued', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix'), ('t2', 'text', 'Hi', 'queued', 2, NULL, NULL, NULL, NULL, NULL)`).run();
@@ -336,6 +336,17 @@ describe('AgentForgeDB', () => {
       assert.doesNotThrow(() => db.saveTask(coding('t2')));
       assert.doesNotThrow(() => db.saveTask(coding('t3', { issue: null })));
       assert.doesNotThrow(() => db.saveTask(coding('t4', { issue: null })));
+    });
+
+    it('keeps the issue taken while its task waits in needs-approval, and round-trips the approval', () => {
+      const approval = {
+        action: 'merge', summary: 'merge x', payload: { pr_url: 'x' }, requested_at: 5,
+        decision: null, decided_by: null, decided_at: null, reason: null,
+      };
+      db.saveTask(coding('t1', { status: 'needs-approval', approval }));
+      assert.throws(() => db.saveTask(coding('t2')), /UNIQUE constraint failed/);
+      assert.deepEqual(db.findTask('t1').approval, approval);
+      assert.deepEqual(db.loadQueue().tasks.map((t) => [t.id, t.status]), [['t1', 'needs-approval']]);
     });
 
     for (const status of ['pr-opened', 'cancelled']) {
