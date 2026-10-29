@@ -4,7 +4,7 @@
  * POST /api/providers/test).
  */
 
-import { describe, it } from 'node:test';
+import { describe, it, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
@@ -13,7 +13,12 @@ import path from 'node:path';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
 import { CostTracker } from '../../src/core/cost-tracker.js';
+import { Orchestrator } from '../../src/core/orchestrator.js';
+import defaultEventBus from '../../src/core/event-bus.js';
+import { runCodingTask } from '../../src/execution/coding-runner.js';
 import { startServer } from '../../src/api/server.js';
+
+const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
 
 function makeForge(overrides = {}) {
   const recent = Array.from({ length: 3 }, (_, i) => ({
@@ -182,6 +187,118 @@ describe('/api/tasks', () => {
   });
 });
 
+describe('POST /api/tasks/:id/cancel', () => {
+  const coding = {
+    kind: 'coding', title: 'Fix it', repo: 'o/r', base: 'master', instruction: 'Fix it', playbook: 'bug-fix',
+  };
+
+  afterEach(() => {
+    for (const evt of ORCHESTRATOR_EVENTS) defaultEventBus.removeAllListeners(evt);
+  });
+
+  function codingForge() {
+    const forge = makeForge();
+    const started = [];
+    const settled = [];
+    const runs = [];
+    const orchestrator = new Orchestrator({
+      taskQueue: forge.taskQueue,
+      router: { models: {}, resolve: () => ({ action: 'wait', reason: 'no text tasks here' }) },
+      quotaManager: forge.quotaManager,
+      providerRegistry: null,
+      config: {},
+      coding: {
+        concurrency: 1,
+        run: (task, signal) => {
+          started.push(task.id);
+          const run = runCodingTask(task, {
+            queue: forge.taskQueue,
+            eventBus: forge.eventBus,
+            signal,
+            execute: (_t, { signal: s }) => new Promise((resolve) => {
+              s.addEventListener('abort', () => resolve({ outcome: 'cancelled', cancelReason: 'signal' }), { once: true });
+            }),
+            publish: async () => { throw new Error('a cancelled run must not publish'); },
+          }).then((status) => settled.push(status));
+          runs.push(run);
+          return run;
+        },
+      },
+    });
+    forge.orchestrator = orchestrator;
+    return { forge, orchestrator, started, settled, runs };
+  }
+
+  it('returns 404 for an unknown task', async (t) => {
+    const { call } = await serve(t);
+    const { status, body } = await call('POST', '/api/tasks/nope/cancel');
+    assert.equal(status, 404);
+    assert.equal(body.ok, false);
+  });
+
+  it('cancels a queued coding task so it never starts', async (t) => {
+    const { forge, orchestrator, started } = codingForge();
+    const { call } = await serve(t, forge);
+    const task = forge.taskQueue.add(coding);
+    const failed = [];
+    forge.eventBus.on('task.failed', (e) => failed.push(e));
+
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/cancel`);
+
+    assert.equal(status, 200);
+    assert.equal(body.task.status, 'cancelled');
+    assert.equal(forge.taskQueue.get(task.id).status, 'cancelled');
+    assert.deepEqual(failed.map((e) => [e.task.id, e.status]), [[task.id, 'cancelled']]);
+
+    orchestrator._dispatchCoding();
+    assert.deepEqual(started, []);
+  });
+
+  it('aborts a running coding task with 202; it settles cancelled without publishing', async (t) => {
+    const { forge, orchestrator, settled, runs } = codingForge();
+    const { call } = await serve(t, forge);
+    const task = forge.taskQueue.add(coding);
+    orchestrator._dispatchCoding();
+    assert.equal(forge.taskQueue.get(task.id).status, 'executing');
+
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/cancel`);
+
+    assert.equal(status, 202);
+    assert.equal(body.task.id, task.id);
+    await Promise.all(runs);
+    assert.deepEqual(settled, ['cancelled']);
+    assert.equal(forge.taskQueue.get(task.id).status, 'cancelled');
+    assert.equal(forge.taskQueue.get(task.id).pr_url, null);
+  });
+
+  it('returns 409 for a finished coding task and for a text task', async (t) => {
+    const { forge } = codingForge();
+    const { call } = await serve(t, forge);
+    const done = forge.taskQueue.add(coding);
+    forge.taskQueue.updateStatus(done.id, 'failed');
+    const text = forge.taskQueue.add({ title: 'plain' });
+
+    for (const id of [done.id, text.id]) {
+      const { status, body } = await call('POST', `/api/tasks/${id}/cancel`);
+      assert.equal(status, 409);
+      assert.equal(body.ok, false);
+    }
+    assert.equal(forge.taskQueue.get(done.id).status, 'failed');
+    assert.equal(forge.taskQueue.get(text.id).status, 'queued');
+  });
+
+  it('returns 409 for an executing coding task with no run to abort', async (t) => {
+    const { forge } = codingForge();
+    const { call } = await serve(t, forge);
+    const task = forge.taskQueue.add(coding);
+    forge.taskQueue.updateStatus(task.id, 'executing');
+
+    const { status } = await call('POST', `/api/tasks/${task.id}/cancel`);
+    assert.equal(status, 409);
+    assert.equal(forge.taskQueue.get(task.id).status, 'executing');
+  });
+});
+
 describe('GET /api/agents', () => {
   it('lists the configured agents without their prompts', async (t) => {
     const { call } = await serve(t);
@@ -319,6 +436,14 @@ describe('auth enabled outside NODE_ENV=test', () => {
     const { call } = await serveWithAuth(t);
     const { status } = await call('GET', '/api/tasks', { headers: { Authorization: `Bearer ${SECRET}` } });
     assert.equal(status, 200);
+  });
+
+  it('guards POST /api/tasks/:id/cancel like the other task mutations', async (t) => {
+    const { forge, call } = await serveWithAuth(t);
+    const task = forge.taskQueue.add({ title: 'x' });
+    assert.equal((await call('POST', `/api/tasks/${task.id}/cancel`)).status, 401);
+    const authed = await call('POST', `/api/tasks/${task.id}/cancel`, { headers: { Authorization: `Bearer ${SECRET}` } });
+    assert.equal(authed.status, 409);
   });
 
   it('leaves GET /api/status open as a health check', async (t) => {
