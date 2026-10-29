@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { runCodingTask, executorConfig } from '../../src/execution/coding-runner.js';
+import { runCodingTask, decideApproval, executorConfig } from '../../src/execution/coding-runner.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
 
 const SHA = 'c'.repeat(40);
@@ -55,7 +55,7 @@ describe('runCodingTask', () => {
   });
 
   it('opens the PR when the gate passes and stores pr_url, step and spend', async () => {
-    const status = await runWith(async () => stoppedRun());
+    const status = await runWith(async () => stoppedRun(), { policy: { publish: 'allow', merge: 'deny' } });
 
     assert.equal(status, 'pr-opened');
     const stored = queue.get(task.id);

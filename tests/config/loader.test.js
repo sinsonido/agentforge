@@ -199,6 +199,40 @@ intake:
   });
 });
 
+describe('loadConfig autonomy', () => {
+  it('defaults to publish allow, merge approve', () => {
+    assert.deepEqual(loadConfig(write('no-autonomy.yml', '')).autonomy, { publish: 'allow', merge: 'approve' });
+  });
+
+  it('reads the autonomy block from agentforge.example.yml', () => {
+    assert.deepEqual(loadConfig(examplePath).autonomy, { publish: 'allow', merge: 'approve' });
+  });
+
+  it('keeps the default for an action the file leaves out', () => {
+    const { autonomy } = loadConfig(write('autonomy-deny.yml', 'autonomy:\n  merge: deny\n'));
+    assert.deepEqual(autonomy, { publish: 'allow', merge: 'deny' });
+  });
+
+  it('rejects an unknown action and a merge without approval', () => {
+    const path = write('autonomy-bad.yml', 'autonomy:\n  deploy: approve\n  merge: allow\n');
+    assert.throws(() => loadConfig(path), (err) => {
+      assert.match(err.message, /Invalid autonomy configuration/);
+      assert.match(err.message, /unknown action "deploy"; AgentForge performs: publish, merge/);
+      assert.match(err.message, /merge must be one of: approve, deny/);
+      return true;
+    });
+  });
+
+  it('rejects a rule that is not allow, approve or deny', () => {
+    assert.throws(() => loadConfig(write('autonomy-rule.yml', 'autonomy:\n  publish: maybe\n')),
+      /publish must be one of: allow, approve, deny/);
+  });
+
+  it('rejects a list', () => {
+    assert.throws(() => loadConfig(write('autonomy-list.yml', 'autonomy:\n  - publish\n')), /autonomy must be a mapping/);
+  });
+});
+
 describe('buildFromConfig', () => {
   it('returns empty registries for an empty config', () => {
     assert.deepEqual(buildFromConfig({}), { models: {}, agents: {}, rules: [] });

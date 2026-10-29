@@ -20,6 +20,7 @@ const EVENTS = [
   'task.queued',
   'task.assigned',
   'task.executing',
+  'task.needs_approval',
   'task.completed',
   'task.failed',
   'task.step_changed',

@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { PLAYBOOKS } from '../core/task-model.js';
+import { parseAutonomy } from '../core/autonomy.js';
 
 const DEFAULT_CONFIG = {
   project: { name: 'AgentForge Project', budget: 100 },
@@ -36,7 +37,19 @@ export function loadConfig(configPath = 'agentforge.yml') {
   const config = mergeDeep(DEFAULT_CONFIG, yaml.load(raw) || {});
   validateModelReferences(config);
   validateIntake(config.intake);
+  config.autonomy = validateAutonomy(config.autonomy);
   return config;
+}
+
+/**
+ * The `autonomy:` block as a full policy, every action with its rule.
+ * Throws when it names an unknown action or a rule the action does not take.
+ * @returns {import('../core/autonomy.js').Policy}
+ */
+export function validateAutonomy(raw) {
+  const parsed = parseAutonomy(raw);
+  if (!parsed.ok) throw new Error(`Invalid autonomy configuration: ${parsed.error}`);
+  return parsed.value;
 }
 
 /**
