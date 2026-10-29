@@ -8,7 +8,7 @@ import { hostRunner } from './host-runner.js';
  *
  * The state lives on the task as `babysit` and survives a restart:
  *
- *   branch      the PR's head branch, as GitHub reports it
+ *   branch      the PR's head branch, the task's own (names.js)
  *   dir         the clone the last harness run used; a fix round deletes it first
  *   max_rounds  how many fix rounds this task may run
  *   rounds      one per head AgentForge pushed: n 0 is the published head, n k the
@@ -22,11 +22,11 @@ import { hostRunner } from './host-runner.js';
  * @typedef {{ name: string, url: string|null }} FailedCheck
  * @typedef {{ n: number, head: string, ci: CiState, failing: FailedCheck[], started_at: number, finished_at: number|null }} Round
  * @typedef {'green'|'red'|'merged'|'closed'|'timeout'|'stopped'} Verdict
- * @typedef {{ branch: string|null, dir: string|null, max_rounds: number, rounds: Round[], verdict: Verdict|null }} Babysit
+ * @typedef {{ branch: string, dir: string|null, max_rounds: number, rounds: Round[], verdict: Verdict|null }} Babysit
  *
  * A check as `gh pr checks --json name,bucket,link` reports it.
  * @typedef {{ name: string, bucket: 'pass'|'fail'|'pending'|'skipping'|'cancel', link: string|null }} Check
- * @typedef {{ state: 'OPEN'|'MERGED'|'CLOSED', head: string, branch: string, checks: Check[] }} PrState
+ * @typedef {{ state: 'OPEN'|'MERGED'|'CLOSED', head: string, checks: Check[] }} PrState
  * @typedef {{ pr(url: string): Promise<PrState>, logTail(repo: string, url: string|null): Promise<string|null> }} CiReader
  */
 
@@ -76,8 +76,8 @@ export function ghCiReader({ checks = 'all', run = hostRunner } = {}) {
   };
   return {
     async pr(url) {
-      const view = JSON.parse(await run('gh', ['pr', 'view', url, '--json', 'state,headRefOid,headRefName']));
-      return { state: view.state, head: view.headRefOid, branch: view.headRefName, checks: view.state === 'OPEN' ? await listChecks(url) : [] };
+      const view = JSON.parse(await run('gh', ['pr', 'view', url, '--json', 'state,headRefOid']));
+      return { state: view.state, head: view.headRefOid, checks: view.state === 'OPEN' ? await listChecks(url) : [] };
     },
     async logTail(repo, url) {
       const job = /\/actions\/runs\/\d+\/job\/(\d+)/.exec(url ?? '')?.[1];
@@ -104,9 +104,9 @@ export function classify(checks) {
  * @param {Babysit|null} state
  * @returns {Babysit}
  */
-export function startRound(state, { n, head, dir, maxRounds }, now = Date.now()) {
+export function startRound(state, { n, head, dir, branch, maxRounds }, now = Date.now()) {
   const round = { n, head, ci: 'pending', failing: [], started_at: now, finished_at: null };
-  if (n === 0 || !state) return { branch: null, dir, max_rounds: maxRounds, rounds: [round], verdict: null };
+  if (n === 0 || !state) return { branch, dir, max_rounds: maxRounds, rounds: [round], verdict: null };
   return { ...state, dir, rounds: [...state.rounds, round] };
 }
 
@@ -122,14 +122,13 @@ export const withLastRound = (state, round) => ({ ...state, rounds: [...state.ro
  * @param {{ url: string, round: Round }} target
  * @param {{ ci: CiReader, timeoutMs: number, signal?: AbortSignal,
  *   wait?: (ms: number, signal?: AbortSignal) => Promise<unknown>, now?: () => number }} deps
- * @returns {Promise<{ outcome: 'pass'|'fail'|'merged'|'closed'|'timeout'|'aborted', branch?: string,
+ * @returns {Promise<{ outcome: 'pass'|'fail'|'merged'|'closed'|'timeout'|'aborted',
  *   failing?: FailedCheck[], checks?: number }>}
  */
 export async function watchCi({ url, round }, { ci, timeoutMs, signal, wait = delay, now = Date.now }) {
-  let branch;
   let lastSeen = null;
   for (let poll = 0; ; poll++) {
-    if (signal?.aborted) return { outcome: 'aborted', branch };
+    if (signal?.aborted) return { outcome: 'aborted' };
     let pr = null;
     try {
       pr = await ci.pr(url);
@@ -137,24 +136,23 @@ export async function watchCi({ url, round }, { ci, timeoutMs, signal, wait = de
       console.warn('[babysit] %s: %s', url, err.message);
     }
     if (pr) {
-      branch = pr.branch;
-      if (pr.state === 'MERGED') return { outcome: 'merged', branch };
-      if (pr.state === 'CLOSED') return { outcome: 'closed', branch };
+      if (pr.state === 'MERGED') return { outcome: 'merged' };
+      if (pr.state === 'CLOSED') return { outcome: 'closed' };
       const seen = pr.head === round.head ? classify(pr.checks) : 'pending';
       const names = pr.checks.map((c) => c.name).sort().join('\n');
       if (seen === 'fail') {
         const failing = pr.checks.filter((c) => c.bucket === 'fail' || c.bucket === 'cancel').map((c) => ({ name: c.name, url: c.link ?? null }));
-        return { outcome: 'fail', branch, failing, checks: pr.checks.length };
+        return { outcome: 'fail', failing, checks: pr.checks.length };
       }
-      if (seen === 'pass' && names === lastSeen) return { outcome: 'pass', branch, failing: [], checks: pr.checks.length };
-      if (seen === 'none' && now() - round.started_at >= NO_CHECKS_GRACE_MS) return { outcome: 'pass', branch, failing: [], checks: 0 };
+      if (seen === 'pass' && names === lastSeen) return { outcome: 'pass', failing: [], checks: pr.checks.length };
+      if (seen === 'none' && now() - round.started_at >= NO_CHECKS_GRACE_MS) return { outcome: 'pass', failing: [], checks: 0 };
       lastSeen = seen === 'pass' ? names : null;
     }
-    if (now() - round.started_at >= timeoutMs) return { outcome: 'timeout', branch };
+    if (now() - round.started_at >= timeoutMs) return { outcome: 'timeout' };
     try {
       await wait(POLL_SECONDS[Math.min(poll, POLL_SECONDS.length - 1)] * 1000, signal);
     } catch {
-      return { outcome: 'aborted', branch };
+      return { outcome: 'aborted' };
     }
   }
 }

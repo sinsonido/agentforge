@@ -1,3 +1,5 @@
+import { branchFor } from '../execution/names.js';
+
 /**
  * The autonomy policy: poteto-mode's Autonomy section, enforced on the host.
  * Reversible work proceeds. Merge waits for the operator.
@@ -43,7 +45,7 @@ export const ACTIONS = Object.freeze({
     next: 'merge',
     watched: true,
     summary: (task, { verdict }) =>
-      `push agentforge/${task.id} and open a PR into ${task.base} (${commits(verdict.commits.length)})`,
+      `push ${branchFor(task)} and open a PR into ${task.base} (${commits(verdict.commits.length)})`,
   },
   'push-fix': {
     rules: RULES,

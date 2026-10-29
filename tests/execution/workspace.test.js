@@ -42,8 +42,8 @@ describe('createWorkspaceManager', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('clones the task repo on agentforge/<taskId> with origin at the local mirror', async () => {
-    const { dir, home, branch } = await ws.prepare({ taskId: 't1', repo, base: 'master' });
+  it('clones the task repo on its branch with origin at the local mirror', async () => {
+    const { dir, home, branch } = await ws.prepare({ taskId: 't1', branch: 'agentforge/t1', repo, base: 'master' });
 
     assert.equal(dir, join(stateDir, 'tasks', 't1', 'repo'));
     assert.equal(home, join(stateDir, 'tasks', 't1', 'home'));
@@ -75,18 +75,18 @@ describe('createWorkspaceManager', () => {
   });
 
   it('resumes the existing clone on a second prepare and keeps its commits', async () => {
-    const { dir } = await ws.prepare({ taskId: 't1', repo, base: 'master' });
+    const { dir } = await ws.prepare({ taskId: 't1', branch: 'agentforge/t1', repo, base: 'master' });
 
     assert.equal(git(dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'agentforge/t1');
     assert.equal((await ws.evidence(dir, 'master')).length, 2);
   });
 
   it('replaces a clone left without its branch by a crashed prepare', async () => {
-    const { dir } = await ws.prepare({ taskId: 't2', repo, base: 'master' });
+    const { dir } = await ws.prepare({ taskId: 't2', branch: 'agentforge/t2', repo, base: 'master' });
     git(dir, 'checkout', '--detach');
     git(dir, 'branch', '-D', 'agentforge/t2');
 
-    const again = await ws.prepare({ taskId: 't2', repo, base: 'master' });
+    const again = await ws.prepare({ taskId: 't2', branch: 'agentforge/t2', repo, base: 'master' });
 
     assert.equal(git(again.dir, 'rev-parse', '--abbrev-ref', 'HEAD'), 'agentforge/t2');
   });
@@ -97,7 +97,7 @@ describe('createWorkspaceManager', () => {
     git(seed, 'commit', '-am', 'upstream change');
     git(seed, 'push', 'origin', 'HEAD:master');
 
-    const { dir } = await ws.prepare({ taskId: 't3', repo, base: 'master' });
+    const { dir } = await ws.prepare({ taskId: 't3', branch: 'agentforge/t3', repo, base: 'master' });
 
     assert.equal(git(dir, 'log', '-1', '--format=%s'), 'upstream change');
   });
@@ -110,7 +110,8 @@ describe('createWorkspaceManager', () => {
   });
 
   it('rejects a taskId that could escape the state directory', async () => {
-    await assert.rejects(ws.prepare({ taskId: '../x', repo, base: 'master' }), /invalid taskId/);
+    await assert.rejects(ws.prepare({ taskId: '../x', branch: 'agentforge/x', repo, base: 'master' }), /invalid taskId/);
+    await assert.rejects(ws.prepare({ taskId: 't9', branch: '../x', repo, base: 'master' }), /invalid branch/);
     await assert.rejects(ws.cleanup('../x'), /invalid taskId/);
   });
 });

@@ -27,6 +27,7 @@ function parse(name) {
 
 const task = {
   id: 't1',
+  handle: 't1-0a1b2c3d',
   kind: 'coding',
   repo: 'acme/widget',
   base: 'master',
@@ -154,7 +155,7 @@ describe('classifyToolCall', () => {
 
 describe('buildDockerArgs', () => {
   const base = {
-    task, dir: '/state/tasks/t1/repo', home: '/state/tasks/t1/home', uid: 1000, gid: 1000,
+    task, instance: 'af-main', dir: '/state/tasks/t1/repo', home: '/state/tasks/t1/home', uid: 1000, gid: 1000,
     image: 'node:24', claudeBin: '/bin/claude', pstackDir: '/pstack', model: 'sonnet', effort: 'medium',
     budgetUsd: 2, gitAuthor: { name: 'agentforge', email: 'agentforge@localhost' },
   };
@@ -168,7 +169,7 @@ describe('buildDockerArgs', () => {
       '/pstack:/opt/pstack:ro',
       '/state/tasks/t1/repo:/state/tasks/t1/repo',
     ]);
-    assert.deepEqual(args.slice(0, 6), ['run', '--rm', '--name', 'af-task-t1', '--user', '1000:1000']);
+    assert.deepEqual(args.slice(0, 8), ['run', '--rm', '--name', 'af-task-t1-0a1b2c3d', '--label', 'agentforge.instance=af-main', '--user', '1000:1000']);
     for (const flag of ['bypassPermissions', '--strict-mcp-config', 'project,local', 'CLAUDE_CODE_ENABLE_TODO_TOOLS=1', 'CLAUDE_CODE_TMPDIR=/home/agent/tmp']) {
       assert.ok(args.includes(flag), flag);
     }
@@ -258,7 +259,7 @@ describe('run (fake docker)', () => {
     const stepChanges = [];
     bus.on('task.agent_event', (e) => seen.push(e));
     bus.on('task.step_changed', (e) => stepChanges.push(e.step));
-    const replayTask = { ...task, id: 'replay1' };
+    const replayTask = { ...task, id: 'replay1', handle: 'replay1' };
 
     const result = await run(replayTask, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
@@ -293,7 +294,7 @@ describe('run (fake docker)', () => {
       return entry;
     };
 
-    await run({ ...task, id: 'rec1' }, {
+    await run({ ...task, id: 'rec1', handle: 'rec1' }, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok', eventBus: bus, recordEvent,
     });
@@ -304,7 +305,7 @@ describe('run (fake docker)', () => {
 
   it('prefers the OAuth token and never puts it in argv', async () => {
     fake({ mode: 'replay', stream: stream('no-commit') });
-    const result = await run({ ...task, id: 'token1', budget: 0.5 }, {
+    const result = await run({ ...task, id: 'token1', handle: 'token1', budget: 0.5 }, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok-secret', eventBus: new EventEmitter(),
     });
@@ -321,7 +322,7 @@ describe('run (fake docker)', () => {
     const bus = new EventEmitter();
     bus.once('task.agent_event', () => controller.abort());
 
-    const result = await run({ ...task, id: 'cancel1' }, {
+    const result = await run({ ...task, id: 'cancel1', handle: 'cancel1' }, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok', eventBus: bus, signal: controller.signal,
     });
@@ -334,7 +335,7 @@ describe('run (fake docker)', () => {
 
   it('cancels on timeout', async () => {
     fake({ mode: 'hang', stream: stream('cancelled'), linesBeforeHang: 1 });
-    const result = await run({ ...task, id: 'timeout1' }, {
+    const result = await run({ ...task, id: 'timeout1', handle: 'timeout1' }, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: docker,
       repoUrl: upstream, oauthToken: 'tok', eventBus: new EventEmitter(), timeoutMs: 300,
     });
@@ -343,7 +344,7 @@ describe('run (fake docker)', () => {
   });
 
   it('reports error when the harness exits without a result', async () => {
-    const result = await run({ ...task, id: 'err1' }, {
+    const result = await run({ ...task, id: 'err1', handle: 'err1' }, {
       stateDir: join(tmp, 'state'), pstackDir, claudeBin: '/bin/claude', dockerBin: join(tmp, 'missing-docker'),
       repoUrl: upstream, oauthToken: 'tok', eventBus: new EventEmitter(),
     });

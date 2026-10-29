@@ -148,7 +148,7 @@ describe('autonomy gate', () => {
     assert.equal(published.length, 0);
     const { approval } = queue.get(task.id);
     assert.equal(approval.action, 'publish');
-    assert.equal(approval.summary, `push agentforge/${task.id} and open a PR into master (1 commit)`);
+    assert.equal(approval.summary, `push agentforge/${task.handle} and open a PR into master (1 commit)`);
     assert.equal(approval.payload.dir, '/state/tasks/t1/repo');
     assert.deepEqual(approval.payload.verdict.commits, [{ sha: SHA, subject: 'fix: parser' }]);
 

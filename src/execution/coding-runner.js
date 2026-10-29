@@ -9,6 +9,7 @@ import { verdict } from '../core/playbook.js';
 import { TERMINAL_STATUSES } from '../core/task-model.js';
 import { createStreamTrail, gateEntries, prEntry, readDecisionLogs, verdictEvidence } from '../core/trail.js';
 import { ciEntry, fixInstruction, startRound, watchCi, withLastRound } from './babysit.js';
+import { branchFor } from './names.js';
 
 /**
  * The life of one coding task after the orchestrator picks it:
@@ -256,7 +257,6 @@ async function babysitLeg(task, deps) {
 
   if (round.ci === 'pending') {
     const seen = await watchCi({ url: task.pr_url, round }, { ...sitter, signal });
-    if (seen.branch) state = { ...state, branch: seen.branch };
     switch (seen.outcome) {
       case 'aborted':
         return signal?.reason === SHUTDOWN
@@ -343,7 +343,7 @@ async function proceed(task, action, payload, deps, fields, approved = false) {
     if (spec.watched && deps.babysit) {
       const { maxRounds, now = Date.now } = deps.babysit;
       const n = name === FIRST_ACTION ? 0 : payload.round;
-      return ['ci-watch', { ...extra, babysit: startRound(task.babysit, { n, head: done.head, dir: payload.dir, maxRounds }, now()) }];
+      return ['ci-watch', { ...extra, babysit: startRound(task.babysit, { n, head: done.head, dir: payload.dir, branch: branchFor(task), maxRounds }, now()) }];
     }
     payload = done.next;
   }

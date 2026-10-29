@@ -84,7 +84,11 @@ export async function createAgentForge(configPath) {
     const babysit = config.babysit ?? BABYSIT_DEFAULTS;
     const host = {
       queue: taskQueue, publish, merge, pushFix, policy: config.autonomy,
-      execute: (t, opts) => runExecutor(t, { ...options, ...opts, recordEvent: (id, event) => db.appendTaskEvent(id, event) }),
+      execute: (t, opts) => runExecutor(t, {
+        ...options, ...opts,
+        instance: process.env.AGENTFORGE_INSTANCE,
+        recordEvent: (id, event) => db.appendTaskEvent(id, event),
+      }),
       babysit: { ci: ghCiReader({ checks: babysit.checks }), maxRounds: babysit.max_rounds, timeoutMs: babysit.timeout_minutes * 60_000 },
     };
     coding = {

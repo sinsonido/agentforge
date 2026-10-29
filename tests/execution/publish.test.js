@@ -5,7 +5,7 @@ import { TaskQueue } from '../../src/core/task-queue.js';
 
 const SHA1 = 'a'.repeat(40);
 const SHA2 = 'b'.repeat(40);
-const BRANCH = 'agentforge/t1';
+let BRANCH;
 const REMOTE = 'https://github.com/acme/app.git';
 
 function fakeGitHub({ remoteSha = '', prs = [] } = {}) {
@@ -21,7 +21,7 @@ function fakeGitHub({ remoteSha = '', prs = [] } = {}) {
         state.remoteSha = args.at(-1).split(':')[0];
         return '';
       case 'gh pr list':
-        return JSON.stringify(state.prs.map((url) => ({ url })));
+        return JSON.stringify(state.prs.map((pr) => (typeof pr === 'string' ? { url: pr, state: 'OPEN' } : pr)));
       case 'gh pr create': {
         const url = `https://github.com/acme/app/pull/${100 + state.prs.length}`;
         state.prs.push(url);
@@ -54,7 +54,34 @@ describe('publish', () => {
       instruction: 'Fix it', issue: 42, playbook: 'bug-fix',
     }).task;
     queue.updateStatus(task.id, 'completed', { cost: 1.234, tokens_in: 1200, tokens_out: 340 });
+    BRANCH = `agentforge/${task.handle}`;
   });
+
+  it('pushes to a branch named by the task handle, not the per-database id', async () => {
+    const gh = fakeGitHub();
+    await publish({ task, clone, verdict, queue, run: gh.run });
+    assert.match(BRANCH, /^agentforge\/t1-[0-9a-f]{8}$/);
+    assert.equal(flag(gh.calls.find((c) => c.args[1] === 'create').args, '--head'), BRANCH);
+  });
+
+  it('refuses to push over a remote branch at a commit this run did not make', async () => {
+    const foreign = 'f'.repeat(40);
+    const gh = fakeGitHub({ remoteSha: foreign });
+    await assert.rejects(publish({ task, clone, verdict, queue, run: gh.run }), /refusing to publish, .* is at fffffff, a commit this run did not make/);
+    assert.equal(gh.state.remoteSha, foreign);
+    assert.equal(gh.calls.some((c) => c.cmd === 'gh' || c.args[0] === 'push'), false);
+    assert.equal(queue.get('t1').pr_url, null);
+  });
+
+  for (const state of ['MERGED', 'CLOSED']) {
+    it(`never adopts a ${state.toLowerCase()} PR on the branch and pushes nothing`, async () => {
+      const gh = fakeGitHub({ remoteSha: SHA1, prs: [{ url: 'https://github.com/acme/app/pull/258', state }] });
+      await assert.rejects(publish({ task, clone, verdict, queue, run: gh.run }), /already had https:\/\/github.com\/acme\/app\/pull\/258/);
+      assert.equal(gh.state.remoteSha, SHA1);
+      assert.equal(gh.calls.some((c) => c.args[0] === 'push' || c.args[1] === 'create'), false);
+      assert.equal(queue.get('t1').pr_url, null);
+    });
+  }
 
   it('pushes the last checked commit to GitHub and opens a PR that closes the issue', async () => {
     const gh = fakeGitHub();
