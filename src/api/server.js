@@ -190,6 +190,33 @@ function buildRouter(forge) {
     }
   });
 
+  // ── POST /api/tasks/:id/cancel ───────────────────────────────────────────
+  /**
+   * Cancel a coding task. A queued one ends `cancelled` now and never starts (200).
+   * A running one is aborted and settles `cancelled` once its container stops (202);
+   * the coding runner emits `task.failed` then. Any other task cannot be cancelled (409).
+   */
+  router.post('/tasks/:id/cancel', (req, res) => {
+    try {
+      const { id } = req.params;
+      const task = forge.taskQueue.get(id);
+      if (!task) {
+        return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
+      }
+      if (task.kind === 'coding' && task.status === 'queued') {
+        forge.taskQueue.updateStatus(id, 'cancelled', { result: 'cancelled (api)' });
+        forge.eventBus.emit('task.failed', { task, status: 'cancelled', error: task.result });
+        return res.json({ ok: true, task });
+      }
+      if (task.kind === 'coding' && forge.orchestrator?.cancelTask(id)) {
+        return res.status(202).json({ ok: true, task });
+      }
+      res.status(409).json({ ok: false, error: `Task '${id}' is not a queued or running coding task (status: ${task.status})` });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── GET /api/agents ──────────────────────────────────────────────────────
   /**
    * List the configured agents.
