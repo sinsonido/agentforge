@@ -74,6 +74,8 @@ Providers receive no `tools` today, so `tool_calls` is always empty in practice.
 **EventBus events emitted by wired code** (use `eventBus.emit / .on / .once`):
 ```
 task.queued | task.executing | task.completed | task.failed   → { task, ... }
+task.agent_event  → { taskId, event }          (execution/coding-executor.js, per parsed harness stream event; WS forwards it with the same seq)
+task.step_changed → { taskId, step }           (execution/coding-executor.js, when the agent's playbook step changes; WS forwards it)
 task.status_changed | agent.config_updated     (from the REST API)
 agent.paused | agent.resumed                   (from the orchestrator on quota events)
 quota.throttled | quota.exhausted | quota.reset
