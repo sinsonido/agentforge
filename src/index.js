@@ -150,13 +150,28 @@ function describeAgentEvent(event) {
   }
 }
 
+/**
+ * On SIGINT or SIGTERM: stop the orchestrator, wait for its running coding tasks
+ * to stop their containers and end cancelled, then close the database and exit.
+ */
+export function exitOnSignals(forge, cleanup = () => {}) {
+  let stopping = false;
+  const onSignal = async (signal) => {
+    if (stopping) return;
+    stopping = true;
+    console.log('\n[agentforge] %s: shutting down...', signal);
+    cleanup();
+    await forge.orchestrator.stop();
+    forge.db?.close();
+    process.exit(0);
+  };
+  process.on('SIGINT', onSignal);
+  process.on('SIGTERM', onSignal);
+}
+
 // Run directly
 if (process.argv[1] && process.argv[1].endsWith('index.js')) {
   const forge = await createAgentForge();
   forge.orchestrator.start();
-
-  process.on('SIGINT', () => {
-    forge.orchestrator.stop();
-    process.exit(0);
-  });
+  exitOnSignals(forge);
 }
