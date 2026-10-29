@@ -71,3 +71,29 @@ export interface TrailEntry {
 
 export const taskTrail = (taskId: string) =>
   request<{ ok: boolean; trail: TrailEntry[] }>(`/tasks/${encodeURIComponent(taskId)}/trail`)
+
+/** A host action waiting for, or decided by, the operator (see src/core/autonomy.js). */
+export interface Approval {
+  action: 'publish' | 'merge'
+  summary: string
+  requested_at: number
+  decision: 'approved' | 'rejected' | null
+  decided_by: string | null
+  decided_at: number | null
+  reason: string | null
+  error?: string
+}
+
+export type ApprovalChoice = 'approve' | 'reject'
+
+/** The task's approval when one waits for the operator, else null. */
+export const pendingApproval = (task: object): Approval | null => {
+  const { status, approval } = task as { status?: string; approval?: Approval | null }
+  return status === 'needs-approval' && approval && approval.decision == null ? approval : null
+}
+
+export const decideTask = (taskId: string, choice: ApprovalChoice, reason?: string) =>
+  request<{ ok: boolean; status: string }>(`/tasks/${encodeURIComponent(taskId)}/${choice}`, {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  })
