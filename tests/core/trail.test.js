@@ -118,15 +118,15 @@ describe('renderTrail', () => {
     const md = renderTrail([
       entry(1, 'status', 'queued'),
       entry(2, 'gate', 'pass commits ahead: 1 commit ahead of base', { gate: 'commits ahead', pass: true }),
-      entry(3, 'decision', 'ping @octocat <script> a|b', { phase: 'frame', why: 'because' }),
+      entry(3, 'decision', 'ping @octocat <script> a|b c\\|d', { phase: 'frame', why: 'because' }),
     ]);
 
     assert.match(md, /^## Decision trail/);
     assert.match(md, /- pass commits ahead: 1 commit ahead of base/);
-    assert.match(md, /- \*\*frame\*\* ping @&#8203;octocat &lt;script> a\\\|b\. Why: because\./);
+    assert.match(md, /- \*\*frame\*\* ping @&#8203;octocat &lt;script> a\\\|b c\\\\\\\|d\. Why: because\./);
     assert.match(md, /<details><summary>Full trail \(3 entries\)<\/summary>/);
     assert.match(md, /\| 1 \| 09:00:00 \| status \| queued \|/);
-    assert.doesNotMatch(md, /@octocat|<script>/);
+    assert.ok(!md.includes('@octocat') && !md.includes('<script>'), 'no live mention or tag');
   });
 
   it('collapses decisions past the first ten and says when there are none', () => {

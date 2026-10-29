@@ -142,7 +142,11 @@ export async function readDecisionLogs(dir) {
 }
 
 /** Agent-written text in a PR body: no HTML, no @mentions, no table breaks. */
-const inert = (s) => String(s).replace(/</g, '&lt;').replace(/@(?=\w)/g, '@&#8203;').replace(/\|/g, '\\|');
+const inert = (s) => String(s)
+  .replace(/\\/g, '\\\\')
+  .replace(/</g, '&lt;')
+  .replace(/@(?=\w)/g, '@&#8203;')
+  .replace(/\|/g, '\\|');
 
 function decisionLine({ summary, evidence }) {
   const e = evidence ?? {};
