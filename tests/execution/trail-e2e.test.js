@@ -49,7 +49,7 @@ describe('decision trail of a coding task', () => {
     rmSync(tmp, { recursive: true, force: true });
   });
 
-  async function runFixTask(name, fakeDocker) {
+  async function runFixTask(name, fakeDocker, issue = 7) {
     const root = join(tmp, name);
     mkdirSync(root);
     const upstream = join(root, 'upstream.git');
@@ -73,7 +73,7 @@ describe('decision trail of a coding task', () => {
     const queue = new TaskQueue({ store: db });
     const task = queue.admit({
       kind: 'coding', title: 'Fix sum', repo: 'acme/widget', base: 'master', instruction: 'sum(2, 3) returns -1',
-      issue: 7, playbook: 'bug-fix', setup_command: 'npm ci', test_command: 'npm test',
+      issue, playbook: 'bug-fix', setup_command: 'npm ci', test_command: 'npm test',
     }).task;
     const bus = new EventEmitter();
     let body = null;
@@ -139,11 +139,11 @@ describe('decision trail of a coding task', () => {
     writeFileSync(noSkip, readFileSync(join(fixtures, 'agent-streams', 'two-commits.jsonl'), 'utf8')
       .split('\n').filter((l) => !l.includes(skip)).join('\n'));
 
-    const { status, task, body } = await runFixTask('without-log', { stream: noSkip });
+    const { status, task, body } = await runFixTask('without-log', { stream: noSkip }, 8);
 
-    assert.equal(status, 'pr-opened');
+    assert.equal(status, 'needs-approval');
     const trail = db.getTrail(task.id);
-    assert.deepEqual(trail.filter((e) => e.kind === 'decision'), []);
+    assert.deepEqual(trail.filter((e) => e.kind === 'decision' && e.evidence.source !== 'policy'), []);
     assert.ok(trail.filter((e) => e.kind === 'gate').every((e) => e.evidence.pass), 'every gate passes');
     assert.match(body, /\*\*Decisions\*\*\n\nThe agent left no decision log\./);
   });
