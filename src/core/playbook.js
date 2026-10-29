@@ -46,6 +46,33 @@ export async function readPlaybook(pstackDir, name) {
 }
 
 /**
+ * The checks of the evidence gate, in the order they are reported. Each one
+ * answers pass or fail and says why in a sentence.
+ */
+const GATE_CHECKS = [
+  {
+    gate: 'not cancelled',
+    check: ({ cancelled }) => [!cancelled, cancelled ? 'the run was cancelled' : 'the run was not cancelled'],
+  },
+  {
+    gate: 'commits ahead',
+    check: ({ commits }) => [commits.length > 0, commits.length
+      ? `${commits.length} commit${commits.length === 1 ? '' : 's'} ahead of base`
+      : 'no commit ahead of base'],
+  },
+  {
+    gate: 'clean tree',
+    check: ({ uncommitted }) => [!uncommitted, uncommitted ? 'uncommitted changes in the clone' : 'no uncommitted tracked changes'],
+  },
+  {
+    gate: 'tests after last edit',
+    check: ({ fresh, testCommand }) => [Boolean(fresh), fresh
+      ? `\`${testCommand}\` passed after the last edit${fresh.counts?.pass != null ? ` (${fresh.counts.pass} passed, ${fresh.counts.fail ?? 0} failed)` : ''}`
+      : `\`${testCommand}\` did not pass after the last edit`],
+  },
+];
+
+/**
  * The evidence gate between a stopped harness run and a pushed branch.
  *
  * Passes only when the run was not cancelled, the clone has at least one commit
@@ -58,22 +85,23 @@ export async function readPlaybook(pstackDir, name) {
  *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean, counts?: object|null }>,
  *   lastEditSeq: number, uncommitted: boolean, cancelled: boolean, testCommand: string }} evidence
  * @returns {{ pass: boolean, cancelled: boolean, commits: Array<{ sha: string, subject: string }>,
- *   testRun: { command: string, sha: string, counts: object|null } | null, reasons: string[] }}
+ *   testRun: { command: string, sha: string, counts: object|null } | null,
+ *   checks: Array<{ gate: string, pass: boolean, why: string }>, reasons: string[] }}
  */
 export function verdict({ commits, observedTestRuns, lastEditSeq, uncommitted, cancelled, testCommand }) {
   const fresh = observedTestRuns.filter((r) => r.passed && r.seq > lastEditSeq && r.command === testCommand).at(-1);
   const head = commits.at(-1);
-  const reasons = [
-    cancelled && 'the run was cancelled',
-    !commits.length && 'no commit ahead of base',
-    uncommitted && 'uncommitted changes in the clone',
-    !fresh && `\`${testCommand}\` did not pass after the last edit`,
-  ].filter(Boolean);
+  const checks = GATE_CHECKS.map(({ gate, check }) => {
+    const [pass, why] = check({ commits, uncommitted, cancelled, fresh, testCommand });
+    return { gate, pass, why };
+  });
+  const reasons = checks.filter((c) => !c.pass).map((c) => c.why);
   return {
     pass: reasons.length === 0,
     cancelled,
     commits,
     testRun: fresh && head ? { command: fresh.command, sha: head.sha, counts: fresh.counts ?? null } : null,
+    checks,
     reasons,
   };
 }

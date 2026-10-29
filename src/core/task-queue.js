@@ -1,7 +1,9 @@
 import eventBus from './event-bus.js';
 import { TERMINAL_STATUSES, admissionKey } from './task-model.js';
+import { statusEntry } from './trail.js';
 
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+const BAD_ENDS = ['failed', 'cancelled'];
 const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', ...TERMINAL_STATUSES];
 
 // What a task loaded from the store becomes when a new process boots. Statuses not
@@ -93,6 +95,7 @@ export class TaskQueue {
       }),
     };
     this._store?.saveTask(task);
+    this.appendTrail(task.id, statusEntry(null, 'queued'));
     this._tasks.set(task.id, task);
     eventBus.emit('task.queued', { task });
     return { task, created: true };
@@ -124,12 +127,28 @@ export class TaskQueue {
     const task = this._tasks.get(id);
     if (!task) throw new Error(`Task ${id} not found`);
     if (!VALID_STATUSES.includes(status)) throw new Error(`Invalid status: ${status}`);
+    const from = task.status;
     task.status = status;
     Object.assign(task, extra);
     if (status === 'assigned') task.assigned_at = Date.now();
     if (TERMINAL_STATUSES.includes(status)) task.completed_at = Date.now();
     this._store?.saveTask(task);
+    if (from !== status) this.appendTrail(id, statusEntry(from, status, BAD_ENDS.includes(status) ? extra.result ?? null : null));
     return task;
+  }
+
+  /**
+   * Append to the task's decision trail. The trail lives only in the store;
+   * a queue without one keeps none.
+   * @returns {import('./trail.js').TrailEntry|null}
+   */
+  appendTrail(id, entry) {
+    return this._store ? this._store.appendTrail(id, entry) : null;
+  }
+
+  /** @returns {import('./trail.js').TrailEntry[]} */
+  trail(id) {
+    return this._store ? this._store.getTrail(id) : [];
   }
 
   getByStatus(status) {

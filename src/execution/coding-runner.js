@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import defaultEventBus from '../core/event-bus.js';
 import { verdict } from '../core/playbook.js';
+import { createStreamTrail, gateEntries, prEntry, readDecisionLogs, verdictEvidence } from '../core/trail.js';
 
 /**
  * The life of one coding task after the orchestrator picks it:
@@ -11,6 +12,10 @@ import { verdict } from '../core/playbook.js';
  *                      → cancelled   aborted or timed out; never published
  *
  * Each row is the final queue write and the event that announces it.
+ *
+ * Along the way it writes the task's decision trail: steps and skipped steps
+ * from the agent stream, the agent's own decision log from the clone, each
+ * gate check, and the commits, test run and PR it accepted.
  */
 const FINAL = Object.freeze({
   'pr-opened': 'task.completed',
@@ -54,9 +59,10 @@ export function executorConfig(cfg) {
  *
  * @param {object} task the queue's live task object
  * @param {{
- *   queue: { updateStatus(id: string, status: string, extra?: object): object },
+ *   queue: { updateStatus(id: string, status: string, extra?: object): object,
+ *            appendTrail(id: string, entry: object): object|null, trail(id: string): object[] },
  *   execute: (task: object, opts: { signal?: AbortSignal }) => Promise<object>,
- *   publish: (opts: { task: object, clone: { dir: string }, verdict: object, queue: object }) => Promise<string>,
+ *   publish: (opts: { task: object, clone: { dir: string }, verdict: object, queue: object, trail: object[] }) => Promise<string>,
  *   signal?: AbortSignal,
  *   eventBus?: import('node:events').EventEmitter,
  * }} deps
@@ -65,19 +71,21 @@ export function executorConfig(cfg) {
 export async function runCodingTask(task, { queue, execute, publish, signal, eventBus = defaultEventBus }) {
   queue.updateStatus(task.id, 'executing');
   eventBus.emit('task.executing', { task });
-  const [status, extra] = await settle(task, { queue, execute, publish, signal });
+  const [status, extra] = await settle(task, { queue, execute, publish, signal, eventBus });
   queue.updateStatus(task.id, status, extra);
   eventBus.emit(FINAL[status], { task, status, error: status === 'pr-opened' ? undefined : extra.result });
   return status;
 }
 
-async function settle(task, { queue, execute, publish, signal }) {
+async function settle(task, { queue, execute, publish, signal, eventBus }) {
+  const record = (entries) => entries.forEach((e) => queue.appendTrail(task.id, e));
   let run;
   try {
-    run = await execute(task, { signal });
+    run = await followStream(task, eventBus, record, () => execute(task, { signal }));
   } catch (err) {
     return ['failed', { result: err.message }];
   }
+  if (run.dir) record(await readDecisionLogs(run.dir));
   const usage = run.usage ?? {};
   const spend = {
     cost: run.costUsd ?? 0,
@@ -92,12 +100,30 @@ async function settle(task, { queue, execute, publish, signal }) {
   if (run.outcome !== 'stopped') return ['failed', { ...spend, result: run.error }];
 
   const gate = verdict({ ...run, testCommand: task.test_command, cancelled: false });
+  record(gateEntries(gate));
   if (!gate.pass) return ['failed', { ...spend, result: `evidence gate: ${gate.reasons.join('; ')}` }];
+  record(verdictEvidence(gate));
 
   try {
-    const url = await publish({ task, clone: { dir: run.dir }, verdict: gate, queue });
+    const url = await publish({ task, clone: { dir: run.dir }, verdict: gate, queue, trail: queue.trail(task.id) });
+    record([prEntry(url)]);
     return ['pr-opened', { ...spend, pr_url: url, result: url }];
   } catch (err) {
     return ['failed', { ...spend, result: `publish: ${err.message}` }];
+  }
+}
+
+/** Record step changes and agent decisions for `task` while `fn` runs. */
+async function followStream(task, eventBus, record, fn) {
+  const stream = createStreamTrail();
+  const onAgent = ({ taskId, event }) => taskId === task.id && record(stream.push(event));
+  const onStep = ({ taskId, step }) => taskId === task.id && step != null && record([stream.step(step)]);
+  eventBus.on('task.agent_event', onAgent);
+  eventBus.on('task.step_changed', onStep);
+  try {
+    return await fn();
+  } finally {
+    eventBus.off('task.agent_event', onAgent);
+    eventBus.off('task.step_changed', onStep);
   }
 }

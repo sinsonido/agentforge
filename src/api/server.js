@@ -166,6 +166,23 @@ function buildRouter(forge) {
     }
   });
 
+  // ── GET /api/tasks/:id/trail ─────────────────────────────────────────────
+  /**
+   * The task's decision trail in order: status transitions, playbook steps,
+   * evidence-gate checks, agent decisions and evidence links.
+   */
+  router.get('/tasks/:id/trail', (req, res) => {
+    try {
+      const { id } = req.params;
+      if (!forge.taskQueue.get(id) && !forge.db?.getTask(id)) {
+        return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
+      }
+      res.json({ ok: true, trail: forge.db?.getTrail(id) ?? [] });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
   // ── GET /api/tasks/:id/events ────────────────────────────────────────────
   /**
    * Replay a task's agent transcript: stored events with seq > `after` (default 0),

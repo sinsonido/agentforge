@@ -4,20 +4,17 @@ import { ArrowLeft, ExternalLink } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
+import { TaskTrail } from '@/components/tasks/TaskTrail'
 import { TranscriptEntry } from '@/components/tasks/TranscriptEntry'
 import { useApi } from '@/hooks/useApi'
 import { useTaskTranscript } from '@/hooks/useTaskTranscript'
 import { useWebSocket } from '@/hooks/useWebSocket'
 import { useWebSocketContext } from '@/contexts/WebSocketContext'
 import { api } from '@/lib/api'
+import { concernsTask } from '@/lib/ws'
 import type { Task } from '@/types/api'
 
 const CANCELLABLE: Task['status'][] = ['queued', 'executing']
-
-function concerns(data: unknown, id: string): boolean {
-  const d = data as { taskId?: string; task?: { id?: string } } | null
-  return d?.taskId === id || d?.task?.id === id
-}
 
 function TaskDetail({ id }: { id: string }) {
   const { data, error: taskError, loading, refresh } = useApi(() => api.task(id), [id])
@@ -29,7 +26,7 @@ function TaskDetail({ id }: { id: string }) {
   const { status } = useWebSocketContext()
 
   useWebSocket(
-    (msg) => { if (concerns(msg.data, id)) void refresh() },
+    (msg) => { if (concernsTask(msg.data, id)) void refresh() },
     (msg) => msg.event.startsWith('task.') && msg.event !== 'task.agent_event',
   )
 
@@ -99,6 +96,11 @@ function TaskDetail({ id }: { id: string }) {
           <p className="text-xs text-muted-foreground break-words">{task.result}</p>
         )}
       </header>
+
+      <section className="space-y-2">
+        <h3 className="text-sm font-semibold text-muted-foreground">Decision trail</h3>
+        <TaskTrail taskId={id} />
+      </section>
 
       <section className="space-y-2">
         <h3 className="text-sm font-semibold text-muted-foreground">Transcript</h3>

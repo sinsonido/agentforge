@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { CODING_FIELDS, TERMINAL_STATUSES } from '../core/task-model.js';
+import { boundEntry } from '../core/trail.js';
 
 // Schema upgrades, applied in order. PRAGMA user_version counts how many have run,
 // so an existing DB file gets only the ones it is missing.
@@ -35,6 +36,15 @@ const MIGRATIONS = [
      event TEXT NOT NULL,
      PRIMARY KEY (task_id, seq)
    ) WITHOUT ROWID;`,
+  `CREATE TABLE task_trail (
+     task_id TEXT NOT NULL,
+     seq INTEGER NOT NULL,
+     at INTEGER NOT NULL,
+     kind TEXT NOT NULL,
+     summary TEXT NOT NULL,
+     evidence TEXT,
+     PRIMARY KEY (task_id, seq)
+   );`,
 ];
 
 /** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
@@ -154,6 +164,12 @@ export class AgentForgeDB {
         SELECT COALESCE(MAX(CAST(SUBSTR(id, 2) AS INTEGER)), 0) AS seq FROM tasks
         WHERE id GLOB 't[0-9]*' AND NOT SUBSTR(id, 2) GLOB '*[^0-9]*'
       `),
+      appendTrail: this.db.prepare(`
+        INSERT INTO task_trail (task_id, seq, at, kind, summary, evidence)
+        VALUES (@task_id, (SELECT COALESCE(MAX(seq), 0) + 1 FROM task_trail WHERE task_id = @task_id), @at, @kind, @summary, @evidence)
+        RETURNING seq, at, kind, summary, evidence
+      `),
+      getTrail: this.db.prepare('SELECT seq, at, kind, summary, evidence FROM task_trail WHERE task_id = ? ORDER BY seq'),
       insertCost: this.db.prepare(`
         INSERT INTO cost_records (project_id, agent_id, model, tokens_in, tokens_out, cost)
         VALUES (@project_id, @agent_id, @model, @tokens_in, @tokens_out, @cost)
@@ -255,6 +271,27 @@ export class AgentForgeDB {
     return this._stmts.getTaskHistory.all(limit).map(rowToTask);
   }
 
+  // ─── Decision trail ──────────────────────────────────
+
+  /**
+   * Append one entry to a task's trail. `seq` counts from 1 per task.
+   * @param {string} taskId
+   * @param {import('../core/trail.js').TrailInput} entry
+   * @returns {import('../core/trail.js').TrailEntry}
+   */
+  appendTrail(taskId, entry) {
+    const { kind, summary, evidence } = boundEntry(entry);
+    const row = this._stmts.appendTrail.get({
+      task_id: taskId, at: Date.now(), kind, summary, evidence: evidence ? JSON.stringify(evidence) : null,
+    });
+    return rowToTrail(row);
+  }
+
+  /** @returns {import('../core/trail.js').TrailEntry[]} the task's trail in order */
+  getTrail(taskId) {
+    return this._stmts.getTrail.all(taskId).map(rowToTrail);
+  }
+
   // ─── Cost operations ─────────────────────────────────
 
   /** Record a cost entry */
@@ -334,6 +371,10 @@ export class AgentForgeDB {
   close() {
     this.db.close();
   }
+}
+
+function rowToTrail(row) {
+  return { ...row, evidence: row.evidence ? JSON.parse(row.evidence) : null };
 }
 
 function rowToTask(row) {
