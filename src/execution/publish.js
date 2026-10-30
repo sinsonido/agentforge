@@ -1,6 +1,7 @@
 import { renderTrail } from '../core/trail.js';
 import { hostRunner } from './host-runner.js';
 import { branchFor } from './names.js';
+import { verdictAt } from './verify.js';
 
 /** @typedef {import('./host-runner.js').Runner} Runner */
 
@@ -80,15 +81,38 @@ export async function pushFix({ task, clone, verdict, branch, run = hostRunner }
 }
 
 /**
- * Squash-merge the task's PR, or do nothing when it is already merged.
- * AgentForge calls this only after the operator approved the merge.
- * @param {{ url: string, run?: Runner }} opts
+ * Squash-merge the task's PR at the head a passing verification verdict covers,
+ * or do nothing when it is already merged. AgentForge calls this only after the
+ * operator approved the merge. Reads the PR head right before merging and passes
+ * it to `--match-head-commit`, so a push in between makes GitHub refuse too.
+ * Throws a MergeRefused when no passing verdict covers the current head:
+ * `head-moved` when the head moved past the one AgentForge last knew, else `no-verdict`.
+ * @param {{ url: string, verification: import('./verify.js').Verification|null, run?: Runner }} opts
  */
-export async function merge({ url, run = hostRunner }) {
-  const { state } = JSON.parse(await run('gh', ['pr', 'view', url, '--json', 'state']));
+export async function merge({ url, verification, run = hostRunner }) {
+  const { state, headRefOid: head } = JSON.parse(await run('gh', ['pr', 'view', url, '--json', 'state,headRefOid']));
   if (state === 'MERGED') return;
   if (state !== 'OPEN') throw new Error(`${url} is ${String(state).toLowerCase()}`);
-  await run('gh', ['pr', 'merge', url, '--squash']);
+  const verdict = verdictAt(verification, head);
+  if (!verdict?.pass) {
+    const moved = !verdict && verification?.head != null && verification.head !== head;
+    const why = verdict ? `the verdict at ${head.slice(0, 7)} failed`
+      : moved ? `the head moved from ${verification.head.slice(0, 7)} to ${head.slice(0, 7)} after verification`
+        : `no verification verdict at ${head.slice(0, 7)}`;
+    throw new MergeRefused(`refusing to merge ${url}: ${why}`, moved ? 'head-moved' : 'no-verdict', head);
+  }
+  await run('gh', ['pr', 'merge', url, '--squash', '--match-head-commit', head]);
+}
+
+/** Merge would land a head that no passing verdict covers. */
+export class MergeRefused extends Error {
+  /** @param {string} message @param {'head-moved'|'no-verdict'} reason @param {string} head */
+  constructor(message, reason, head) {
+    super(message);
+    this.name = 'MergeRefused';
+    this.reason = reason;
+    this.head = head;
+  }
 }
 
 const passSummary =(counts) => (counts?.pass != null ? `: ${counts.pass} passed, ${counts.fail ?? 0} failed` : '');

@@ -5,7 +5,7 @@ import { statusEntry } from './trail.js';
 const PRIORITY_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 // Statuses whose trail entry carries the task's `result` as the reason.
 const REASONED = ['failed', 'cancelled', 'needs-approval'];
-const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', 'needs-approval', 'ci-watch', 'fixing', ...TERMINAL_STATUSES];
+const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'paused_budget', 'needs-approval', 'ci-watch', 'fixing', 'verifying', ...TERMINAL_STATUSES];
 
 // What a task loaded from the store becomes when a new process boots. Statuses not
 // listed are kept. An `executing` task lost its run with the previous process; its side
@@ -14,12 +14,14 @@ const VALID_STATUSES = ['queued', 'assigned', 'executing', 'waiting_quota', 'pau
 // A `needs-approval` task keeps waiting: its pending approval is stored with it.
 // A `ci-watch` task keeps its CI rounds and the orchestrator resumes the watch. A `fixing`
 // task goes back to `ci-watch`: its last round is still red, so the fix round runs again
-// on a fresh clone of the PR branch.
+// on a fresh clone of the PR branch. A `verifying` task goes back to `ci-watch` too: its
+// head has no verdict yet, so the watch hands it to a fresh verification again.
 const ON_BOOT = {
   executing: { status: 'failed', extra: { result: 'interrupted' } },
   assigned: { status: 'queued' },
   waiting_quota: { status: 'queued' },
   fixing: { status: 'ci-watch', extra: { result: 'fix round interrupted; running it again' } },
+  verifying: { status: 'ci-watch', extra: { result: 'verification interrupted; running it again' } },
 };
 
 /**
@@ -99,6 +101,7 @@ export class TaskQueue {
         pr_url: null,
         approval: null,
         babysit: null,
+        verification: null,
         setup_command: taskData.setup_command,
         test_command: taskData.test_command,
         handle: newHandle(id),

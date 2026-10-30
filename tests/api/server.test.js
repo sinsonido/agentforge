@@ -18,6 +18,7 @@ import defaultEventBus from '../../src/core/event-bus.js';
 import { decideApproval, runCodingTask } from '../../src/execution/coding-runner.js';
 import { startServer } from '../../src/api/server.js';
 import { AgentForgeDB } from '../../src/persistence/db.js';
+import { fakeVerifier } from '../fixtures/fake-verifier.js';
 
 const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
 
@@ -337,6 +338,7 @@ describe('POST /api/tasks/:id/approve and /reject', () => {
         if (mergeError) throw new Error(mergeError);
         merged.push(url);
       },
+      verifier: fakeVerifier({ head: () => 'a'.repeat(40) }),
     };
     forge.orchestrator = new Orchestrator({
       taskQueue: forge.taskQueue,

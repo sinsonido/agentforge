@@ -233,7 +233,8 @@ intake:
 autonomy:
   publish: allow    # push agentforge/<task> and open the PR; allow, approve or deny
   push-fix: allow   # push a fix round's commits to the PR branch; allow, approve or deny
-  merge: approve    # squash-merge the PR; approve or deny, never allow
+  verify: allow     # verify the PR head with a fresh read-only run; allow or approve
+  merge: approve    # squash-merge the PR at its verified head; approve or deny, never allow
 
 # ─── BABYSIT ───────────────────────────────────────────
 # After AgentForge pushes a PR head, it watches that head's CI with gh on the host.
@@ -244,6 +245,19 @@ babysit:
   max_rounds: 2        # fix rounds per task; red after the last one fails the task
   timeout_minutes: 60  # how long one head's CI may run before the task fails
   checks: all          # all, or required (only the checks branch protection requires)
+
+# ─── VERIFY ────────────────────────────────────────────
+# Green is not safe. Before the merge is offered, a fresh harness run that did not
+# write the change verifies the PR at its exact head SHA on a fresh clone,
+# read-only: a commit or tracked change voids the run. Each lane passes or fails
+# with evidence; the verdict is stored by SHA, and a new head (a fix round, a push
+# from outside) needs a new one. The merge refuses without a passing verdict at
+# the current head and passes it to gh pr merge --match-head-commit.
+
+verify:
+  lanes: [tests, review]   # tests: the host sees the test command pass; review: the diff against the task
+  budget_usd: 1.00         # --max-budget-usd of one verification, reported as its own cost tranche
+  # model: opus            # a different model from executor.model for a second opinion
 
 # ─── ALERTS ────────────────────────────────────────────
 

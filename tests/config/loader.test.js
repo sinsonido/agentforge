@@ -201,23 +201,23 @@ intake:
 
 describe('loadConfig autonomy', () => {
   it('defaults to publish and push-fix allow, merge approve', () => {
-    assert.deepEqual(loadConfig(write('no-autonomy.yml', '')).autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'approve' });
+    assert.deepEqual(loadConfig(write('no-autonomy.yml', '')).autonomy, { publish: 'allow', 'push-fix': 'allow', verify: 'allow', merge: 'approve' });
   });
 
   it('reads the autonomy block from agentforge.example.yml', () => {
-    assert.deepEqual(loadConfig(examplePath).autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'approve' });
+    assert.deepEqual(loadConfig(examplePath).autonomy, { publish: 'allow', 'push-fix': 'allow', verify: 'allow', merge: 'approve' });
   });
 
   it('keeps the default for an action the file leaves out', () => {
     const { autonomy } = loadConfig(write('autonomy-deny.yml', 'autonomy:\n  merge: deny\n'));
-    assert.deepEqual(autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'deny' });
+    assert.deepEqual(autonomy, { publish: 'allow', 'push-fix': 'allow', verify: 'allow', merge: 'deny' });
   });
 
   it('rejects an unknown action and a merge without approval', () => {
     const path = write('autonomy-bad.yml', 'autonomy:\n  deploy: approve\n  merge: allow\n');
     assert.throws(() => loadConfig(path), (err) => {
       assert.match(err.message, /Invalid autonomy configuration/);
-      assert.match(err.message, /unknown action "deploy"; AgentForge performs: publish, push-fix, merge/);
+      assert.match(err.message, /unknown action "deploy"; AgentForge performs: publish, push-fix, verify, merge/);
       assert.match(err.message, /merge must be one of: approve, deny/);
       return true;
     });
@@ -230,6 +230,20 @@ describe('loadConfig autonomy', () => {
 
   it('rejects a list', () => {
     assert.throws(() => loadConfig(write('autonomy-list.yml', 'autonomy:\n  - publish\n')), /autonomy must be a mapping/);
+  });
+});
+
+describe('loadConfig verify', () => {
+  it('defaults to the tests and review lanes with a $1 budget', () => {
+    assert.deepEqual(loadConfig(write('no-verify.yml', '')).verify, { lanes: ['tests', 'review'], budget_usd: 1, model: null });
+  });
+
+  it('reads the verify block from agentforge.example.yml', () => {
+    assert.deepEqual(loadConfig(examplePath).verify, { lanes: ['tests', 'review'], budget_usd: 1, model: null });
+  });
+
+  it('rejects an unknown lane at startup', () => {
+    assert.throws(() => loadConfig(write('verify-bad.yml', 'verify:\n  lanes: [smoke]\n')), /Invalid verify configuration: unknown lanes: smoke/);
   });
 });
 

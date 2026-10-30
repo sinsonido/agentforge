@@ -8,6 +8,7 @@ import defaultEventBus from '../core/event-bus.js';
 import { createStepTracker, readPlaybook } from '../core/playbook.js';
 import { createWorkspaceManager } from './workspace.js';
 import { INSTANCE_LABEL, branchFor, containerFor } from './names.js';
+import { LANES, REPORT_FILE } from './verify.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -302,10 +303,47 @@ export function buildPrompt(task) {
 }
 
 /**
+ * The harness prompt for verifying a task's PR at `sha`: a fresh, read-only
+ * Investigation run by an agent that did not write the change, one finding per lane.
+ * @param {object} task the coding task
+ * @param {{ sha: string, lanes: string[], prUrl?: string|null }} verify
+ */
+export function buildVerifyPrompt(task, { sha, lanes, prUrl = task.pr_url }) {
+  const issue = task.issue != null ? ` (issue #${task.issue})` : '';
+  const example = JSON.stringify({ lanes: lanes.map((name) => ({ name, pass: true, evidence: '...' })) });
+  return [
+    '/pstack:poteto-mode Verify a pull request with the **Investigation** playbook, fully autonomous.',
+    '',
+    'Full-autonomy grant: you are running headless under AgentForge. No human will answer. Do not ask questions; decide, act, and report. "Run until done."',
+    '',
+    `You are the independent verifier of ${prUrl ?? 'this change'} at commit ${sha}. Another agent wrote the change. poteto-mode's Shipping playbook: green is not safe, and only a verdict from an agent that did not write the code counts.`,
+    '',
+    'Read-only: do not edit tracked files, do not commit, do not switch branches or move HEAD. Any commit or change to a tracked file voids this verification.',
+    '',
+    `Task the change was made for${issue}: ${task.instruction}`,
+    '',
+    `The current directory is a fresh clone checked out at ${sha}. The change under review is \`git diff origin/${task.base}...HEAD\`.`,
+    '',
+    'Check each lane:',
+    ...lanes.map((name) => `- ${name}: ${LANES[name].ask(task)}`),
+    '',
+    `Report (required by the AgentForge host): write \`${REPORT_FILE}\` at the clone root with one entry per lane, for example \`${example}\`. \`evidence\` says what you ran or read and what it showed, in one or two sentences. Leave the file untracked: never \`git add\` or commit it.`,
+    '',
+    'Constraints for this run:',
+    '- Node 24 and git are installed here. The dependencies are not installed.',
+    `- Before you run any test, set up the clone with exactly: \`${task.setup_command}\``,
+    '- Do NOT push, do NOT open a PR, do NOT call gh.',
+  ].join('\n');
+}
+
+/**
  * `docker run` arguments for one harness run. The container sees the task
  * clone at its host path, a per-task HOME, and read-only pstack and claude.
  */
-export function buildDockerArgs({ task, instance, dir, home, uid, gid, image, claudeBin, pstackDir, model, effort, budgetUsd, gitAuthor, withToken }) {
+export function buildDockerArgs({
+  task, instance, dir, home, uid, gid, image, claudeBin, pstackDir, model, effort, budgetUsd, gitAuthor, withToken,
+  prompt = buildPrompt(task), name = containerFor(task),
+}) {
   const env = {
     HOME: CONTAINER_HOME,
     CLAUDE_CODE_TMPDIR: `${CONTAINER_HOME}/tmp`,
@@ -316,7 +354,7 @@ export function buildDockerArgs({ task, instance, dir, home, uid, gid, image, cl
     GIT_COMMITTER_EMAIL: gitAuthor.email,
   };
   return [
-    'run', '--rm', '--name', containerFor(task), '--label', `${INSTANCE_LABEL}=${instance}`,
+    'run', '--rm', '--name', name, '--label', `${INSTANCE_LABEL}=${instance}`,
     '--user', `${uid}:${gid}`,
     ...Object.entries(env).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
     ...(withToken ? ['-e', 'CLAUDE_CODE_OAUTH_TOKEN'] : []),
@@ -326,7 +364,7 @@ export function buildDockerArgs({ task, instance, dir, home, uid, gid, image, cl
     '-v', `${dir}:${dir}`,
     '-w', dir,
     image,
-    'claude', '-p', buildPrompt(task),
+    'claude', '-p', prompt,
     '--output-format', 'stream-json', '--verbose',
     '--setting-sources', 'project,local',
     '--plugin-dir', CONTAINER_PSTACK,
@@ -410,12 +448,17 @@ function runContainer({ dockerBin, args, env, name, timeoutMs, signal, onLine })
  * The container is labelled with `opts.instance` (default: the hostname), so
  * stopping one instance's leftover task containers never stops another's.
  *
+ * With `opts.verify` ({ sha, lanes, budgetUsd? }) the run verifies instead of
+ * building: a fresh clone of its own, detached at `sha`, the verify prompt, no
+ * step tracking, and `commits` are the ones made after `sha`, which a read-only
+ * verifier must not make. `head` is the clone's HEAD after the run.
+ *
  * @returns {Promise<{
  *   outcome: 'stopped'|'cancelled'|'error', cancelReason: null|'timeout'|'signal', error: string|null,
  *   exitCode: number|null, sessionId: string|null, usage: object, costUsd: number|null,
  *   rateLimits: object, commits: Array<{ sha: string, subject: string }>, uncommitted: boolean,
  *   observedTestRuns: Array<{ seq: number, command: string, passed: boolean, counts: object|null }>, lastEditSeq: number,
- *   branch: string, dir: string }>}
+ *   branch: string, head: string, dir: string }>}
  */
 export async function run(task, opts = {}) {
   if (task?.kind !== 'coding') throw new Error('coding executor runs only coding tasks');
@@ -423,20 +466,25 @@ export async function run(task, opts = {}) {
   if (!opts.pstackDir) throw new Error('pstackDir is required');
   const o = { ...EXECUTOR_DEFAULTS, ...opts };
   const eventBus = o.eventBus ?? defaultEventBus;
-  const budgetUsd = task.budget ?? o.budgetUsd;
+  const verify = o.verify ?? null;
+  // A verification gets its own clone and container, apart from the build's.
+  const own = verify ? { ...task, id: `${task.id}-verify`, handle: `${task.handle}-verify` } : task;
+  const budgetUsd = verify ? (verify.budgetUsd ?? o.budgetUsd) : (task.budget ?? o.budgetUsd);
 
   const workspace = createWorkspaceManager({ stateDir: o.stateDir });
+  if (verify) await workspace.cleanup(own.id);
   const { dir, home, branch } = await workspace.prepare({
-    taskId: task.id,
-    branch: branchFor(task),
+    taskId: own.id,
+    branch: branchFor(own),
     repo: { slug: task.repo, ...(o.repoUrl && { url: o.repoUrl }) },
     base: task.base,
   });
+  if (verify) await execFileAsync('git', ['checkout', '--quiet', '--detach', verify.sha], { cwd: dir });
   await mkdir(join(home, 'tmp'), { recursive: true });
 
   const parser = createStreamParser({ testCommand: task.test_command });
-  const steps = createStepTracker(await readPlaybook(o.pstackDir, task.playbook));
-  const name = containerFor(task);
+  const steps = verify ? null : createStepTracker(await readPlaybook(o.pstackDir, task.playbook));
+  const name = containerFor(own);
   const credentials = await stageCredentials(home, {
     oauthToken: o.oauthToken ?? process.env.CLAUDE_CODE_OAUTH_TOKEN,
     credentialsFile: o.credentialsFile ?? join(homedir(), '.claude', '.credentials.json'),
@@ -450,7 +498,8 @@ export async function run(task, opts = {}) {
     } else {
       await new Promise((r) => execFile(o.dockerBin, ['rm', '-f', name], { env }, () => r()));
       const args = buildDockerArgs({
-        task, dir, home,
+        task, dir, home, name,
+        prompt: verify ? buildVerifyPrompt(task, verify) : buildPrompt(task),
         instance: o.instance ?? hostname(),
         uid: o.uid ?? process.getuid(),
         gid: o.gid ?? process.getgid(),
@@ -468,7 +517,7 @@ export async function run(task, opts = {}) {
         onLine: (line) => {
           for (const event of parser.push(line)) {
             eventBus.emit('task.agent_event', { taskId: task.id, ...(o.recordEvent?.(task.id, event) ?? { event }) });
-            if (steps.push(event)) {
+            if (steps?.push(event)) {
               task.step = steps.step;
               eventBus.emit('task.step_changed', { taskId: task.id, step: steps.step });
             }
@@ -481,9 +530,10 @@ export async function run(task, opts = {}) {
   }
 
   const summary = parser.summary();
-  const commits = await workspace.evidence(dir, task.base);
+  const commits = verify ? await commitsAfter(dir, verify.sha) : await workspace.evidence(dir, task.base);
   const uncommitted = await trackedChanges(dir);
   const { outcome, error } = decideOutcome(exit, summary.result);
+  const head = (await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: dir })).stdout.trim();
 
   return {
     outcome,
@@ -498,10 +548,20 @@ export async function run(task, opts = {}) {
     uncommitted,
     observedTestRuns: summary.observedTestRuns,
     lastEditSeq: summary.lastEditSeq,
-    step: steps.step,
+    step: steps?.step ?? null,
     branch,
+    head,
     dir,
   };
+}
+
+/** Commits on HEAD after `sha`, oldest first: what a read-only verifier must not have made. */
+async function commitsAfter(dir, sha) {
+  const { stdout } = await execFileAsync('git', ['log', '--reverse', '--format=%H%x1f%s', `${sha}..HEAD`], { cwd: dir });
+  return stdout.trim() ? stdout.trim().split('\n').map((line) => {
+    const [commit, subject] = line.split('\x1f');
+    return { sha: commit, subject };
+  }) : [];
 }
 
 function decideOutcome(exit, result) {

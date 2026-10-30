@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { SHUTDOWN, decideApproval, runCodingTask } from '../../src/execution/coding-runner.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { AgentForgeDB } from '../../src/persistence/db.js';
+import { fakeVerifier } from '../fixtures/fake-verifier.js';
 
 const PR = 'https://github.com/acme/app/pull/7';
 const sha = (n) => String(n).repeat(40).slice(0, 40);
@@ -59,6 +60,7 @@ describe('babysitting a task PR', () => {
     publish: async () => { pushes.push(sha(1)); return PR; },
     pushFix: async ({ verdict, branch }) => { assert.equal(branch, `agentforge/${task.handle}`); pushes.push(verdict.commits.at(-1).sha); return verdict.commits.at(-1).sha; },
     merge: async ({ url }) => { merged.push(url); },
+    verifier: fakeVerifier({ head: () => pushes.at(-1) ?? sha(1) }),
     babysit: { ci, maxRounds: 2, timeoutMs: 3_600_000, now: () => t, wait: async (ms) => { t += ms; } },
     ...over,
   });
@@ -110,7 +112,10 @@ describe('babysitting a task PR', () => {
     assert.equal(stored.babysit.verdict, 'green');
     assert.equal(stored.babysit.branch, `agentforge/${task.handle}`);
     assert.deepEqual(rounds(), [[0, '1', 'pass', []]]);
-    assert.deepEqual(trail('gate').at(-1), 'pass ci round 0: 2 checks passed at 1111111');
+    assert.deepEqual(trail('gate').slice(-2), [
+      'pass ci round 0: 2 checks passed at 1111111',
+      'pass verify tests at 1111111: `npm test` passed: 12 passed, 0 failed',
+    ], 'green CI is not enough: the head is verified before the merge is offered');
     assert.deepEqual(events, ['task.executing', 'task.ci_watch', 'task.needs_approval']);
     assert.equal(runs.length, 1);
   });
