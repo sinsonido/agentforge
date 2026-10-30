@@ -13,6 +13,7 @@ import path from 'node:path';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { QuotaManager } from '../../src/core/quota-tracker.js';
 import { CostTracker } from '../../src/core/cost-tracker.js';
+import { Budget, parseBudget } from '../../src/core/budget.js';
 import { Orchestrator } from '../../src/core/orchestrator.js';
 import defaultEventBus from '../../src/core/event-bus.js';
 import { decideApproval, runCodingTask } from '../../src/execution/coding-runner.js';
@@ -276,6 +277,18 @@ describe('POST /api/tasks/:id/cancel', () => {
     assert.deepEqual(started, []);
   });
 
+  it('cancels a coding task paused on its budget so it never resumes', async (t) => {
+    const { forge } = codingForge();
+    const { call } = await serve(t, forge);
+    const task = forge.taskQueue.add(coding);
+    forge.taskQueue.updateStatus(task.id, 'paused_budget', { result: 'paused: task build budget $1.00 of $1.00 spent' });
+
+    const { status, body } = await call('POST', `/api/tasks/${task.id}/cancel`);
+
+    assert.equal(status, 200);
+    assert.equal(body.task.status, 'cancelled');
+  });
+
   it('aborts a running coding task with 202; it settles cancelled without publishing', async (t) => {
     const { forge, orchestrator, settled, runs } = codingForge();
     const { call } = await serve(t, forge);
@@ -442,8 +455,8 @@ describe('GET /api/costs', () => {
   it('reports spend by agent, model and project budget from the cost tracker', async (t) => {
     const costTracker = new CostTracker({});
     costTracker.initProject('proj', 10);
-    costTracker.recordCost('proj', 'dev', 'claude-sonnet-5-5', 0.5);
-    costTracker.recordCost('proj', 'qa', 'codestral:22b', 0.25);
+    costTracker.recordCost({ projectId: 'proj', agentId: 'dev', model: 'claude-sonnet-5-5', cost: 0.5 });
+    costTracker.recordCost({ projectId: 'proj', agentId: 'qa', model: 'codestral:22b', cost: 0.25 });
     const { call } = await serve(t, makeForge({ costTracker }));
 
     const { body } = await call('GET', '/api/costs');
@@ -456,10 +469,46 @@ describe('GET /api/costs', () => {
     assert.equal(body.costs.budgets.proj.budget, 10);
   });
 
+  it('counts spend with no agent in the total and splits it by phase and repo window (#244)', async (t) => {
+    const costTracker = new CostTracker({});
+    const budget = new Budget(parseBudget({ repo: { build: 5 } }).value, costTracker);
+    costTracker.recordCost({ projectId: 'p', cost: 0.5, taskId: 't1', repo: 'acme/app' });
+    costTracker.recordCost({ projectId: 'p', cost: 0.25, taskId: 't1', repo: 'acme/app', phase: 'verify' });
+    const { call } = await serve(t, makeForge({ costTracker, orchestrator: { budget } }));
+
+    const { body } = await call('GET', '/api/costs');
+
+    assert.equal(body.costs.totalCostUSD, 0.75);
+    assert.deepEqual(body.costs.byPhase, { build: 0.5, verify: 0.25 });
+    assert.equal(body.costs.repos['acme/app'].window, 'day');
+    assert.deepEqual(body.costs.repos['acme/app'].build, { spent: 0.5, limit: 5 });
+    assert.deepEqual(body.costs.repos['acme/app'].verify, { spent: 0.25, limit: null });
+    assert.deepEqual(body.costs.transactions.map((r) => [r.phase, r.cost]), [['build', 0.5], ['verify', 0.25]]);
+  });
+
   it('reports costs unavailable without a cost tracker or db', async (t) => {
     const { call } = await serve(t, makeForge({ orchestrator: null }));
     const { body } = await call('GET', '/api/costs');
     assert.deepEqual(body, { ok: true, available: false, costs: null });
+  });
+});
+
+describe('GET /api/tasks/:id/spend', () => {
+  it("reports a task's build and verify spend with its limits", async (t) => {
+    const costTracker = new CostTracker({});
+    const budget = new Budget(parseBudget({ task: { build: 2, verify: 1 } }).value, costTracker);
+    const forge = makeForge({ costTracker, orchestrator: { budget } });
+    const task = forge.taskQueue.add({ kind: 'coding', title: 'x', repo: 'acme/app', base: 'master', instruction: 'go', playbook: 'feature' });
+    costTracker.recordCost({ cost: 0.5, taskId: task.id, repo: 'acme/app' });
+    const { call } = await serve(t, forge);
+
+    const { status, body } = await call('GET', `/api/tasks/${task.id}/spend`);
+
+    assert.equal(status, 200);
+    assert.equal(body.spend.build.spent, 0.5);
+    assert.partialDeepStrictEqual(body.spend.build.limits, [{ scope: 'task', limit: 2, remaining: 1.5 }]);
+    assert.equal(body.spend.verify.spent, 0);
+    assert.equal((await call('GET', '/api/tasks/nope/spend')).status, 404);
   });
 });
 

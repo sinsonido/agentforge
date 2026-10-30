@@ -51,6 +51,7 @@ export const api = {
   updateAgent: (id: string, patch: { model?: string; systemPrompt?: string }) =>
     request<{ ok: boolean }>(`/agents/${id}`, { method: 'POST', body: JSON.stringify(patch) }),
   quotas: () => request<{ ok: boolean; quotas: Record<string, import('../types/api').QuotaStatus> }>('/quotas'),
+  taskSpend: (id: string) => request<{ ok: boolean; spend: import('../types/api').TaskSpend }>(`/tasks/${encodeURIComponent(id)}/spend`),
   costs: () => request<{ ok: boolean; available: boolean; costs: import('../types/api').CostData | null }>('/costs'),
   events: (limit?: number) => request<{ ok: boolean; events: import('../types/api').ApiEvent[] }>(`/events${limit ? `?limit=${limit}` : ''}`),
   controlStart: () => request<{ ok: boolean }>('/control/start', { method: 'POST' }),

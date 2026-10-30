@@ -2,6 +2,7 @@ import eventBus from './event-bus.js';
 import { ContextBuilder } from '../execution/context-builder.js';
 import { OutputCollector } from '../execution/output-collector.js';
 import { CostTracker } from './cost-tracker.js';
+import { Budget, parseBudget, pauseEntry, pauseReason, resumeEntry, resumeStatus } from './budget.js';
 import { SHUTDOWN } from '../execution/coding-runner.js';
 
 /**
@@ -17,8 +18,10 @@ export class Orchestrator {
    * task starts. `decide(task, choice)`
    * applies the operator's approve or reject. Without it coding tasks stay queued.
    * `intake` polls for new coding tasks while the orchestrator runs.
+   * Before each leg, `budget` decides whether the task may spend: a task over a
+   * limit parks in `paused_budget` and resumes once the budget has room again.
    */
-  constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config, coding = null, intake = null }) {
+  constructor({ taskQueue, router, quotaManager, providerRegistry, agents, config, coding = null, intake = null, costTracker = null, budget = null }) {
     this.taskQueue = taskQueue;
     this.router = router;
     this.quotaManager = quotaManager;
@@ -34,7 +37,8 @@ export class Orchestrator {
     // Execution helpers
     this.contextBuilder = new ContextBuilder({ agents, config });
     this.outputCollector = new OutputCollector();
-    this.costTracker = new CostTracker(config);
+    this.costTracker = costTracker ?? new CostTracker(config);
+    this.budget = budget ?? new Budget(parseBudget(this.config.budget).value, this.costTracker);
 
     // Init project budget
     if (config.project) {
@@ -78,6 +82,7 @@ export class Orchestrator {
 
   async _tick() {
     if (!this._running) return;
+    this._resumeBudgetPaused();
     this._dispatchCoding();
 
     const task = this.taskQueue.next(t => t.kind !== 'coding');
@@ -106,7 +111,6 @@ export class Orchestrator {
 
       // Calculate and record cost
       const cost = this._calculateCost(route.model, result.tokens_in, result.tokens_out);
-      this.costTracker.recordCost(projectId, task.agent_id, route.model, cost);
       eventBus.emit('cost.recorded', {
         projectId,
         agentId: task.agent_id,
@@ -114,6 +118,7 @@ export class Orchestrator {
         tokensIn: result.tokens_in,
         tokensOut: result.tokens_out,
         cost,
+        taskId: task.id,
       });
 
       // Parse output
@@ -153,7 +158,15 @@ export class Orchestrator {
    */
   decideApproval(id, choice) {
     const task = this.taskQueue.get(id);
-    return task && this.coding?.decide ? this.coding.decide(task, choice) : null;
+    if (!task || !this.coding?.decide) return null;
+    if (choice.decision === 'approved' && task.status === 'needs-approval' && task.approval?.action === 'verify') {
+      const over = this.budget.check(task, ['verify']);
+      if (over) {
+        this._pauseForBudget(task, over);
+        return Promise.resolve({ ok: false, conflict: true, error: pauseReason(over) });
+      }
+    }
+    return this.coding.decide(task, choice);
   }
 
   _dispatchCoding() {
@@ -162,6 +175,11 @@ export class Orchestrator {
       const task = this.taskQueue.getByStatus('ci-watch').find(t => !this._codingRuns.has(t.id))
         ?? this.taskQueue.next(t => t.kind === 'coding');
       if (!task) return;
+      const over = this.budget.check(task);
+      if (over) {
+        this._pauseForBudget(task, over);
+        continue;
+      }
       const controller = new globalThis.AbortController();
       const before = { cost: task.cost ?? 0, tokens_in: task.tokens_in ?? 0, tokens_out: task.tokens_out ?? 0 };
       const done = this.coding.run(task, controller.signal)
@@ -172,20 +190,43 @@ export class Orchestrator {
     }
   }
 
-  /** Record what one leg spent: the task's totals minus what it had spent `before`. */
+  /**
+   * Record what one leg spent on its build: the task's totals minus what it had
+   * spent `before`. `task.cost` counts only build runs; a verification emits its
+   * own `cost.recorded` with `phase: 'verify'`.
+   */
   _recordCodingCost(task, before) {
     const cost = (task.cost ?? 0) - before.cost;
     if (!cost) return;
-    const projectId = task.project_id || this.config.project?.name || 'default';
-    this.costTracker.recordCost(projectId, task.agent_id, 'coding-executor', cost);
     eventBus.emit('cost.recorded', {
-      projectId,
+      projectId: task.project_id || this.config.project?.name || 'default',
       agentId: task.agent_id,
       model: 'coding-executor',
       tokensIn: (task.tokens_in ?? 0) - before.tokens_in,
       tokensOut: (task.tokens_out ?? 0) - before.tokens_out,
       cost,
+      taskId: task.id,
+      repo: task.repo,
+      phase: 'build',
     });
+  }
+
+  /** Park a coding task whose next leg would spend past `limit`. */
+  _pauseForBudget(task, limit) {
+    this.taskQueue.appendTrail(task.id, pauseEntry(limit, this.budget.policy.min_run_usd));
+    this.taskQueue.updateStatus(task.id, 'paused_budget', { result: pauseReason(limit) });
+    eventBus.emit('task.paused_budget', { task, limit });
+  }
+
+  /** Send back every parked coding task whose budget has room again. */
+  _resumeBudgetPaused() {
+    for (const task of this.taskQueue.getByStatus('paused_budget')) {
+      if (task.kind !== 'coding' || this.budget.check(task)) continue;
+      const status = resumeStatus(task);
+      this.taskQueue.appendTrail(task.id, resumeEntry(status));
+      this.taskQueue.updateStatus(task.id, status, { result: null });
+      eventBus.emit(status === 'queued' ? 'task.queued' : 'task.ci_watch', { task });
+    }
   }
 
   async _executeTask(task, route) {
@@ -238,18 +279,24 @@ export class Orchestrator {
       }
     });
 
-    // When budget exceeded → pause all new executions
+    // When the project budget is exceeded → pause queued text tasks. Coding tasks
+    // answer to `budget` instead, before each leg.
     eventBus.on('budget.exceeded', ({ projectId, spent_pct }) => {
       console.warn(
         '[orchestrator] Budget exceeded for project %s (%.0f%% spent). Pausing queued tasks.',
         projectId, spent_pct * 100
       );
-      const queued = this.taskQueue.getByStatus('queued');
+      const queued = this.taskQueue.getByStatus('queued').filter(t => t.kind !== 'coding');
       for (const task of queued) {
         if (!task.project_id || task.project_id === projectId) {
           this.taskQueue.updateStatus(task.id, 'paused_budget');
         }
       }
+    });
+
+    // Every tranche of spend, build or verify, goes into the ledger the budget reads.
+    eventBus.on('cost.recorded', (record) => {
+      this.costTracker.recordCost({ ...record, repo: record.repo ?? this.taskQueue.get(record.taskId)?.repo ?? null });
     });
 
     eventBus.on('task.step_changed', ({ taskId, step }) => {

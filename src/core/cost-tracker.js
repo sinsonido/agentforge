@@ -1,57 +1,93 @@
 import eventBus from './event-bus.js';
 
 /**
- * CostTracker — Tracks cumulative spend per project and agent.
- * Emits budget warning and exceeded events.
- * Implements GitHub issue #17.
+ * CostTracker: the cost ledger. One record per tranche of spend, a provider
+ * call for a text task or one executor run for a coding task.
+ *
+ * Whoever spends emits `cost.recorded`; the orchestrator feeds each one to
+ * `recordCost`. With a `store` (AgentForgeDB), every record is written through
+ * and construction reloads the ledger, so budgets survive a restart.
+ * Emits budget warning and exceeded events for a project budget.
+ *
+ * @typedef {import('./budget.js').Phase} Phase
+ * @typedef {{
+ *   projectId: string|null, agentId: string|null, model: string|null,
+ *   tokensIn: number, tokensOut: number, cost: number,
+ *   taskId: string|null, repo: string|null, phase: Phase, at: number,
+ * }} CostRecord
  */
 export class CostTracker {
-  constructor(config = {}) {
+  constructor(config = {}, { store = null } = {}) {
     this.budgets = new Map();   // projectId → { budget, spent }
-    this.agentCosts = new Map(); // agentId → total spent
-    this.modelCosts = new Map(); // modelId → total spent
-    this._config = config;
+    this._store = store;
+    /** @type {CostRecord[]} */
+    this._records = store ? store.costRecords() : [];
     this._alertConfig = config.alerts || {
       budget_warning_pct: 0.80,
       budget_pause_pct: 0.95,
     };
   }
 
+  /** Read the ledger again from the store, for a store changed behind this process (E2E reset). */
+  reload() {
+    this._records = this._store ? this._store.costRecords() : [];
+    for (const [id, proj] of this.budgets) this.initProject(id, proj.budget);
+  }
+
   /**
-   * Register a project with a budget limit.
+   * Register a project with a budget limit. Spend already in the ledger counts.
    * @param {string} projectId
    * @param {number} budget - Max spend in USD
    */
   initProject(projectId, budget) {
-    this.budgets.set(projectId, { budget, spent: 0 });
+    const spent = this._records.filter((r) => r.projectId === projectId).reduce((s, r) => s + r.cost, 0);
+    this.budgets.set(projectId, { budget, spent });
   }
 
   /**
-   * Record a cost entry for a completed task.
-   * @param {string} projectId
-   * @param {string} agentId
-   * @param {string} modelId
-   * @param {number} cost - Cost in USD
+   * Record one tranche of spend. Zero or negative cost records nothing.
+   * @param {Partial<CostRecord> & { cost: number }} input
+   * @returns {CostRecord|null}
    */
-  recordCost(projectId, agentId, modelId, cost) {
-    if (!cost || cost <= 0) return;
+  recordCost({ projectId = null, agentId = null, model = null, tokensIn = 0, tokensOut = 0, cost, taskId = null, repo = null, phase = 'build', at = Date.now() }) {
+    if (!cost || cost <= 0) return null;
+    const record = { projectId, agentId, model, tokensIn, tokensOut, cost, taskId, repo, phase, at };
+    this._records.push(record);
+    this._store?.recordCost(record);
 
-    // Update project budget
     if (projectId && this.budgets.has(projectId)) {
       const proj = this.budgets.get(projectId);
       proj.spent += cost;
       this._checkBudgetAlerts(projectId, proj);
     }
+    return record;
+  }
 
-    // Update agent total
-    if (agentId) {
-      this.agentCosts.set(agentId, (this.agentCosts.get(agentId) || 0) + cost);
+  /**
+   * Spend per phase over the records that match every given filter.
+   * @param {{ taskId?: string, repo?: string, since?: number }} [filter]
+   * @returns {Record<Phase, number> & { total: number }}
+   */
+  spent({ taskId, repo, since } = {}) {
+    const out = { build: 0, verify: 0, total: 0 };
+    for (const r of this._records) {
+      if (taskId !== undefined && r.taskId !== taskId) continue;
+      if (repo !== undefined && r.repo !== repo) continue;
+      if (since !== undefined && r.at < since) continue;
+      out[r.phase] = (out[r.phase] ?? 0) + r.cost;
+      out.total += r.cost;
     }
+    return out;
+  }
 
-    // Update model total
-    if (modelId) {
-      this.modelCosts.set(modelId, (this.modelCosts.get(modelId) || 0) + cost);
-    }
+  /** The newest `limit` records, oldest first. */
+  records(limit = 200) {
+    return this._records.slice(-limit);
+  }
+
+  /** Repositories that have spent anything. */
+  repos() {
+    return [...new Set(this._records.map((r) => r.repo).filter(Boolean))];
   }
 
   /**
@@ -89,39 +125,44 @@ export class CostTracker {
     return status ? status.remaining_pct : 1.0;
   }
 
-  /**
-   * Get cost breakdown by agent.
-   * @returns {Object} { agentId: totalCost }
-   */
+  /** @returns {Object} { agentId: totalCost }, records without an agent left out */
   getCostByAgent() {
-    return Object.fromEntries(this.agentCosts);
+    return this._sumBy('agentId');
   }
 
-  /**
-   * Get cost breakdown by model.
-   * @returns {Object} { modelId: totalCost }
-   */
+  /** @returns {Object} { modelId: totalCost } */
   getCostByModel() {
-    return Object.fromEntries(this.modelCosts);
+    return this._sumBy('model');
   }
 
   /**
-   * Full stats snapshot.
+   * Full stats snapshot. `totalSpent` is every record in the ledger, whether
+   * or not it names an agent or a registered project.
    */
   getAllStats() {
     const projects = {};
     for (const [id] of this.budgets) {
       projects[id] = this.getBudgetStatus(id);
     }
+    const { build, verify, total } = this.spent();
     return {
       projects,
       byAgent: this.getCostByAgent(),
       byModel: this.getCostByModel(),
-      totalSpent: Array.from(this.budgets.values()).reduce((s, p) => s + p.spent, 0),
+      byPhase: { build, verify },
+      totalSpent: total,
     };
   }
 
   // ─── Private ────────────────────────────────────────
+
+  _sumBy(key) {
+    const out = {};
+    for (const r of this._records) {
+      if (r[key]) out[r[key]] = (out[r[key]] ?? 0) + r.cost;
+    }
+    return out;
+  }
 
   _checkBudgetAlerts(projectId, proj) {
     const spent_pct = proj.budget > 0 ? proj.spent / proj.budget : 0;

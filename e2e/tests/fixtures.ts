@@ -27,7 +27,7 @@ export function resetTestDb() {
   }
 }
 
-async function resetServerState() {
+export async function resetServerState() {
   let res: Response
   try {
     res = await fetch(`${SERVER_URL}/api/test/reset`, { method: 'POST' })

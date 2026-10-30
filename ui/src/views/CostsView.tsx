@@ -4,6 +4,7 @@ import { BudgetBars } from '@/components/costs/BudgetBars'
 import { CostTable } from '@/components/costs/CostTable'
 import { TransactionLog } from '@/components/costs/TransactionLog'
 import { SpendChart } from '@/components/costs/SpendChart'
+import { RepoSpend } from '@/components/costs/RepoSpend'
 import { useApi } from '@/hooks/useApi'
 import { api } from '@/lib/api'
 
@@ -34,6 +35,15 @@ export default function CostsView() {
         <p className="text-xs text-muted-foreground uppercase tracking-wider">Total Spend</p>
         <p className="mt-1 text-3xl font-bold tabular-nums">${costs.totalCostUSD.toFixed(4)}</p>
       </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-semibold">Repositories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <RepoSpend repos={costs.repos} byPhase={costs.byPhase} />
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

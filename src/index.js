@@ -3,6 +3,8 @@ import { TaskQueue } from './core/task-queue.js';
 import { QuotaManager } from './core/quota-tracker.js';
 import { Router } from './routing/router.js';
 import { Orchestrator } from './core/orchestrator.js';
+import { CostTracker } from './core/cost-tracker.js';
+import { Budget } from './core/budget.js';
 import { AgentForgeDB } from './persistence/db.js';
 import { ProviderRegistry, OllamaProvider } from './providers/interface.js';
 import { AnthropicProvider } from './providers/anthropic.js';
@@ -29,6 +31,8 @@ export async function createAgentForge(configPath) {
   // Database, then the task queue it restores and writes through to
   const db = new AgentForgeDB(config.database?.path);
   const taskQueue = new TaskQueue({ store: db });
+  const costTracker = new CostTracker(config, { store: db });
+  const budget = new Budget(config.budget, costTracker);
 
   // Quota manager
   const quotaManager = new QuotaManager();
@@ -91,14 +95,14 @@ export async function createAgentForge(configPath) {
     };
     const host = {
       queue: taskQueue, publish, merge, pushFix, policy: config.autonomy, projectId: config.project?.name,
-      execute: (t, opts) => runExecutor(t, { ...executorOpts, ...opts }),
+      execute: (t, opts) => runExecutor(budget.capRun(t, 'build'), { ...executorOpts, ...opts }),
       verifier: {
         lanes: verify.lanes,
         pr: ghPrHead().pr,
         run: (t, { sha, signal }) => runExecutor(t, {
           ...executorOpts, signal,
           ...(verify.model && { model: verify.model }),
-          verify: { sha, lanes: verify.lanes, budgetUsd: verify.budget_usd },
+          verify: { sha, lanes: verify.lanes, budgetUsd: Math.min(verify.budget_usd, budget.runCap(t, 'verify') ?? Infinity) },
         }),
       },
       babysit: { ci: ghCiReader({ checks: babysit.checks }), maxRounds: babysit.max_rounds, timeoutMs: babysit.timeout_minutes * 60_000 },
@@ -123,13 +127,11 @@ export async function createAgentForge(configPath) {
     config,
     coding,
     intake,
+    costTracker,
+    budget,
   });
 
-  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.verifying', 'task.completed', 'task.failed'];
-
-  eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
-    db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);
-  });
+  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.verifying', 'task.paused_budget', 'task.completed', 'task.failed'];
 
   // Log all events to DB
   const ALL_LOG_EVENTS = [...TASK_EVENTS, 'cost.recorded', 'quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning'];

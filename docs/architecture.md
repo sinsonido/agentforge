@@ -248,7 +248,7 @@ agent.resumed        { agent }
 agent.config_updated { agentId, model, updatedAt }      (REST API)
 budget.warning       { projectId, spent, budget, spent_pct }
 budget.exceeded      { projectId, spent, budget, spent_pct }
-cost.recorded        { projectId, agentId, model, tokensIn, tokensOut, cost }
+cost.recorded        { projectId, agentId, model, tokensIn, tokensOut, cost, taskId, repo, phase, at }
 ```
 
 ### Coding executor (`src/execution/coding-executor.js`)
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS agent_activity (
 `createAgentForge()` subscribes the database to the event bus:
 
 - `task.queued`, `task.executing`, `task.completed`, and `task.failed` upsert the task row.
-- Each `cost.recorded` event inserts a `cost_records` row.
+- The cost tracker writes each record to `cost_records` before it emits `cost.recorded`, and reloads the table on boot.
 - The four `task.*` events above plus `cost.recorded`, `quota.exhausted`, `quota.reset`, `budget.warning`, and `budget.exceeded` write to `events`.
 
 Nothing reads the database back into the queue or the cost tracker at startup.

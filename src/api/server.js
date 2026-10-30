@@ -233,7 +233,8 @@ function buildRouter(forge) {
 
   // ── POST /api/tasks/:id/cancel ───────────────────────────────────────────
   /**
-   * Cancel a coding task. A queued one ends `cancelled` now and never starts (200).
+   * Cancel a coding task. A queued one, or one paused on its budget, ends
+   * `cancelled` now and never runs again (200).
    * A running one is aborted and settles `cancelled` once its container stops (202);
    * the coding runner emits `task.failed` then. Any other task cannot be cancelled (409).
    */
@@ -244,7 +245,7 @@ function buildRouter(forge) {
       if (!task) {
         return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
       }
-      if (task.kind === 'coding' && task.status === 'queued') {
+      if (task.kind === 'coding' && (task.status === 'queued' || task.status === 'paused_budget')) {
         forge.taskQueue.updateStatus(id, 'cancelled', { result: 'cancelled (api)' });
         forge.eventBus.emit('task.failed', { task, status: 'cancelled', error: task.result });
         return res.json({ ok: true, task });
@@ -370,53 +371,54 @@ function buildRouter(forge) {
 
   // ── GET /api/costs ───────────────────────────────────────────────────────
   /**
-   * Cost stats with normalized shape for UI consumption.
-   * Returns: { totalCostUSD, byAgent, byModel, transactions, budgets }
+   * Spend from the cost ledger, normalized for the UI.
+   * Returns: { totalCostUSD, byAgent, byModel, byPhase, repos, transactions, budgets }
+   * `repos` has each repository's build and verify spend in the current budget
+   * window, with its limits. `totalCostUSD` counts every record, with or without an agent.
    */
   router.get('/costs', (req, res) => {
     try {
       const costTracker = forge.costTracker ?? forge.orchestrator?.costTracker;
-      const db = forge.db;
-
-      if (!costTracker && !db) {
+      if (!costTracker) {
         return res.json({ ok: true, available: false, costs: null });
       }
-
-      // Base shape from in-memory cost tracker
-      const rawStats = costTracker?.getAllStats?.() ?? {};
-
-      // Enrich with DB data when available
-      let byAgent = {};
-      let transactions = [];
-      if (db) {
-        const projectId = forge.config?.project?.name || 'default';
-        const agentRows = db.getCostByAgent(projectId);
-        for (const row of agentRows) {
-          byAgent[row.agent_id] = row.total;
-        }
-        transactions = db.getRecentEvents(200)
-          .filter(e => e.event === 'cost.recorded')
-          .map(e => e.data);
-      }
-
-      // Aggregate from rawStats if DB not available
-      if (!db && rawStats.byAgent) {
-        byAgent = rawStats.byAgent;
-      }
-
-      const totalCostUSD = Object.values(byAgent).reduce((s, v) => s + v, 0)
-        || rawStats.totalCost
-        || 0;
-
+      const stats = costTracker.getAllStats();
+      const budget = forge.orchestrator?.budget;
+      const repos = budget
+        ? Object.fromEntries(costTracker.repos().map((repo) => [repo, budget.repoReport(repo)]))
+        : {};
       const costs = {
-        totalCostUSD,
-        byAgent,
-        byModel: rawStats.byModel ?? {},
-        transactions,
-        budgets: rawStats.budgets ?? rawStats.projects ?? {},
+        totalCostUSD: stats.totalSpent,
+        byAgent: stats.byAgent,
+        byModel: stats.byModel,
+        byPhase: stats.byPhase,
+        repos,
+        transactions: costTracker.records(200),
+        budgets: stats.projects,
       };
-
       res.json({ ok: true, available: true, costs });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+
+  // ── GET /api/tasks/:id/spend ─────────────────────────────────────────────
+  /**
+   * A coding task's spend per phase (build, verify) with each limit that applies:
+   * the task's own and its repository's in the current window. 503 without a budget.
+   */
+  router.get('/tasks/:id/spend', (req, res) => {
+    try {
+      const { id } = req.params;
+      const task = forge.taskQueue.get(id) ?? forge.db?.findTask(id);
+      if (!task) {
+        return res.status(404).json({ ok: false, error: `Task '${id}' not found` });
+      }
+      const budget = forge.orchestrator?.budget;
+      if (!budget) {
+        return res.status(503).json({ ok: false, error: 'No cost ledger is configured' });
+      }
+      res.json({ ok: true, spend: budget.report(task) });
     } catch (err) {
       res.status(500).json({ ok: false, error: err.message });
     }
@@ -496,6 +498,8 @@ function buildRouter(forge) {
         }
         // Clear event bus replay log so WS replays don't leak events across tests
         forge.eventBus?.clearRecent?.();
+        // The cost ledger caches its table; the E2E fixture rewrites it behind the server
+        (forge.costTracker ?? forge.orchestrator?.costTracker)?.reload?.();
         res.json({ ok: true });
       } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

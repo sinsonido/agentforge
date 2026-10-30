@@ -109,36 +109,32 @@ describe('AgentForgeDB', () => {
 
   // ─── Costs ────────────────────────────────────────────────────────────────
 
-  describe('recordCost() / getTotalCost()', () => {
-    it('accumulates cost per project', () => {
-      db.recordCost('proj1', 'agent-a', 'claude-sonnet-4-6', 100, 200, 0.001);
-      db.recordCost('proj1', 'agent-b', 'claude-opus-4-6',   50,  100, 0.002);
-      const total = db.getTotalCost('proj1');
-      assert.ok(Math.abs(total - 0.003) < 1e-9);
+  describe('cost ledger', () => {
+    it('reads back every record with its task, repo and phase, oldest first', () => {
+      db.recordCost({ projectId: 'p', agentId: 'a1', model: 'm', tokensIn: 100, tokensOut: 200, cost: 0.5, taskId: 't1', repo: 'o/r', phase: 'build', at: 10 });
+      db.recordCost({ projectId: 'p', model: 'v', cost: 0.25, taskId: 't1', repo: 'o/r', phase: 'verify', at: 20 });
+      db.recordCost({ projectId: 'p', cost: 1 });
+
+      const [build, verify, plain] = db.costRecords();
+      assert.deepEqual(build, { projectId: 'p', agentId: 'a1', model: 'm', tokensIn: 100, tokensOut: 200, cost: 0.5, taskId: 't1', repo: 'o/r', phase: 'build', at: 10 });
+      assert.equal(verify.phase, 'verify');
+      assert.equal(verify.agentId, null);
+      assert.equal(plain.phase, 'build', 'a record without a phase is build spend');
+      assert.equal(plain.taskId, null);
     });
 
-    it('returns 0 for a project with no cost records', () => {
-      assert.equal(db.getTotalCost('unknown-proj'), 0);
-    });
+    it('keeps cost records written before the phase column as build spend', async () => {
+      const path = `${TEST_DIR}/v10-costs.db`;
+      const v10 = new AgentForgeDB(path);
+      v10.db.exec('ALTER TABLE cost_records DROP COLUMN task_id; ALTER TABLE cost_records DROP COLUMN repo; ALTER TABLE cost_records DROP COLUMN phase');
+      v10.db.pragma('user_version = 10');
+      v10.db.prepare("INSERT INTO cost_records (project_id, agent_id, model, cost, recorded_at) VALUES ('p', NULL, 'coding-executor', 0.4, 5)").run();
+      v10.close();
 
-    it('does not mix costs between projects', () => {
-      db.recordCost('alpha', 'a1', 'model', 0, 0, 1.0);
-      db.recordCost('beta',  'a2', 'model', 0, 0, 2.0);
-      assert.ok(Math.abs(db.getTotalCost('alpha') - 1.0) < 1e-9);
-      assert.ok(Math.abs(db.getTotalCost('beta')  - 2.0) < 1e-9);
-    });
-  });
-
-  describe('getCostByAgent()', () => {
-    it('groups costs by agent_id', () => {
-      db.recordCost('p', 'a1', 'm', 0, 0, 0.5);
-      db.recordCost('p', 'a1', 'm', 0, 0, 0.5);
-      db.recordCost('p', 'a2', 'm', 0, 0, 1.0);
-
-      const rows = db.getCostByAgent('p');
-      const map = Object.fromEntries(rows.map(r => [r.agent_id, r.total]));
-      assert.ok(Math.abs(map.a1 - 1.0) < 1e-9);
-      assert.ok(Math.abs(map.a2 - 1.0) < 1e-9);
+      const upgraded = new AgentForgeDB(path);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 11);
+      assert.deepEqual(upgraded.costRecords().map((r) => [r.cost, r.phase, r.taskId]), [[0.4, 'build', null]]);
+      upgraded.close();
     });
   });
 
@@ -253,7 +249,7 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 10);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 11);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
@@ -278,7 +274,7 @@ describe('AgentForgeDB', () => {
 
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 10);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 11);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.kind, 'text');
       assert.equal(task.priority, 'high');
@@ -291,7 +287,7 @@ describe('AgentForgeDB', () => {
     it('gives coding tasks saved before the command columns the default setup and test commands', async () => {
       const path = `${TEST_DIR}/v3.db`;
       const v3 = new AgentForgeDB(path);
-      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; ALTER TABLE tasks DROP COLUMN approval; ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit; ALTER TABLE tasks DROP COLUMN verification; DROP TABLE task_events; DROP TABLE task_trail');
+      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; ALTER TABLE tasks DROP COLUMN approval; ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit; ALTER TABLE tasks DROP COLUMN verification; DROP TABLE task_events; DROP TABLE task_trail; ALTER TABLE cost_records DROP COLUMN task_id; ALTER TABLE cost_records DROP COLUMN repo; ALTER TABLE cost_records DROP COLUMN phase');
       v3.db.pragma('user_version = 3');
       v3.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook)
         VALUES ('t1', 'coding', 'Fix', 'queued', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix'), ('t2', 'text', 'Hi', 'queued', 2, NULL, NULL, NULL, NULL, NULL)`).run();
@@ -308,7 +304,7 @@ describe('AgentForgeDB', () => {
     it('gives queued coding tasks a fresh handle and lets tasks that already ran keep their id', async () => {
       const path = `${TEST_DIR}/v7.db`;
       const v7 = new AgentForgeDB(path);
-      v7.db.exec('ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit; ALTER TABLE tasks DROP COLUMN verification');
+      v7.db.exec('ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit; ALTER TABLE tasks DROP COLUMN verification; ALTER TABLE cost_records DROP COLUMN task_id; ALTER TABLE cost_records DROP COLUMN repo; ALTER TABLE cost_records DROP COLUMN phase');
       v7.db.pragma('user_version = 7');
       v7.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook, pr_url)
         VALUES ('t1', 'coding', 'Ran', 'needs-approval', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix', 'https://github.com/o/r/pull/5'),
@@ -385,14 +381,14 @@ describe('AgentForgeDB', () => {
     it('upgrades a v9 DB with a verification column that starts empty', () => {
       const path = `${TEST_DIR}/v9.db`;
       const v9 = new AgentForgeDB(path);
-      v9.db.exec('ALTER TABLE tasks DROP COLUMN verification');
+      v9.db.exec('ALTER TABLE tasks DROP COLUMN verification; ALTER TABLE cost_records DROP COLUMN task_id; ALTER TABLE cost_records DROP COLUMN repo; ALTER TABLE cost_records DROP COLUMN phase');
       v9.db.pragma('user_version = 9');
       v9.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook, handle)
         VALUES ('t1', 'coding', 'Watching', 'ci-watch', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix', 't1')`).run();
       v9.close();
 
       const upgraded = new AgentForgeDB(path);
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 10);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 11);
       assert.equal(upgraded.loadQueue().tasks[0].verification, null);
       upgraded.close();
     });

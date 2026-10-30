@@ -78,7 +78,7 @@ task.status_changed | agent.config_updated     (from the REST API)
 agent.paused | agent.resumed                   (from the orchestrator on quota events)
 quota.throttled | quota.exhausted | quota.reset
 budget.warning | budget.exceeded               → { projectId, spent, budget, spent_pct }
-cost.recorded    → { projectId, agentId, model, tokensIn, tokensOut, cost }  (Orchestrator only)
+cost.recorded    → { projectId, agentId, model, tokensIn, tokensOut, cost, taskId, repo, phase, at }  (CostTracker only)
 ```
 
 **Config env vars:** `${VAR_NAME}` syntax in `agentforge.yml`.

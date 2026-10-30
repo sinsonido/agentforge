@@ -24,6 +24,7 @@ const EVENTS = [
   'task.ci_watch',
   'task.fixing',
   'task.verifying',
+  'task.paused_budget',
   'task.completed',
   'task.failed',
   'task.step_changed',

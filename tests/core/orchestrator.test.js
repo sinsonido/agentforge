@@ -6,7 +6,7 @@ import { QuotaManager } from '../../src/core/quota-tracker.js';
 import eventBus from '../../src/core/event-bus.js';
 import { SHUTDOWN } from '../../src/execution/coding-runner.js';
 
-const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
+const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed', 'cost.recorded'];
 const OK = { content: 'result text', tokens_in: 10, tokens_out: 20, tool_calls: [], finish_reason: 'stop' };
 
 let running = [];
@@ -106,14 +106,16 @@ describe('Orchestrator execution loop', () => {
     await completed;
     eventBus.off('cost.recorded', onCost);
 
-    assert.deepEqual(costs, [{
+    assert.equal(costs.length, 1);
+    assert.partialDeepStrictEqual(costs[0], {
       projectId: 'proj-1',
       agentId: 'agent-1',
       model: 'mock-model',
       tokensIn: 2_000_000,
       tokensOut: 1_000_000,
       cost: 21,
-    }]);
+      taskId: task.id,
+    });
     assert.equal(taskQueue.get(task.id).cost, 21);
   });
 
@@ -291,7 +293,11 @@ describe('Orchestrator coding tasks', () => {
     await waitFor(() => costs.length === 1);
     eventBus.off('cost.recorded', onCost);
 
-    assert.deepEqual(costs, [{ projectId: 'default', agentId: null, model: 'coding-executor', tokensIn: 100, tokensOut: 7, cost: 0.5 }]);
+    assert.equal(costs.length, 1);
+    assert.partialDeepStrictEqual(costs[0], {
+      projectId: 'default', agentId: null, model: 'coding-executor', tokensIn: 100, tokensOut: 7, cost: 0.5,
+      taskId: runs[0].task.id, repo: 'acme/app', phase: 'build',
+    });
   });
 
   it('cancelTask aborts a running coding task', async () => {
