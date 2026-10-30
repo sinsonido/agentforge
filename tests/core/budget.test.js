@@ -43,6 +43,8 @@ describe('phasesAhead', () => {
     assert.deepEqual(phasesAhead(task(round('pending'))), ['build', 'verify']);
     assert.deepEqual(phasesAhead(task(round('fail'))), ['build']);
     assert.deepEqual(phasesAhead(task(round('pass'))), ['verify']);
+    const verified = { verification: { head: 'abc', verdicts: [{ sha: 'abc', pass: true, lanes: [] }] } };
+    assert.deepEqual(phasesAhead(task({ ...round('pass'), ...verified })), [], 'a verdict at the head is not run again');
   });
 
   it('resumes a parked task where it was: CI watch once it has a PR', () => {

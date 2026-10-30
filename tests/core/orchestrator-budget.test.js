@@ -27,7 +27,7 @@ afterEach(() => {
   for (const db of dbs) db.close();
   running = [];
   dbs = [];
-  for (const evt of ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed']) eventBus.removeAllListeners(evt);
+  for (const evt of ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed', 'cost.recorded']) eventBus.removeAllListeners(evt);
 });
 
 /**
@@ -144,6 +144,38 @@ describe('Orchestrator budget gate', () => {
     await waitFor(() => later.runs.length === 1);
     assert.equal(later.runs[0].task.id, task.id);
     assert.ok(trailOf(later.taskQueue, task.id).includes('budget has room again: resuming at queued'));
+  });
+
+  it('takes a verification tranche from cost.recorded into the ledger, as the runner emits it', async () => {
+    clock = 10 * 24 * HOUR;
+    const { db, taskQueue, costTracker } = boot('ingest.db', { repo: { verify: 1 } });
+    const task = taskQueue.add({ ...CODING, issue: 1 });
+
+    eventBus.emit('cost.recorded', { projectId: 'default', agentId: null, taskId: task.id, model: 'coding-verifier', tokensIn: 5, tokensOut: 1, cost: 0.3, phase: 'verify' });
+
+    assert.deepEqual(costTracker.spent({ taskId: task.id }), { build: 0, verify: 0.3, total: 0.3 });
+    assert.deepEqual(db.costRecords().map((r) => [r.taskId, r.repo, r.phase, r.model, r.cost]), [[task.id, 'acme/app', 'verify', 'coding-verifier', 0.3]]);
+  });
+
+  it('parks a task instead of approving a verification it cannot afford', async () => {
+    clock = 10 * 24 * HOUR;
+    const { taskQueue, costTracker, orchestrator } = boot('approve.db', { task: { verify: 0.5 } });
+    const decided = [];
+    orchestrator.coding.decide = async (t, choice) => { decided.push(choice); return { ok: true, status: 'executing' }; };
+    const task = taskQueue.add({ ...CODING, issue: 1 });
+    taskQueue.updateStatus(task.id, 'needs-approval', { babysit: round('pass'), approval: { action: 'verify', summary: 'verify', payload: {}, requested_at: 1, decision: null } });
+    costTracker.recordCost({ cost: 0.4, taskId: task.id, repo: 'acme/app', phase: 'verify', at: clock });
+
+    const out = await orchestrator.decideApproval(task.id, { decision: 'approved', by: 'operator' });
+
+    assert.deepEqual(out, { ok: false, conflict: true, error: 'paused: task verify budget $0.40 of $0.50 spent' });
+    assert.deepEqual(decided, []);
+    assert.equal(taskQueue.get(task.id).status, 'paused_budget');
+
+    const rejected = taskQueue.add({ ...CODING, issue: 2 });
+    taskQueue.updateStatus(rejected.id, 'needs-approval', { approval: { action: 'verify', summary: 'verify', payload: {}, requested_at: 1, decision: null } });
+    await orchestrator.decideApproval(rejected.id, { decision: 'rejected', by: 'operator' });
+    assert.equal(decided.length, 1, 'a rejection still reaches the runner');
   });
 
   it('a project budget.exceeded pauses text tasks and leaves coding tasks to the budget gate', () => {

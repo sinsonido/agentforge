@@ -6,7 +6,7 @@ import { QuotaManager } from '../../src/core/quota-tracker.js';
 import eventBus from '../../src/core/event-bus.js';
 import { SHUTDOWN } from '../../src/execution/coding-runner.js';
 
-const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed'];
+const ORCHESTRATOR_EVENTS = ['quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning', 'task.step_changed', 'cost.recorded'];
 const OK = { content: 'result text', tokens_in: 10, tokens_out: 20, tool_calls: [], finish_reason: 'stop' };
 
 let running = [];
@@ -115,7 +115,6 @@ describe('Orchestrator execution loop', () => {
       tokensOut: 1_000_000,
       cost: 21,
       taskId: task.id,
-      phase: 'build',
     });
     assert.equal(taskQueue.get(task.id).cost, 21);
   });

@@ -257,15 +257,6 @@ describe('CostTracker', () => {
       assert.deepEqual(tracker.repos(), ['a/b', 'c/d']);
     });
 
-    it('emits each record as cost.recorded', () => {
-      const seen = [];
-      const on = (r) => seen.push(r);
-      eventBus.on('cost.recorded', on);
-      tracker.recordCost({ cost: 0.25, taskId: 't9', repo: 'a/b', phase: 'verify', at: 5 });
-      eventBus.off('cost.recorded', on);
-      assert.deepEqual(seen, [{ projectId: null, agentId: null, model: null, tokensIn: 0, tokensOut: 0, cost: 0.25, taskId: 't9', repo: 'a/b', phase: 'verify', at: 5 }]);
-    });
-
     it('writes through to its store and reloads it on construction, so budgets survive a restart', () => {
       const dir = mkdtempSync(join(tmpdir(), 'af-ledger-'));
       try {

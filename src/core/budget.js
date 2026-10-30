@@ -79,13 +79,13 @@ export function parseBudget(raw) {
  * The phases the next leg of a coding task could spend in. A task with no PR yet
  * runs its build. With a PR, CI decides: a pending round may go red (a fix
  * round) or green (verification before merge), a red one runs a fix round, and
- * a green one only verifies.
+ * a green one only verifies, unless a verdict at that head is already recorded.
  * @returns {Phase[]}
  */
 export function phasesAhead(task) {
   const round = task.babysit?.rounds?.at(-1);
   if (!round) return ['build'];
-  if (round.ci === 'pass') return ['verify'];
+  if (round.ci === 'pass') return task.verification?.verdicts?.some((v) => v.sha === round.head) ? [] : ['verify'];
   if (round.ci === 'fail') return ['build'];
   return ['build', 'verify'];
 }
@@ -123,11 +123,13 @@ export class Budget {
   }
 
   /**
-   * The first limit that blocks the next leg of `task`, or null when it may run.
+   * The first limit that blocks `phases`, by default those the next leg of
+   * `task` could reach, or null when it may run.
+   * @param {Phase[]} [phases]
    * @returns {Limit|null}
    */
-  check(task) {
-    for (const phase of phasesAhead(task)) {
+  check(task, phases = phasesAhead(task)) {
+    for (const phase of phases) {
       const blocked = this.limits(task, phase).find((l) => l.remaining < Math.max(this.policy.min_run_usd, Number.EPSILON));
       if (blocked) return blocked;
     }

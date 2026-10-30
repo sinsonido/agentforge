@@ -4,10 +4,10 @@ import eventBus from './event-bus.js';
  * CostTracker: the cost ledger. One record per tranche of spend, a provider
  * call for a text task or one executor run for a coding task.
  *
- * With a `store` (AgentForgeDB), every record is written through and
- * construction reloads the ledger, so budgets survive a restart.
- * Emits `cost.recorded` with each record, and budget warning and exceeded
- * events for a project budget.
+ * Whoever spends emits `cost.recorded`; the orchestrator feeds each one to
+ * `recordCost`. With a `store` (AgentForgeDB), every record is written through
+ * and construction reloads the ledger, so budgets survive a restart.
+ * Emits budget warning and exceeded events for a project budget.
  *
  * @typedef {import('./budget.js').Phase} Phase
  * @typedef {{
@@ -54,7 +54,6 @@ export class CostTracker {
       proj.spent += cost;
       this._checkBudgetAlerts(projectId, proj);
     }
-    eventBus.emit('cost.recorded', record);
     return record;
   }
 

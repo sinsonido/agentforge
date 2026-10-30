@@ -111,7 +111,7 @@ export class Orchestrator {
 
       // Calculate and record cost
       const cost = this._calculateCost(route.model, result.tokens_in, result.tokens_out);
-      this.costTracker.recordCost({
+      eventBus.emit('cost.recorded', {
         projectId,
         agentId: task.agent_id,
         model: route.model,
@@ -158,7 +158,15 @@ export class Orchestrator {
    */
   decideApproval(id, choice) {
     const task = this.taskQueue.get(id);
-    return task && this.coding?.decide ? this.coding.decide(task, choice) : null;
+    if (!task || !this.coding?.decide) return null;
+    if (choice.decision === 'approved' && task.status === 'needs-approval' && task.approval?.action === 'verify') {
+      const over = this.budget.check(task, ['verify']);
+      if (over) {
+        this._pauseForBudget(task, over);
+        return Promise.resolve({ ok: false, conflict: true, error: pauseReason(over) });
+      }
+    }
+    return this.coding.decide(task, choice);
   }
 
   _dispatchCoding() {
@@ -184,13 +192,13 @@ export class Orchestrator {
 
   /**
    * Record what one leg spent on its build: the task's totals minus what it had
-   * spent `before`. `task.cost` counts only build runs; verification records its
-   * own tranches with `phase: 'verify'`.
+   * spent `before`. `task.cost` counts only build runs; a verification emits its
+   * own `cost.recorded` with `phase: 'verify'`.
    */
   _recordCodingCost(task, before) {
     const cost = (task.cost ?? 0) - before.cost;
     if (!cost) return;
-    this.costTracker.recordCost({
+    eventBus.emit('cost.recorded', {
       projectId: task.project_id || this.config.project?.name || 'default',
       agentId: task.agent_id,
       model: 'coding-executor',
@@ -284,6 +292,11 @@ export class Orchestrator {
           this.taskQueue.updateStatus(task.id, 'paused_budget');
         }
       }
+    });
+
+    // Every tranche of spend, build or verify, goes into the ledger the budget reads.
+    eventBus.on('cost.recorded', (record) => {
+      this.costTracker.recordCost({ ...record, repo: record.repo ?? this.taskQueue.get(record.taskId)?.repo ?? null });
     });
 
     eventBus.on('task.step_changed', ({ taskId, step }) => {
