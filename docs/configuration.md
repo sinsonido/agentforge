@@ -21,6 +21,7 @@ routing:   ...   # Rules for automatic model selection
 team:      ...   # Agent definitions
 autonomy:  ...   # Which host actions run, wait for the operator, or never run
 babysit:   ...   # How AgentForge watches a task PR's CI and fixes it when red
+budget:    ...   # Spend limits per coding task and per repository, build and verify apart
 alerts:    ...   # Budget alert thresholds
 server:    ...   # HTTP/WebSocket server settings and auth
 database:  ...   # SQLite file location
@@ -357,6 +358,39 @@ A task in `ci-watch` keeps its issue and survives a restart: the next process re
 
 ---
 
+## `budget`
+
+Spend limits for coding tasks. Every executor run is one tranche of spend, written to the cost ledger (`cost_records`) with its task, repository and `phase`:
+
+- `build` is the task's first run and its fix rounds.
+- `verify` is an independent verification run before merge.
+
+Build and verification are budgeted apart, so a task that used its build budget can still be verified, and verification cannot eat the budget for fixes.
+
+```yaml
+budget:
+  task:
+    build: 5        # USD one task may spend on build runs over its whole life
+    verify: 2       # USD one task may spend on verification
+  repo:
+    window: day     # rolling window: day (24 h), week (7 days) or month (30 days)
+    build: 50       # USD all tasks of one repository may spend on build in the window
+    verify: 20
+  min_run_usd: 0.25 # a run starts only with at least this much left under every limit of its phase
+```
+
+Every limit is optional; a missing one is no limit. A task created with `budget` in `POST /api/tasks` uses it as its own build limit instead of `task.build`.
+
+**Before each leg.** Before the orchestrator starts a leg that could spend, it checks the limits of every phase that leg could reach. A task with no PR yet runs a build. A task in `ci-watch` whose last round is red runs a fix round (build). A green round goes on to verification (verify). A pending round could do either, so both are checked. When a limit has less than `min_run_usd` left, the task moves to `paused_budget` and a `fail budget` gate entry in the decision trail names the limit and what it has spent. The task keeps its issue, survives a restart, and goes back to `queued` or `ci-watch` on its own once the limit has room again: the repository window rolled on, or the operator raised the limit and restarted. A `decision` entry records the resume. The task view's Cancel button ends a paused task.
+
+**Each run.** The harness gets `--max-budget-usd` set to what is left under the tightest limit of the run's phase. Without any limit, `executor.budget_usd` applies as before.
+
+**Why a rolling window.** A calendar day resets to a full budget at midnight, so a runaway loop could spend twice the limit across the boundary. A rolling window counts the last 24 hours (or 7 or 30 days) from the ledger at every check, so it needs no reset job and gives the same answer after a restart.
+
+The task view shows build and verify spend against each limit. The Costs view lists each repository's spend in its window. `GET /api/tasks/:id/spend` and `GET /api/costs` (`byPhase`, `repos`) return the same numbers.
+
+---
+
 ## `alerts`
 
 ```yaml
@@ -365,7 +399,7 @@ alerts:
   budget_pause_pct: 0.95      # Emit budget.exceeded and pause queued tasks at 95%
 ```
 
-At `budget_pause_pct` the orchestrator moves every queued task of the project to `paused_budget`. Nothing moves them back automatically. Tasks that are already running finish.
+At `budget_pause_pct` the orchestrator moves every queued text task of the project to `paused_budget`. Nothing moves them back automatically. Tasks that are already running finish. Coding tasks answer to `budget` instead.
 
 ---
 

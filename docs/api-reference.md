@@ -377,6 +377,10 @@ Cost stats: budgets, spend by agent, spend by model, transaction log.
     },
     "byAgent": { "developer": 3.42 },
     "byModel": { "claude-sonnet-5-5": 3.42 },
+    "byPhase": { "build": 3.42, "verify": 0 },
+    "repos": {
+      "acme/app": { "window": "day", "since": 1793000000000, "build": { "spent": 0.8, "limit": 50 }, "verify": { "spent": 0, "limit": null } }
+    },
     "transactions": [
       {
         "projectId": "My Project",
@@ -384,17 +388,38 @@ Cost stats: budgets, spend by agent, spend by model, transaction log.
         "model": "claude-sonnet-5-5",
         "tokensIn": 1200,
         "tokensOut": 480,
-        "cost": 0.0072
+        "cost": 0.0072,
+        "taskId": "t4",
+        "repo": null,
+        "phase": "build",
+        "at": 1793000000000
       }
     ]
   }
 }
 ```
 
-`budgets` and `byModel` come from the in-memory cost tracker and reset on restart.
-`byAgent` and `totalCostUSD` come from SQLite for the current project, so they
-survive a restart while `budgets` does not. `transactions` lists the
-`cost.recorded` events among the last 200 logged events.
+Every number comes from the cost ledger (`cost_records`), which the cost tracker
+reloads on boot, so all of them survive a restart. `totalCostUSD` is every record,
+with or without an agent. `byPhase` splits it into build and verification spend.
+`repos` has each repository's spend in its rolling budget window with its limits
+(see `budget` in the configuration reference). `transactions` is the newest 200
+records, oldest first.
+
+#### `GET /api/tasks/:id/spend`
+
+A coding task's spend per phase, each with the limits that apply: the task's own
+and its repository's in the current window. 404 for an unknown task.
+
+```json
+{
+  "ok": true,
+  "spend": {
+    "build": { "spent": 0.8, "limits": [{ "scope": "task", "phase": "build", "limit": 1, "spent": 0.8, "remaining": 0.2 }] },
+    "verify": { "spent": 0, "limits": [] }
+  }
+}
+```
 
 ---
 
@@ -499,7 +524,7 @@ no emitter, so clients never see them today.
 | `agent.resumed` | `{ agent }` |
 | `budget.warning` | `{ projectId, spent, budget, spent_pct }` |
 | `budget.exceeded` | `{ projectId, spent, budget, spent_pct }` |
-| `cost.recorded` | `{ projectId, agentId, model, tokensIn, tokensOut, cost }` |
+| `cost.recorded` | `{ projectId, agentId, model, tokensIn, tokensOut, cost, taskId, repo, phase, at }` |
 
 `task.status_changed` and `agent.config_updated` are emitted by the REST API but
 are not forwarded.

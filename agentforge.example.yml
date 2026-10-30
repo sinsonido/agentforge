@@ -214,7 +214,7 @@ intake:
 #   claude_bin: ~/.local/share/claude/versions/2.1.312                   # default: realpath of ~/.local/bin/claude
 #   model: sonnet
 #   effort: medium
-#   budget_usd: 2.00         # --max-budget-usd when a task has no budget
+#   budget_usd: 2.00         # --max-budget-usd when no budget limit applies
 #   timeout_minutes: 30      # then SIGTERM and `docker stop -t 10`; the task ends cancelled
 #   concurrency: 1           # coding tasks that run at the same time
 #   oauth_token: ${CLAUDE_CODE_OAUTH_TOKEN}   # preferred; from `claude setup-token`
@@ -244,6 +244,21 @@ babysit:
   max_rounds: 2        # fix rounds per task; red after the last one fails the task
   timeout_minutes: 60  # how long one head's CI may run before the task fails
   checks: all          # all, or required (only the checks branch protection requires)
+
+# ─── BUDGET ────────────────────────────────────────────
+# Spend limits for coding tasks, build (first run and fix rounds) and verify
+# (verification before merge) apart. Every limit is optional. A task that cannot
+# afford its next leg waits in paused_budget and resumes once the limit has room.
+
+# budget:
+#   task:
+#     build: 5.00       # USD per task over its whole life; a task's own budget overrides it
+#     verify: 2.00
+#   repo:
+#     window: day       # rolling: day (24 h), week (7 days), month (30 days)
+#     build: 50.00      # USD per repository in the window
+#     verify: 20.00
+#   min_run_usd: 0.25   # a run starts only with this much left; it is capped at what is left
 
 # ─── ALERTS ────────────────────────────────────────────
 
