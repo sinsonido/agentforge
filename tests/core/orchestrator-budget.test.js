@@ -78,15 +78,16 @@ describe('Orchestrator budget gate', () => {
     clock = 10 * 24 * HOUR;
     const { taskQueue, costTracker, orchestrator, runs } = boot('fix.db', { task: { build: 1 }, min_run_usd: 0.25 });
     const task = taskQueue.add({ ...CODING, issue: 1 });
-    const paused = new Promise((r) => eventBus.once('task.paused_budget', r));
+    const paused = [];
+    eventBus.on('task.paused_budget', (e) => paused.push(e.task.id));
 
     start(orchestrator);
     await waitFor(() => runs.length === 1);
     runs[0].finish('ci-watch', { cost: 0.8, tokens_in: 10, tokens_out: 2, babysit: round('fail') });
-    const event = await paused;
-
-    assert.equal(event.task.id, task.id);
     await settle();
+    eventBus.removeAllListeners('task.paused_budget');
+
+    assert.deepEqual(paused, [task.id]);
     assert.equal(runs.length, 1, 'the fix round never started');
     assert.equal(taskQueue.get(task.id).status, 'paused_budget');
     assert.equal(taskQueue.get(task.id).result, 'paused: task build budget $0.80 of $1.00 spent');
@@ -121,7 +122,8 @@ describe('Orchestrator budget gate', () => {
     const task = first.taskQueue.add({ ...CODING, issue: 1 });
 
     start(first.orchestrator);
-    await waitFor(() => first.taskQueue.get(task.id).status === 'paused_budget');
+    await settle();
+    assert.equal(first.taskQueue.get(task.id).status, 'paused_budget');
     await first.orchestrator.stop({ graceMs: 0 });
     assert.equal(first.runs.length, 0);
     first.db.close();
