@@ -19,12 +19,16 @@ import { branchFor } from '../execution/names.js';
  * AgentForge watches that head's CI before it reaches `next`: green goes on,
  * red starts a fix round whose commits `push-fix` pushes, then CI is watched again.
  *
+ * `verify` runs a fresh read-only harness on the PR at its exact head (see
+ * verify.js). Merge only follows a passing verdict for that head, so `verify`
+ * can be gated (approve) but not denied: `merge: deny` is how to skip merging.
+ *
  * Force-push, deploys, data deletion and customer messages are on poteto-mode's
  * Always-pause list but are not actions AgentForge performs, so the policy
  * cannot name them.
  *
  * @typedef {'allow'|'approve'|'deny'} Rule
- * @typedef {'publish'|'push-fix'|'merge'} Action
+ * @typedef {'publish'|'push-fix'|'verify'|'merge'} Action
  * @typedef {Record<Action, Rule>} Policy
  * @typedef {{
  *   action: Action, summary: string, payload: object, requested_at: number,
@@ -42,7 +46,7 @@ export const ACTIONS = Object.freeze({
     rules: RULES,
     default: 'allow',
     stopsAt: null,
-    next: 'merge',
+    next: 'verify',
     watched: true,
     summary: (task, { verdict }) =>
       `push ${branchFor(task)} and open a PR into ${task.base} (${commits(verdict.commits.length)})`,
@@ -51,10 +55,18 @@ export const ACTIONS = Object.freeze({
     rules: RULES,
     default: 'allow',
     stopsAt: 'failed',
-    next: 'merge',
+    next: 'verify',
     watched: true,
     summary: (task, { verdict, branch, round }) =>
       `push ${commits(verdict.commits.length)} to ${branch} for fix round ${round} of ${task.pr_url}`,
+  },
+  verify: {
+    rules: ['allow', 'approve'],
+    default: 'allow',
+    stopsAt: 'pr-opened',
+    next: 'merge',
+    watched: false,
+    summary: (task, { pr_url }) => `verify ${pr_url} at its head with a fresh read-only run`,
   },
   merge: {
     rules: ['approve', 'deny'],
@@ -62,7 +74,7 @@ export const ACTIONS = Object.freeze({
     stopsAt: 'pr-opened',
     next: null,
     watched: false,
-    summary: (task, { pr_url }) => `merge ${pr_url} into ${task.base}`,
+    summary: (task, { pr_url }) => `merge ${pr_url} into ${task.base} (verified at ${String(task.verification?.head ?? '').slice(0, 7)})`,
   },
 });
 

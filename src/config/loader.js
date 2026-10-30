@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 import { PLAYBOOKS } from '../core/task-model.js';
 import { parseAutonomy } from '../core/autonomy.js';
 import { parseBabysit } from '../execution/babysit.js';
+import { parseVerify } from '../execution/verify.js';
 
 const DEFAULT_CONFIG = {
   project: { name: 'AgentForge Project', budget: 100 },
@@ -40,7 +41,19 @@ export function loadConfig(configPath = 'agentforge.yml') {
   validateIntake(config.intake);
   config.autonomy = validateAutonomy(config.autonomy);
   config.babysit = validateBabysit(config.babysit);
+  config.verify = validateVerify(config.verify);
   return config;
+}
+
+/**
+ * The `verify:` block with every key set: the lanes one verification checks,
+ * its budget and an optional model. Throws on a bad value.
+ * @returns {{ lanes: string[], budget_usd: number, model: string|null }}
+ */
+export function validateVerify(raw) {
+  const parsed = parseVerify(raw);
+  if (!parsed.ok) throw new Error(`Invalid verify configuration: ${parsed.error}`);
+  return parsed.value;
 }
 
 /**

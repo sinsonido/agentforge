@@ -15,6 +15,7 @@ import { run as runExecutor } from './execution/coding-executor.js';
 import { decideApproval, executorConfig, runCodingTask } from './execution/coding-runner.js';
 import { merge, publish, pushFix } from './execution/publish.js';
 import { BABYSIT_DEFAULTS, ghCiReader } from './execution/babysit.js';
+import { VERIFY_DEFAULTS, ghPrHead } from './execution/verify.js';
 
 /**
  * Bootstrap AgentForge from config.
@@ -82,13 +83,24 @@ export async function createAgentForge(configPath) {
   if (config.executor && config.intake?.repos?.length) {
     const { concurrency, options } = executorConfig(config.executor);
     const babysit = config.babysit ?? BABYSIT_DEFAULTS;
+    const verify = config.verify ?? VERIFY_DEFAULTS;
+    const executorOpts = {
+      ...options,
+      instance: process.env.AGENTFORGE_INSTANCE,
+      recordEvent: (id, event) => db.appendTaskEvent(id, event),
+    };
     const host = {
-      queue: taskQueue, publish, merge, pushFix, policy: config.autonomy,
-      execute: (t, opts) => runExecutor(t, {
-        ...options, ...opts,
-        instance: process.env.AGENTFORGE_INSTANCE,
-        recordEvent: (id, event) => db.appendTaskEvent(id, event),
-      }),
+      queue: taskQueue, publish, merge, pushFix, policy: config.autonomy, projectId: config.project?.name,
+      execute: (t, opts) => runExecutor(t, { ...executorOpts, ...opts }),
+      verifier: {
+        lanes: verify.lanes,
+        pr: ghPrHead().pr,
+        run: (t, { sha, signal }) => runExecutor(t, {
+          ...executorOpts, signal,
+          ...(verify.model && { model: verify.model }),
+          verify: { sha, lanes: verify.lanes, budgetUsd: verify.budget_usd },
+        }),
+      },
       babysit: { ci: ghCiReader({ checks: babysit.checks }), maxRounds: babysit.max_rounds, timeoutMs: babysit.timeout_minutes * 60_000 },
     };
     coding = {
@@ -113,7 +125,7 @@ export async function createAgentForge(configPath) {
     intake,
   });
 
-  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.completed', 'task.failed'];
+  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.verifying', 'task.completed', 'task.failed'];
 
   eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
     db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);

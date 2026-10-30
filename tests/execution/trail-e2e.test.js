@@ -11,6 +11,7 @@ import { TaskQueue } from '../../src/core/task-queue.js';
 import { run as runExecutor } from '../../src/execution/coding-executor.js';
 import { runCodingTask } from '../../src/execution/coding-runner.js';
 import { publish } from '../../src/execution/publish.js';
+import { fakeVerifier } from '../fixtures/fake-verifier.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8' });
@@ -92,6 +93,7 @@ describe('decision trail of a coding task', () => {
         dockerBin: docker, repoUrl: upstream, credentialsFile, eventBus: bus,
       }),
       publish: (opts) => publish({ ...opts, run: gh }),
+      verifier: fakeVerifier({ head: () => queue.get(task.id).verification.head }),
     });
     return { status, task, body };
   }
@@ -121,8 +123,11 @@ describe('decision trail of a coding task', () => {
       ['evidence', '`npm test` passed at <sha>'],
       ['decision', 'publish allowed by policy'],
       ['evidence', 'PR https://github.com/acme/widget/pull/9'],
+      ['decision', 'verify allowed by policy'],
+      ['status', 'executing → verifying'],
+      ['gate', 'pass verify tests at <sha>: `npm test` passed: 12 passed, 0 failed'],
       ['decision', 'merge needs approval by policy'],
-      ['status', 'executing → needs-approval: awaiting approval: merge https://github.com/acme/widget/pull/9 into master'],
+      ['status', 'verifying → needs-approval: awaiting approval: merge https://github.com/acme/widget/pull/9 into master (verified at <sha>)'],
     ]);
 
     assert.match(body, /## Decision trail/);

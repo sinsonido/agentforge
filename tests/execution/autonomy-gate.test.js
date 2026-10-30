@@ -8,6 +8,7 @@ import { runCodingTask, decideApproval } from '../../src/execution/coding-runner
 import { merge } from '../../src/execution/publish.js';
 import { TaskQueue } from '../../src/core/task-queue.js';
 import { AgentForgeDB } from '../../src/persistence/db.js';
+import { fakeVerifier } from '../fixtures/fake-verifier.js';
 
 const SHA = 'c'.repeat(40);
 const PR = 'https://github.com/acme/app/pull/7';
@@ -29,6 +30,7 @@ describe('autonomy gate', () => {
   let merged;
   let mergeError;
   let events;
+  let verifier;
 
   const deps = (policy) => ({
     queue,
@@ -39,6 +41,7 @@ describe('autonomy gate', () => {
       if (mergeError) throw new Error(mergeError);
       merged.push(url);
     },
+    verifier,
   });
   const run = (policy) => runCodingTask(task, { ...deps(policy), execute: stoppedRun });
   const approve = (policy, reason) => decideApproval(task, { decision: 'approved', by: 'operator', reason }, deps(policy));
@@ -58,6 +61,7 @@ describe('autonomy gate', () => {
     merged = [];
     mergeError = null;
     events = [];
+    verifier = fakeVerifier({ head: () => SHA });
     for (const e of ['task.executing', 'task.needs_approval', 'task.completed', 'task.failed']) bus.on(e, (d) => events.push([e, d.status]));
   });
 
@@ -74,12 +78,17 @@ describe('autonomy gate', () => {
       assert.equal(published.length, 1);
       assert.equal(stored.pr_url, PR);
       assert.equal(stored.completed_at, null);
-      assert.equal(stored.result, `awaiting approval: merge ${PR} into master`);
+      assert.equal(stored.result, `awaiting approval: merge ${PR} into master (verified at ccccccc)`);
       assert.deepEqual({ ...stored.approval, requested_at: 0 }, {
-        action: 'merge', summary: `merge ${PR} into master`, payload: { pr_url: PR }, requested_at: 0,
+        action: 'merge', summary: `merge ${PR} into master (verified at ccccccc)`, payload: { pr_url: PR }, requested_at: 0,
         decision: null, decided_by: null, decided_at: null, reason: null,
       });
-      assert.deepEqual(decisions(), [['policy', 'publish allowed by policy'], ['policy', 'merge needs approval by policy']]);
+      assert.deepEqual(decisions(), [
+        ['policy', 'publish allowed by policy'], ['policy', 'verify allowed by policy'], ['policy', 'merge needs approval by policy'],
+      ]);
+      assert.deepEqual(verifier.runs, [SHA], 'the merge is offered only after the head was verified');
+      assert.equal(stored.verification.head, SHA);
+      assert.equal(stored.verification.verdicts[0].pass, true);
       assert.deepEqual(events.at(-1), ['task.needs_approval', 'needs-approval']);
     });
 
@@ -202,28 +211,57 @@ describe('autonomy gate', () => {
 });
 
 describe('merge', () => {
-  const gh = (state) => {
+  const OTHER = 'd'.repeat(40);
+  const verdict = (sha, pass = true) => ({ sha, pass, error: null, cost_usd: 0.05, at: 1, lanes: [{ name: 'tests', pass, evidence: 'npm test' }] });
+  const verified = (head, ...verdicts) => ({ head, verdicts });
+  const gh = (state, head = SHA) => {
     const calls = [];
     const run = async (cmd, args) => {
       calls.push([cmd, ...args]);
-      return args[1] === 'view' ? JSON.stringify({ state }) : '';
+      return args[1] === 'view' ? JSON.stringify({ state, headRefOid: head }) : '';
     };
     return { run, calls };
   };
 
-  it('squash-merges an open PR', async () => {
+  it('squash-merges an open PR at the verified head, pinned with --match-head-commit', async () => {
     const { run, calls } = gh('OPEN');
-    await merge({ url: PR, run });
-    assert.deepEqual(calls, [['gh', 'pr', 'view', PR, '--json', 'state'], ['gh', 'pr', 'merge', PR, '--squash']]);
+    await merge({ url: PR, verification: verified(SHA, verdict(SHA)), run });
+    assert.deepEqual(calls, [
+      ['gh', 'pr', 'view', PR, '--json', 'state,headRefOid'],
+      ['gh', 'pr', 'merge', PR, '--squash', '--match-head-commit', SHA],
+    ]);
+  });
+
+  it('refuses without a verdict at the current head and never calls gh pr merge', async () => {
+    const { run, calls } = gh('OPEN');
+    await assert.rejects(merge({ url: PR, verification: null, run }), { name: 'MergeRefused', reason: 'no-verdict', message: /no verification verdict at ccccccc/ });
+    assert.equal(calls.length, 1);
+  });
+
+  it('refuses a failing verdict at the current head', async () => {
+    const { run, calls } = gh('OPEN');
+    await assert.rejects(merge({ url: PR, verification: verified(SHA, verdict(SHA, false)), run }), { reason: 'no-verdict', message: /the verdict at ccccccc failed/ });
+    assert.equal(calls.length, 1);
+  });
+
+  it('refuses when the head moved after a passing verdict: the new head is not covered', async () => {
+    const { run, calls } = gh('OPEN', OTHER);
+    await assert.rejects(merge({ url: PR, verification: verified(SHA, verdict(SHA)), run }), (err) => {
+      assert.equal(err.reason, 'head-moved');
+      assert.equal(err.head, OTHER);
+      assert.match(err.message, /head moved from ccccccc to ddddddd after verification/);
+      return true;
+    });
+    assert.equal(calls.length, 1);
   });
 
   it('does nothing for a merged PR', async () => {
     const { run, calls } = gh('MERGED');
-    await merge({ url: PR, run });
+    await merge({ url: PR, verification: null, run });
     assert.equal(calls.length, 1);
   });
 
   it('refuses a closed PR', async () => {
-    await assert.rejects(merge({ url: PR, run: gh('CLOSED').run }), /pull\/7 is closed/);
+    await assert.rejects(merge({ url: PR, verification: null, run: gh('CLOSED').run }), /pull\/7 is closed/);
   });
 });
