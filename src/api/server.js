@@ -498,6 +498,8 @@ function buildRouter(forge) {
         }
         // Clear event bus replay log so WS replays don't leak events across tests
         forge.eventBus?.clearRecent?.();
+        // The cost ledger caches its table; the E2E fixture rewrites it behind the server
+        (forge.costTracker ?? forge.orchestrator?.costTracker)?.reload?.();
         res.json({ ok: true });
       } catch (err) {
         res.status(500).json({ ok: false, error: err.message });

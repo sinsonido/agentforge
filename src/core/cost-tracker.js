@@ -28,6 +28,12 @@ export class CostTracker {
     };
   }
 
+  /** Read the ledger again from the store, for a store changed behind this process (E2E reset). */
+  reload() {
+    this._records = this._store ? this._store.costRecords() : [];
+    for (const [id, proj] of this.budgets) this.initProject(id, proj.budget);
+  }
+
   /**
    * Register a project with a budget limit. Spend already in the ledger counts.
    * @param {string} projectId

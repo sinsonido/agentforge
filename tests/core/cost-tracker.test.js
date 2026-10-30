@@ -269,6 +269,11 @@ describe('CostTracker', () => {
         again.initProject('p', 10);
         assert.deepEqual(again.spent({ taskId: 't1' }), { build: 0, verify: 0.75, total: 0.75 });
         assert.equal(again.getBudgetStatus('p').spent, 0.75, 'a project budget counts spend from before the restart');
+
+        reopened.db.exec('DELETE FROM cost_records');
+        again.reload();
+        assert.deepEqual(again.spent(), { build: 0, verify: 0, total: 0 });
+        assert.equal(again.getBudgetStatus('p').spent, 0);
         reopened.close();
       } finally {
         rmSync(dir, { recursive: true, force: true });

@@ -3,7 +3,7 @@
  * Inherits the base DB-reset fixture and additionally seeds cost_records
  * and cost.recorded events so the Costs view renders with real data.
  */
-import { test as base, expect } from './fixtures'
+import { test as base, expect, resetServerState } from './fixtures'
 import Database from 'better-sqlite3'
 
 export { expect }
@@ -61,6 +61,8 @@ export const test = base.extend<{ seedCosts: CostSeed[] }>({
       } finally {
         db?.close()
       }
+      // The server reads its cost ledger into memory; reload it with the seeded rows
+      await resetServerState()
     }
 
     await use(DEFAULT_SEEDS)
