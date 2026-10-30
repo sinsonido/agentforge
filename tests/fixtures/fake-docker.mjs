@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 // Stands in for the docker CLI in coding-executor tests. Reads its behaviour
 // from fake-docker.json next to the copied script and appends each call to calls.jsonl.
+// A verification run (container name ending in -verify) takes its keys from
+// config.verify over the rest; `commit: false` leaves the clone's history as it was.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -21,17 +23,21 @@ let credentialsPresent = true;
 try { readFileSync(join(home, '.claude', '.credentials.json')); } catch { credentialsPresent = false; }
 appendFileSync(join(here, 'calls.jsonl'), JSON.stringify({ credentialsPresent }) + '\n');
 
-const lines = readFileSync(config.stream, 'utf8').split('\n').filter(Boolean);
+const name = args[args.indexOf('--name') + 1];
+const run = name.endsWith('-verify') ? { ...config, ...config.verify } : config;
+const lines = readFileSync(run.stream, 'utf8').split('\n').filter(Boolean);
 
-if (config.mode === 'hang') {
+if (run.mode === 'hang') {
   process.on('SIGTERM', () => process.exit(143));
-  for (const line of lines.slice(0, config.linesBeforeHang)) process.stdout.write(line + '\n');
+  for (const line of lines.slice(0, run.linesBeforeHang)) process.stdout.write(line + '\n');
   setInterval(() => {}, 1000);
 } else {
   const dir = args[args.indexOf('-w') + 1];
-  appendFileSync(join(dir, 'fix.txt'), 'fixed\n');
-  for (const [file, text] of Object.entries(config.leave ?? {})) writeFileSync(join(dir, file), text);
-  execFileSync('git', ['add', 'fix.txt'], { cwd: dir });
-  execFileSync('git', ['-c', 'user.name=Agent', '-c', 'user.email=agent@example.com', 'commit', '-m', 'fix: the bug'], { cwd: dir });
+  for (const [file, text] of Object.entries(run.leave ?? {})) writeFileSync(join(dir, file), text);
+  if (run.commit !== false) {
+    appendFileSync(join(dir, 'fix.txt'), 'fixed\n');
+    execFileSync('git', ['add', 'fix.txt'], { cwd: dir });
+    execFileSync('git', ['-c', 'user.name=Agent', '-c', 'user.email=agent@example.com', 'commit', '-m', 'fix: the bug'], { cwd: dir });
+  }
   for (const line of lines) process.stdout.write(line + '\n');
 }

@@ -11,6 +11,7 @@ export interface Babysit {
     failing: Array<{ name: string; url: string | null }>
     started_at: number
     finished_at: number | null
+    external?: boolean
   }>
   verdict: 'green' | 'red' | 'merged' | 'closed' | 'timeout' | 'stopped' | null
 }
@@ -35,7 +36,7 @@ const ICON = {
 
 /** CI per pushed head: the published head, then one row per fix round. */
 export function CiRounds({ babysit, fixing }: { babysit: Babysit; fixing: boolean }) {
-  const fixes = babysit.rounds.length - 1
+  const fixes = babysit.rounds.filter((r) => r.n > 0 && !r.external).length
   return (
     <section data-testid="ci-rounds" className="space-y-2 rounded-lg border p-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
@@ -47,12 +48,12 @@ export function CiRounds({ babysit, fixing }: { babysit: Babysit; fixing: boolea
         </span>
       </div>
       <ol className="space-y-2">
-        {babysit.rounds.map((r) => (
-          <li key={r.n} data-testid="ci-round" className="flex items-start gap-2 text-sm">
+        {babysit.rounds.map((r, i) => (
+          <li key={i} data-testid="ci-round" className="flex items-start gap-2 text-sm">
             {ICON[r.ci]}
             <div className="min-w-0 space-y-1">
               <p className="break-words">
-                {r.n === 0 ? 'Published' : `Fix round ${r.n}`}{' '}
+                {r.external ? 'Pushed outside AgentForge' : r.n === 0 ? 'Published' : `Fix round ${r.n}`}{' '}
                 <code className="text-xs">{r.head.slice(0, 7)}</code>
               </p>
               {r.failing.length > 0 && (

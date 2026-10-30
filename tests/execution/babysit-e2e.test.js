@@ -12,6 +12,7 @@ import { run as runExecutor } from '../../src/execution/coding-executor.js';
 import { runCodingTask } from '../../src/execution/coding-runner.js';
 import { publish, pushFix } from '../../src/execution/publish.js';
 import { ghCiReader } from '../../src/execution/babysit.js';
+import { fakeVerifier } from '../fixtures/fake-verifier.js';
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), '..', 'fixtures');
 const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -108,6 +109,7 @@ describe('babysit end to end', () => {
       publish: (opts) => publish({ ...opts, run: gh }),
       pushFix: (opts) => pushFix({ ...opts, run: gh }),
       merge: async () => { throw new Error('merge needs approval'); },
+      verifier: fakeVerifier({ head: headOf }),
       babysit: { ci: ghCiReader({ run: gh }), maxRounds: 2, timeoutMs: 3_600_000, now: () => t, wait: async (ms) => { t += ms; } },
     };
 

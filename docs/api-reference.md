@@ -257,7 +257,7 @@ The endpoint emits `task.status_changed` on the event bus. The WebSocket server 
 
 #### `POST /api/tasks/:id/approve` and `POST /api/tasks/:id/reject`
 
-The operator's decision on a coding task in `needs-approval`. The task's `approval` field holds the pending action (`publish` or `merge`), a `summary`, and `requested_at`. Both routes need the same Bearer token as other mutating routes. The decision, with `decided_by: "operator"` and the reason, goes to the task's `approval` and its decision trail.
+The operator's decision on a coding task in `needs-approval`. The task's `approval` field holds the pending action (`publish`, `push-fix`, `verify` or `merge`), a `summary`, and `requested_at`. Both routes need the same Bearer token as other mutating routes. The decision, with `decided_by: "operator"` and the reason, goes to the task's `approval` and its decision trail.
 
 **Body** (optional)
 ```json

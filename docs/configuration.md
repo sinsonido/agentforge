@@ -21,6 +21,7 @@ routing:   ...   # Rules for automatic model selection
 team:      ...   # Agent definitions
 autonomy:  ...   # Which host actions run, wait for the operator, or never run
 babysit:   ...   # How AgentForge watches a task PR's CI and fixes it when red
+verify:    ...   # The independent verification of a PR head before its merge
 budget:    ...   # Spend limits per coding task and per repository, build and verify apart
 alerts:    ...   # Budget alert thresholds
 server:    ...   # HTTP/WebSocket server settings and auth
@@ -318,12 +319,14 @@ What AgentForge may do on the host after a coding task passes the evidence gate.
 |---|---|---|---|
 | `publish` | Push `agentforge/<task>` and open the PR | `allow`, `approve`, `deny` | `allow` |
 | `push-fix` | Push a fix round's commits onto the PR branch (see `babysit`) | `allow`, `approve`, `deny` | `allow` |
-| `merge` | Squash-merge the PR with `gh pr merge` | `approve`, `deny` | `approve` |
+| `verify` | Verify the PR at its head with a fresh read-only run (see `verify`) | `allow`, `approve` | `allow` |
+| `merge` | Squash-merge the PR at its verified head with `gh pr merge --match-head-commit` | `approve`, `deny` | `approve` |
 
 ```yaml
 autonomy:
   publish: allow
   push-fix: allow
+  verify: allow
   merge: approve
 ```
 
@@ -331,7 +334,7 @@ autonomy:
 - `approve`: the task moves to `needs-approval` with a pending approval record. The task view shows an approval card with Approve and Reject. Approve runs the action. If the approved action fails, the task waits again with the error on the card, and Approve retries it.
 - `deny`: the action never runs.
 
-An action that does not run, denied by the policy or rejected by the operator, ends the task where the action before it left it. A denied or rejected `merge` leaves the task `pr-opened`. A denied `publish` fails the task, and a rejected `publish` cancels it. A denied or rejected `push-fix` fails the task with CI red. After an approved merge the task is `completed`.
+An action that does not run, denied by the policy or rejected by the operator, ends the task where the action before it left it. A denied or rejected `merge` leaves the task `pr-opened`, and so does a rejected `verify`. `verify` cannot be denied: without a verdict nothing merges, so `merge: deny` is the way to stop before the merge. A denied `publish` fails the task, and a rejected `publish` cancels it. A denied or rejected `push-fix` fails the task with CI red. After an approved merge the task is `completed`.
 
 A task in `needs-approval` keeps its issue: intake creates no second task for it. It survives a restart and waits for the operator. Every policy and operator decision goes to the task's decision trail. A missing action takes its default. An unknown action, or `merge: allow`, stops startup with an error.
 
@@ -341,7 +344,7 @@ A task in `needs-approval` keeps its issue: intake creates no second task for it
 
 poteto-mode's Babysit playbook, run by the host. After `publish` or `push-fix` pushes a PR head, the task waits in `ci-watch` while AgentForge reads that head's checks with `gh pr checks` on the host. It polls every 10 to 60 seconds; nothing sleeps inside the agent.
 
-- **Green.** Every check finished and none failed. The task goes on to `merge` under the `autonomy` policy, so by default it waits in `needs-approval`.
+- **Green.** Every check finished and none failed. The task goes on to `verify` and then `merge` under the `autonomy` policy, so by default it waits in `needs-approval` with a passing verdict.
 - **Red.** A check failed or was cancelled. With fix rounds left, the task moves to `fixing`: a fresh harness run on a fresh clone of the PR branch. Its instruction holds the original task, each failing check with the tail of its log, and the decision trail so far. The run passes the same evidence gate, `push-fix` pushes its commits onto the PR branch (fast-forward only), and the new head is watched again.
 - **Over the cap.** Red after `max_rounds` fix rounds fails the task with the failing check names.
 
@@ -355,6 +358,32 @@ babysit:
 A head with no checks after five minutes counts as green. The task stores its rounds as `babysit`: the branch, the cap, one record per pushed head (`n`, `head`, `ci`, `failing`), and the final `verdict` (`green`, `red`, `merged`, `closed`, `timeout` or `stopped`). Each CI result is a `gate` entry in the decision trail. The task view shows the rounds.
 
 A task in `ci-watch` keeps its issue and survives a restart: the next process resumes the watch with the same deadline. A task that was `fixing` goes back to `ci-watch` on boot and runs the fix round again on a fresh clone. A PR merged outside AgentForge completes the task; a closed one fails it.
+
+---
+
+## `verify`
+
+poteto-mode's Shipping playbook, run by the host: green is not safe. Before the merge is offered, AgentForge verifies the PR at its exact head SHA with a fresh harness run that did not write the change. The task waits in `verifying` while it runs.
+
+- The verifier gets its own fresh clone, detached at the head SHA, and its own container (`af-task-<handle>-verify`). Its prompt is poteto-mode's Investigation playbook: read-only, one finding per lane, written to `agentforge-verdict.json` at the clone root.
+- A commit, a moved HEAD or a changed tracked file voids the run. A void run fails the verdict whatever its lanes said.
+- Each lane passes or fails with evidence:
+  - `tests`: the host saw the repository's `test_command` pass in the verifier's stream. The verifier's own word does not decide it.
+  - `review`: the verifier read the diff against the base and the task and found it does what the task asks, with nothing unrelated and no bug it can point to.
+- A passing verdict goes on to `merge`. A failing verdict fails the task, and the merge is never offered.
+
+```yaml
+verify:
+  lanes: [tests, review]   # one or both; each is one finding of the same verifier run
+  budget_usd: 1.00         # --max-budget-usd of one verification
+  model: opus              # optional: a different model from executor.model, for a second opinion
+```
+
+The task stores `verification`: `head`, the PR head AgentForge last pushed or read from GitHub, and `verdicts`, one per verified SHA (`sha`, `lanes[]` of `{name, pass, evidence}`, `pass`, `error`, `cost_usd`, `at`). Only the verdict at `head` counts. A fix round, or a push from outside AgentForge, moves `head`, so the old verdict stops covering the PR and a `stale verify` gate entry says so. Each lane is a `gate` entry in the decision trail, and the task view shows the verdict card.
+
+The `merge` action reads the PR head with `gh pr view` right before merging. It refuses unless a passing verdict exists for that head, and it passes the head to `gh pr merge --match-head-commit`, so a push in between makes GitHub refuse too. When the head moved after the verdict, the approved merge sends the task back to `ci-watch` with a new round marked as pushed outside AgentForge: CI and verification run again on the new head, then the merge is offered again.
+
+Each verification reports its cost as its own `cost.recorded` event with `phase: 'verify'`, `model: 'coding-verifier'` and the `taskId`. It does not add to the task's `cost`, which stays the build's. A task interrupted in `verifying` goes back to `ci-watch` on boot and verifies again.
 
 ---
 
@@ -381,9 +410,13 @@ budget:
 
 Every limit is optional; a missing one is no limit. A task created with `budget` in `POST /api/tasks` uses it as its own build limit instead of `task.build`.
 
-**Before each leg.** Before the orchestrator starts a leg that could spend, it checks the limits of every phase that leg could reach. A task with no PR yet runs a build. A task in `ci-watch` whose last round is red runs a fix round (build). A green round goes on to verification (verify). A pending round could do either, so both are checked. When a limit has less than `min_run_usd` left, the task moves to `paused_budget` and a `fail budget` gate entry in the decision trail names the limit and what it has spent. The task keeps its issue, survives a restart, and goes back to `queued` or `ci-watch` on its own once the limit has room again: the repository window rolled on, or the operator raised the limit and restarted. A `decision` entry records the resume. The task view's Cancel button ends a paused task.
+**Before each leg.** Before the orchestrator starts a leg that could spend, it checks the limits of every phase that leg could reach. A task with no PR yet runs a build. A task in `ci-watch` whose last round is red runs a fix round (build). A green round goes on to verification (verify), unless a verdict at that head is already recorded. A pending round could do either, so both are checked. When a limit has less than `min_run_usd` left, the task moves to `paused_budget` and a `fail budget` gate entry in the decision trail names the limit and what it has spent. The task keeps its issue, survives a restart, and goes back to `queued` or `ci-watch` on its own once the limit has room again: the repository window rolled on, or the operator raised the limit and restarted. A `decision` entry records the resume. The task view's Cancel button ends a paused task.
 
-**Each run.** The harness gets `--max-budget-usd` set to what is left under the tightest limit of the run's phase. Without any limit, `executor.budget_usd` applies as before.
+Approving a `verify` that waits in `needs-approval` is checked the same way. Without room in the verify budget, the task parks instead and the approval answers 409.
+
+**Each run.** A build run gets `--max-budget-usd` set to what is left under the tightest build limit. Without one, `executor.budget_usd` applies as before. A verification gets the smaller of `verify.budget_usd` and what is left under the tightest verify limit.
+
+**Recording.** The orchestrator records each build leg's spend, and each verification emits its own `cost.recorded` with `phase: 'verify'`. The orchestrator writes every `cost.recorded` into the ledger and fills in the task's repository.
 
 **Why a rolling window.** A calendar day resets to a full budget at midnight, so a runaway loop could spend twice the limit across the boundary. A rolling window counts the last 24 hours (or 7 or 30 days) from the ledger at every check, so it needs no reset job and gives the same answer after a restart.
 

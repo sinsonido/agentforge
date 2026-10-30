@@ -10,6 +10,9 @@ import { TERMINAL_STATUSES } from '../core/task-model.js';
 import { createStreamTrail, gateEntries, prEntry, readDecisionLogs, verdictEvidence } from '../core/trail.js';
 import { ciEntry, fixInstruction, startRound, watchCi, withLastRound } from './babysit.js';
 import { branchFor } from './names.js';
+import {
+  currentVerdict, judge, readReport, staleEntry, verdictAt, verdictEntries, withHead, withVerdict,
+} from './verify.js';
 
 /**
  * The life of one coding task after the orchestrator picks it:
@@ -20,7 +23,7 @@ import { branchFor } from './names.js';
  *                      → ci-watch         the PR is open; its CI is watched next (with a babysitter)
  *                      → failed           harness error, gate failure, denied publish, or action error
  *                      → cancelled        aborted or timed out; never published
- *   ci-watch → (green) the merge, as above
+ *   ci-watch → (green) verifying          a fresh read-only run verifies the PR at its head
  *            → fixing                     red with fix rounds left: a fresh harness run
  *            → failed                     red over the round cap, PR closed, or CI timed out
  *            → completed                  the PR was merged outside AgentForge
@@ -28,11 +31,17 @@ import { branchFor } from './names.js';
  *   fixing → ci-watch                     push-fix pushed the fix, or the host shut down
  *                                         and the round runs again
  *          → needs-approval|failed|cancelled  as for executing
+ *   verifying → needs-approval|pr-opened  the verdict passed: the merge, as its rule says
+ *             → failed                    the verdict failed; the merge is never offered
+ *             → ci-watch                  the PR head moved outside AgentForge, or the host shut down
+ *             → cancelled                 aborted
  *   needs-approval → executing            approved: the parked action runs
+ *                  → ci-watch             approved merge found a head no verdict covers
  *                  → pr-opened|failed|cancelled  rejected: where the action before it left the task
  *
- * After the evidence gate passes, every host action (publish, push-fix, merge)
- * goes through the autonomy gate, `proceed`. Each call of runCodingTask is one
+ * After the evidence gate passes, every host action (publish, push-fix, verify,
+ * merge) goes through the autonomy gate, `proceed`. Without a babysitter, publish
+ * goes straight to verify, so `executing` leads to the verdict in the same leg. Each call of runCodingTask is one
  * leg that ends in one of the statuses above; the orchestrator runs the next
  * leg of a task left in `ci-watch`. Each row is the queue write and the event
  * that announces it.
@@ -66,12 +75,98 @@ const HOST_ACTIONS = Object.freeze({
     const entry = { kind: 'evidence', summary, evidence: { branch, sha, round } };
     return { extra: { result: summary }, trail: [entry], next: { pr_url: task.pr_url }, head: sha };
   },
-  async merge(task, { pr_url }, { merge }) {
-    await merge({ task, url: pr_url });
+  async verify(task, { pr_url }, deps) {
+    const { queue, verifier, signal, eventBus = defaultEventBus } = deps;
+    if (!verifier) return { extra: { result: `${pr_url} is not verified: this host has no verifier` }, trail: [], stop: 'pr-opened' };
+    const { state, head } = await verifier.pr(pr_url);
+    if (state !== 'OPEN') throw new Error(`${pr_url} is ${String(state).toLowerCase()}`);
+    moveHead(task, head, queue);
+    if (deps.babysit && task.babysit && head !== task.babysit.rounds.at(-1).head) return rewatch(task, head, deps);
+
+    const recorded = verdictAt(task.verification, head);
+    if (recorded) {
+      const entry = { kind: 'decision', summary: `verdict at ${short(head)} already recorded (${recorded.pass ? 'pass' : 'fail'})`, evidence: { source: 'verify', sha: head } };
+      return recorded.pass
+        ? { extra: {}, trail: [entry], next: { pr_url } }
+        : { extra: { result: verdictFailure(recorded) }, trail: [entry], stop: 'failed' };
+    }
+
+    queue.updateStatus(task.id, 'verifying', { result: `verifying ${short(head)}` });
+    eventBus.emit('task.verifying', { task, sha: head });
+    const run = await verifier.run(task, { sha: head, signal });
+    if (signal?.reason === SHUTDOWN) return { extra: {}, trail: [], stop: task.babysit ? 'ci-watch' : 'cancelled' };
+    if (run.outcome === 'cancelled' || signal?.aborted) {
+      return { extra: { result: `verification cancelled (${run.cancelReason ?? 'signal'})` }, trail: [], stop: 'cancelled' };
+    }
+    const verdict = judge(run, { sha: head, lanes: verifier.lanes, task, report: run.dir ? await readReport(run.dir) : null });
+    queue.updateStatus(task.id, 'verifying', { verification: withVerdict(task.verification, verdict) });
+    recordVerifyCost(task, run, deps);
+    const trail = verdictEntries(verdict);
+    if (!verdict.pass) return { extra: { result: verdictFailure(verdict) }, trail, stop: 'failed' };
+    return { extra: { result: `verified ${short(head)}` }, trail, next: { pr_url } };
+  },
+  async merge(task, { pr_url }, deps) {
+    try {
+      await deps.merge({ task, url: pr_url, verification: task.verification });
+    } catch (err) {
+      if (err.reason !== 'head-moved' || !deps.babysit || !task.babysit) throw err;
+      moveHead(task, err.head, deps.queue);
+      return rewatch(task, err.head, deps);
+    }
     const entry = { kind: 'evidence', summary: `merged ${pr_url}`, evidence: { url: pr_url, merged: true } };
     return { extra: { result: `merged ${pr_url}` }, trail: [entry], next: null };
   },
 });
+
+const short = (sha) => String(sha ?? '').slice(0, 7);
+
+const verdictFailure = (v) =>
+  `verification failed at ${short(v.sha)}: ${v.error ?? v.lanes.filter((l) => !l.pass).map((l) => `${l.name}: ${l.evidence}`).join('; ')}`;
+
+/**
+ * Record `head` as the PR head AgentForge knows. A verdict that covered the old
+ * head stops counting, and the trail says so.
+ */
+function moveHead(task, head, queue) {
+  const before = task.verification;
+  if (before?.head === head) return;
+  const covered = currentVerdict(before);
+  if (covered) queue.appendTrail(task.id, staleEntry(covered, head));
+  queue.updateStatus(task.id, task.status, { verification: withHead(before, head) });
+}
+
+/**
+ * The PR head moved outside AgentForge after its CI was watched: watch the new
+ * head's CI again. The new round keeps the last round's number, so it does not
+ * spend a fix round, and is marked `external`.
+ */
+function rewatch(task, head, { babysit: { now = Date.now } }) {
+  const state = task.babysit;
+  const last = state.rounds.at(-1);
+  const round = { n: last.n, head, ci: 'pending', failing: [], started_at: now(), finished_at: null, external: true };
+  const summary = `the PR head moved to ${short(head)} outside AgentForge; watching its CI again`;
+  return {
+    extra: { babysit: { ...state, verdict: null, rounds: [...state.rounds, round] }, result: summary },
+    trail: [{ kind: 'decision', summary, evidence: { source: 'babysit', head, previous: last.head } }],
+    stop: 'ci-watch',
+  };
+}
+
+/** Report what a verification spent as its own tranche: phase `verify`, apart from the build. */
+function recordVerifyCost(task, run, { eventBus = defaultEventBus, projectId = null }) {
+  if (run.costUsd == null) return;
+  const usage = run.usage ?? {};
+  eventBus.emit('cost.recorded', {
+    projectId: task.project_id || projectId || 'default',
+    agentId: task.agent_id,
+    taskId: task.id,
+    model: 'coding-verifier',
+    tokensIn: (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0),
+    tokensOut: usage.output_tokens ?? 0,
+    cost: run.costUsd,
+    phase: 'verify',
+  });
+}
 
 /** The abort reason of a host shutdown: a CI watch or fix round resumes on the next boot. */
 export const SHUTDOWN = 'shutdown';
@@ -111,8 +206,10 @@ export function executorConfig(cfg) {
  *   queue: { updateStatus(id: string, status: string, extra?: object): object,
  *            appendTrail(id: string, entry: object): object|null, trail(id: string): object[] },
  *   publish: (opts: { task: object, clone: { dir: string }, verdict: object, queue: object, trail: object[] }) => Promise<string>,
- *   merge: (opts: { task: object, url: string }) => Promise<void>,
+ *   merge: (opts: { task: object, url: string, verification: object|null }) => Promise<void>,
  *   pushFix?: (opts: { task: object, clone: { dir: string }, verdict: object, branch: string }) => Promise<string>,
+ *   verifier?: Verifier,
+ *   projectId?: string|null,
  *   execute?: (task: object, opts: { signal?: AbortSignal }) => Promise<object>,
  *   babysit?: Babysitter,
  *   signal?: AbortSignal,
@@ -124,6 +221,13 @@ export function executorConfig(cfg) {
  * directly and no CI is watched.
  * @typedef {{ ci: import('./babysit.js').CiReader, maxRounds: number, timeoutMs: number,
  *   wait?: (ms: number, signal?: AbortSignal) => Promise<unknown>, now?: () => number }} Babysitter
+ *
+ * What the runner needs to verify a PR head before the merge (see verify.js).
+ * `run` is a fresh read-only harness run on a fresh clone at `sha`; its result
+ * carries `head`, the clone's HEAD after the run, and `dir`, where the report is.
+ * Without it, the verify action fails, so nothing merges.
+ * @typedef {{ lanes: string[], pr(url: string): Promise<{ state: string, head: string }>,
+ *   run(task: object, opts: { sha: string, signal?: AbortSignal }) => Promise<object> }} Verifier
  */
 
 /**
@@ -252,6 +356,7 @@ async function settle(task, deps, fix = null) {
 async function babysitLeg(task, deps) {
   const { queue, signal, babysit: sitter } = deps;
   if (!sitter) return ['failed', { result: 'ci-watch: this host has no CI watcher configured' }];
+  if (!task.babysit) return ['failed', { result: 'ci-watch: the task has no CI rounds to watch' }];
   let state = task.babysit;
   let round = state.rounds.at(-1);
 
@@ -323,7 +428,7 @@ async function proceed(task, action, payload, deps, fields, approved = false) {
   const extra = { ...fields };
   for (let name = action; name; name = ACTIONS[name].next) {
     const spec = ACTIONS[name];
-    const rule = approved ? 'allow' : policy[name];
+    const rule = approved ? 'allow' : (policy[name] ?? spec.default);
     if (!approved) queue.appendTrail(task.id, policyEntry(name, rule));
     if (rule === 'deny') return [spec.stopsAt ?? 'failed', { ...extra, result: `${name} denied by policy` }];
     if (rule === 'approve') {
@@ -340,6 +445,8 @@ async function proceed(task, action, payload, deps, fields, approved = false) {
     approved = false;
     done.trail.forEach((e) => queue.appendTrail(task.id, e));
     Object.assign(extra, done.extra);
+    if (done.head) moveHead(task, done.head, queue);
+    if (done.stop) return [done.stop, extra];
     if (spec.watched && deps.babysit) {
       const { maxRounds, now = Date.now } = deps.babysit;
       const n = name === FIRST_ACTION ? 0 : payload.round;
