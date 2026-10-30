@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import yaml from 'js-yaml';
 import { PLAYBOOKS } from '../core/task-model.js';
 import { parseAutonomy } from '../core/autonomy.js';
+import { parseBabysit } from '../execution/babysit.js';
 
 const DEFAULT_CONFIG = {
   project: { name: 'AgentForge Project', budget: 100 },
@@ -38,6 +39,7 @@ export function loadConfig(configPath = 'agentforge.yml') {
   validateModelReferences(config);
   validateIntake(config.intake);
   config.autonomy = validateAutonomy(config.autonomy);
+  config.babysit = validateBabysit(config.babysit);
   return config;
 }
 
@@ -49,6 +51,17 @@ export function loadConfig(configPath = 'agentforge.yml') {
 export function validateAutonomy(raw) {
   const parsed = parseAutonomy(raw);
   if (!parsed.ok) throw new Error(`Invalid autonomy configuration: ${parsed.error}`);
+  return parsed.value;
+}
+
+/**
+ * The `babysit:` block with every key set: the fix round cap, how long one CI
+ * run may take, and which checks count. Throws on a bad value.
+ * @returns {typeof import('../execution/babysit.js').BABYSIT_DEFAULTS}
+ */
+export function validateBabysit(raw) {
+  const parsed = parseBabysit(raw);
+  if (!parsed.ok) throw new Error(`Invalid babysit configuration: ${parsed.error}`);
   return parsed.value;
 }
 

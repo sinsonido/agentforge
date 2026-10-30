@@ -10,7 +10,9 @@
  *   repo's dependencies and the one test command the evidence gate accepts, and
  *   `handle`, the task's name outside this database (see newHandle).
  *   Its lifecycle: queued → executing → pr-opened | completed | failed | cancelled, with
- *   `needs-approval` while a host action waits for the operator (see autonomy.js).
+ *   `needs-approval` while a host action waits for the operator (see autonomy.js),
+ *   `ci-watch` while AgentForge watches the PR's CI and `fixing` while a fix round runs
+ *   (see babysit.js). `babysit` holds the CI rounds.
  *
  * @typedef {'bug-fix'|'feature'|'refactoring'|'investigation'|'perf-issue'} Playbook
  * @typedef {{ kind: 'text', title: string, type?: string, priority?: string, agent_id?: string }} TextTaskInput
@@ -29,7 +31,7 @@ export const TASK_KINDS = Object.freeze(['text', 'coding']);
 export const TERMINAL_STATUSES = Object.freeze(['completed', 'failed', 'pr-opened', 'cancelled']);
 
 export const CODING_FIELDS = Object.freeze([
-  'repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url', 'setup_command', 'test_command', 'approval', 'handle',
+  'repo', 'base', 'instruction', 'issue', 'playbook', 'step', 'budget', 'pr_url', 'setup_command', 'test_command', 'approval', 'handle', 'babysit',
 ]);
 
 /**

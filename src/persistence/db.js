@@ -50,6 +50,7 @@ const MIGRATIONS = [
   `ALTER TABLE tasks ADD COLUMN handle TEXT;
    UPDATE tasks SET handle = CASE WHEN status = 'queued' THEN id || '-' || lower(hex(randomblob(4))) ELSE id END
      WHERE kind = 'coding';`,
+  `ALTER TABLE tasks ADD COLUMN babysit TEXT;`,
 ];
 
 /** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
@@ -148,12 +149,12 @@ export class AgentForgeDB {
       upsertTask: this.db.prepare(`
         INSERT INTO tasks (id, title, type, status, agent_id, project_id, model_used, tokens_in, tokens_out, cost, result, created_at, assigned_at, completed_at,
                            priority, depends_on, force_model, allow_tier_downgrade, context_tokens_estimate,
-                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command, approval, handle)
+                           kind, repo, base, instruction, issue, playbook, step, budget, pr_url, setup_command, test_command, approval, handle, babysit)
         VALUES (@id, @title, @type, @status, @agent_id, @project_id, @model_used, @tokens_in, @tokens_out, @cost, @result, @created_at, @assigned_at, @completed_at,
                 @priority, @depends_on, @force_model, @allow_tier_downgrade, @context_tokens_estimate,
-                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command, @approval, @handle)
+                @kind, @repo, @base, @instruction, @issue, @playbook, @step, @budget, @pr_url, @setup_command, @test_command, @approval, @handle, @babysit)
         ON CONFLICT(id) DO UPDATE SET
-          status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, approval=excluded.approval, model_used=excluded.model_used,
+          status=excluded.status, step=excluded.step, pr_url=excluded.pr_url, approval=excluded.approval, babysit=excluded.babysit, model_used=excluded.model_used,
           tokens_in=excluded.tokens_in, tokens_out=excluded.tokens_out,
           cost=excluded.cost, result=excluded.result,
           assigned_at=excluded.assigned_at, completed_at=excluded.completed_at
@@ -236,6 +237,7 @@ export class AgentForgeDB {
       // better-sqlite3 binds a JS number as REAL, which the TEXT column would keep as '5.0'.
       step: task.step == null ? null : String(task.step),
       approval: task.approval ? JSON.stringify(task.approval) : null,
+      babysit: task.babysit ? JSON.stringify(task.babysit) : null,
     });
   }
 
@@ -389,6 +391,7 @@ function rowToTask(row) {
     depends_on: JSON.parse(row.depends_on),
     allow_tier_downgrade: row.allow_tier_downgrade === 1,
     approval: row.approval ? JSON.parse(row.approval) : null,
+    babysit: row.babysit ? JSON.parse(row.babysit) : null,
   };
   if (task.kind !== 'coding') for (const f of CODING_FIELDS) delete task[f];
   return task;

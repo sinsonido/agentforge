@@ -200,24 +200,24 @@ intake:
 });
 
 describe('loadConfig autonomy', () => {
-  it('defaults to publish allow, merge approve', () => {
-    assert.deepEqual(loadConfig(write('no-autonomy.yml', '')).autonomy, { publish: 'allow', merge: 'approve' });
+  it('defaults to publish and push-fix allow, merge approve', () => {
+    assert.deepEqual(loadConfig(write('no-autonomy.yml', '')).autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'approve' });
   });
 
   it('reads the autonomy block from agentforge.example.yml', () => {
-    assert.deepEqual(loadConfig(examplePath).autonomy, { publish: 'allow', merge: 'approve' });
+    assert.deepEqual(loadConfig(examplePath).autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'approve' });
   });
 
   it('keeps the default for an action the file leaves out', () => {
     const { autonomy } = loadConfig(write('autonomy-deny.yml', 'autonomy:\n  merge: deny\n'));
-    assert.deepEqual(autonomy, { publish: 'allow', merge: 'deny' });
+    assert.deepEqual(autonomy, { publish: 'allow', 'push-fix': 'allow', merge: 'deny' });
   });
 
   it('rejects an unknown action and a merge without approval', () => {
     const path = write('autonomy-bad.yml', 'autonomy:\n  deploy: approve\n  merge: allow\n');
     assert.throws(() => loadConfig(path), (err) => {
       assert.match(err.message, /Invalid autonomy configuration/);
-      assert.match(err.message, /unknown action "deploy"; AgentForge performs: publish, merge/);
+      assert.match(err.message, /unknown action "deploy"; AgentForge performs: publish, push-fix, merge/);
       assert.match(err.message, /merge must be one of: approve, deny/);
       return true;
     });
@@ -230,6 +230,32 @@ describe('loadConfig autonomy', () => {
 
   it('rejects a list', () => {
     assert.throws(() => loadConfig(write('autonomy-list.yml', 'autonomy:\n  - publish\n')), /autonomy must be a mapping/);
+  });
+});
+
+describe('loadConfig babysit', () => {
+  it('defaults to two fix rounds, 60 minutes per CI run, all checks', () => {
+    assert.deepEqual(loadConfig(write('no-babysit.yml', '')).babysit, { max_rounds: 2, timeout_minutes: 60, checks: 'all' });
+  });
+
+  it('reads the babysit block from agentforge.example.yml', () => {
+    assert.deepEqual(loadConfig(examplePath).babysit, { max_rounds: 2, timeout_minutes: 60, checks: 'all' });
+  });
+
+  it('keeps the defaults for keys the file leaves out', () => {
+    const { babysit } = loadConfig(write('babysit-required.yml', 'babysit:\n  max_rounds: 0\n  checks: required\n'));
+    assert.deepEqual(babysit, { max_rounds: 0, timeout_minutes: 60, checks: 'required' });
+  });
+
+  it('rejects a bad cap, timeout, check set and unknown key at once', () => {
+    const path = write('babysit-bad.yml', 'babysit:\n  max_rounds: -1\n  timeout_minutes: 0\n  checks: some\n  rounds: 3\n');
+    assert.throws(() => loadConfig(path), (err) => {
+      for (const part of [
+        'Invalid babysit configuration', 'unknown keys: rounds', 'max_rounds must be a whole number',
+        'timeout_minutes must be a positive number', 'checks must be one of: all, required',
+      ]) assert.ok(err.message.includes(part), part);
+      return true;
+    });
   });
 });
 

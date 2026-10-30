@@ -2,6 +2,7 @@ import eventBus from './event-bus.js';
 import { ContextBuilder } from '../execution/context-builder.js';
 import { OutputCollector } from '../execution/output-collector.js';
 import { CostTracker } from './cost-tracker.js';
+import { SHUTDOWN } from '../execution/coding-runner.js';
 
 /**
  * The Orchestrator is the main loop of AgentForge.
@@ -10,8 +11,10 @@ import { CostTracker } from './cost-tracker.js';
  */
 export class Orchestrator {
   /**
-   * `coding` runs `kind: 'coding'` tasks: `run(task, signal)` drives one task to a
-   * terminal status or `needs-approval`, at most `concurrency` at a time; `decide(task, choice)`
+   * `coding` runs `kind: 'coding'` tasks: `run(task, signal)` drives one leg of a task, to a
+   * terminal status, `needs-approval` or `ci-watch`, at most `concurrency` legs at a time. A task
+   * left in `ci-watch`, by a leg or by the previous process, gets its next leg before any queued
+   * task starts. `decide(task, choice)`
    * applies the operator's approve or reject. Without it coding tasks stay queued.
    * `intake` polls for new coding tasks while the orchestrator runs.
    */
@@ -54,7 +57,8 @@ export class Orchestrator {
 
   /**
    * Stop the loop and abort every running coding task, which stops its container
-   * and ends it `cancelled`. Resolves once those runs settle, or after `graceMs`.
+   * and ends it `cancelled`, except a CI watch or fix round, which stays in `ci-watch`
+   * for the next process. Resolves once those runs settle, or after `graceMs`.
    */
   stop({ graceMs = 20_000 } = {}) {
     this._running = false;
@@ -65,7 +69,7 @@ export class Orchestrator {
       this._loopInterval = null;
     }
     const runs = [...this._codingRuns.values()];
-    for (const run of runs) run.controller.abort();
+    for (const run of runs) run.controller.abort(SHUTDOWN);
     console.log('[orchestrator] Stopped. Cancelling %d coding task(s).', runs.length);
     let timer;
     const grace = new Promise((r) => { timer = setTimeout(r, graceMs).unref(); });
@@ -155,28 +159,32 @@ export class Orchestrator {
   _dispatchCoding() {
     if (!this.coding) return;
     while (this._codingRuns.size < this.coding.concurrency) {
-      const task = this.taskQueue.next(t => t.kind === 'coding');
+      const task = this.taskQueue.getByStatus('ci-watch').find(t => !this._codingRuns.has(t.id))
+        ?? this.taskQueue.next(t => t.kind === 'coding');
       if (!task) return;
       const controller = new globalThis.AbortController();
+      const before = { cost: task.cost ?? 0, tokens_in: task.tokens_in ?? 0, tokens_out: task.tokens_out ?? 0 };
       const done = this.coding.run(task, controller.signal)
-        .then(() => this._recordCodingCost(this.taskQueue.get(task.id)))
+        .then(() => this._recordCodingCost(this.taskQueue.get(task.id), before))
         .catch((err) => console.error('[orchestrator] Coding task %s: %s', task.id, err.message))
         .finally(() => this._codingRuns.delete(task.id));
       this._codingRuns.set(task.id, { controller, done });
     }
   }
 
-  _recordCodingCost(task) {
-    if (!task.cost) return;
+  /** Record what one leg spent: the task's totals minus what it had spent `before`. */
+  _recordCodingCost(task, before) {
+    const cost = (task.cost ?? 0) - before.cost;
+    if (!cost) return;
     const projectId = task.project_id || this.config.project?.name || 'default';
-    this.costTracker.recordCost(projectId, task.agent_id, 'coding-executor', task.cost);
+    this.costTracker.recordCost(projectId, task.agent_id, 'coding-executor', cost);
     eventBus.emit('cost.recorded', {
       projectId,
       agentId: task.agent_id,
       model: 'coding-executor',
-      tokensIn: task.tokens_in,
-      tokensOut: task.tokens_out,
-      cost: task.cost,
+      tokensIn: (task.tokens_in ?? 0) - before.tokens_in,
+      tokensOut: (task.tokens_out ?? 0) - before.tokens_out,
+      cost,
     });
   }
 

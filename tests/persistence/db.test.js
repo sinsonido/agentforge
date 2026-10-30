@@ -253,7 +253,7 @@ describe('AgentForgeDB', () => {
       new AgentForgeDB(path).close();
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 8);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 9);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.title, 'Legacy');
       assert.equal(task.priority, 'medium');
@@ -278,7 +278,7 @@ describe('AgentForgeDB', () => {
 
       const upgraded = new AgentForgeDB(path);
 
-      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 8);
+      assert.equal(upgraded.db.pragma('user_version', { simple: true }), 9);
       const [task] = upgraded.loadQueue().tasks;
       assert.equal(task.kind, 'text');
       assert.equal(task.priority, 'high');
@@ -291,7 +291,7 @@ describe('AgentForgeDB', () => {
     it('gives coding tasks saved before the command columns the default setup and test commands', async () => {
       const path = `${TEST_DIR}/v3.db`;
       const v3 = new AgentForgeDB(path);
-      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; ALTER TABLE tasks DROP COLUMN approval; ALTER TABLE tasks DROP COLUMN handle; DROP TABLE task_events; DROP TABLE task_trail');
+      v3.db.exec('ALTER TABLE tasks DROP COLUMN setup_command; ALTER TABLE tasks DROP COLUMN test_command; ALTER TABLE tasks DROP COLUMN approval; ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit; DROP TABLE task_events; DROP TABLE task_trail');
       v3.db.pragma('user_version = 3');
       v3.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook)
         VALUES ('t1', 'coding', 'Fix', 'queued', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix'), ('t2', 'text', 'Hi', 'queued', 2, NULL, NULL, NULL, NULL, NULL)`).run();
@@ -308,7 +308,7 @@ describe('AgentForgeDB', () => {
     it('gives queued coding tasks a fresh handle and lets tasks that already ran keep their id', async () => {
       const path = `${TEST_DIR}/v7.db`;
       const v7 = new AgentForgeDB(path);
-      v7.db.exec('ALTER TABLE tasks DROP COLUMN handle');
+      v7.db.exec('ALTER TABLE tasks DROP COLUMN handle; ALTER TABLE tasks DROP COLUMN babysit');
       v7.db.pragma('user_version = 7');
       v7.db.prepare(`INSERT INTO tasks (id, kind, title, status, created_at, repo, base, instruction, issue, playbook, pr_url)
         VALUES ('t1', 'coding', 'Ran', 'needs-approval', 1, 'o/r', 'master', 'Fix it', 9, 'bug-fix', 'https://github.com/o/r/pull/5'),
