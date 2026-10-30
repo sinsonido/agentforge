@@ -8,6 +8,7 @@ import { ApprovalCard } from '@/components/tasks/ApprovalCard'
 import { CiRounds, babysitOf } from '@/components/tasks/CiRounds'
 import { TaskTrail } from '@/components/tasks/TaskTrail'
 import { TranscriptEntry } from '@/components/tasks/TranscriptEntry'
+import { VerdictCard, verificationOf } from '@/components/tasks/VerdictCard'
 import { useApi } from '@/hooks/useApi'
 import { useTaskTranscript } from '@/hooks/useTaskTranscript'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -15,7 +16,7 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext'
 import { api, pendingApproval } from '@/lib/api'
 import { concernsTask } from '@/lib/ws'
 
-const CANCELLABLE: string[] = ['queued', 'executing', 'ci-watch', 'fixing']
+const CANCELLABLE: string[] = ['queued', 'executing', 'ci-watch', 'fixing', 'verifying']
 
 function TaskDetail({ id }: { id: string }) {
   const { data, error: taskError, loading, refresh } = useApi(() => api.task(id), [id])
@@ -63,6 +64,7 @@ function TaskDetail({ id }: { id: string }) {
 
   const coding = task.kind === 'coding' ? task : null
   const babysit = coding && babysitOf(coding)
+  const verification = coding && verificationOf(coding)
   const cancel = async () => {
     setCancelling(true)
     setCancelError(null)
@@ -109,6 +111,8 @@ function TaskDetail({ id }: { id: string }) {
       </header>
 
       {babysit && <CiRounds babysit={babysit} fixing={(task.status as string) === 'fixing'} />}
+
+      {verification?.head && <VerdictCard verification={verification} verifying={(task.status as string) === 'verifying'} />}
 
       {coding && waiting && (
         <div ref={approvalBox} className="scroll-mt-4">
