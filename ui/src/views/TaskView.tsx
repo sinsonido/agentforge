@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { ApprovalCard } from '@/components/tasks/ApprovalCard'
 import { CiRounds, babysitOf } from '@/components/tasks/CiRounds'
+import { SpendCard } from '@/components/tasks/SpendCard'
 import { TaskTrail } from '@/components/tasks/TaskTrail'
 import { TranscriptEntry } from '@/components/tasks/TranscriptEntry'
 import { useApi } from '@/hooks/useApi'
@@ -15,7 +16,7 @@ import { useWebSocketContext } from '@/contexts/WebSocketContext'
 import { api, pendingApproval } from '@/lib/api'
 import { concernsTask } from '@/lib/ws'
 
-const CANCELLABLE: string[] = ['queued', 'executing', 'ci-watch', 'fixing']
+const CANCELLABLE: string[] = ['queued', 'executing', 'ci-watch', 'fixing', 'paused_budget']
 
 function TaskDetail({ id }: { id: string }) {
   const { data, error: taskError, loading, refresh } = useApi(() => api.task(id), [id])
@@ -107,6 +108,8 @@ function TaskDetail({ id }: { id: string }) {
           <p className="text-xs text-muted-foreground break-words">{task.result}</p>
         )}
       </header>
+
+      {coding && <SpendCard taskId={id} version={`${task.status}:${task.cost ?? 0}`} />}
 
       {babysit && <CiRounds babysit={babysit} fixing={(task.status as string) === 'fixing'} />}
 

@@ -66,22 +66,51 @@ export interface QuotaStatus {
   requests: { used: number; max: number }
 }
 
+/** What a cost record was spent on: a task's build runs or its verification runs. */
+export type SpendPhase = 'build' | 'verify'
+
+/** One repository's spend in the current rolling budget window (see src/core/budget.js). */
+export interface RepoSpend {
+  window: 'day' | 'week' | 'month'
+  since: number
+  build: { spent: number; limit: number | null }
+  verify: { spent: number; limit: number | null }
+}
+
 export interface CostData {
   totalCostUSD: number
   byAgent: Record<string, number>
   byModel: Record<string, number>
+  byPhase: Record<SpendPhase, number>
+  repos: Record<string, RepoSpend>
   transactions: CostTransaction[]
   budgets: Record<string, { budget: number; spent: number }>
 }
 
 export interface CostTransaction {
-  projectId?: string
-  agentId?: string
-  model?: string
+  projectId?: string | null
+  agentId?: string | null
+  model?: string | null
   tokensIn?: number
   tokensOut?: number
   cost?: number
+  taskId?: string | null
+  repo?: string | null
+  phase?: SpendPhase
+  at?: number
 }
+
+/** A limit on a task's spend in one phase: its own, or its repository's in the window. */
+export interface SpendLimit {
+  scope: 'task' | 'repo'
+  phase: SpendPhase
+  limit: number
+  spent: number
+  remaining: number
+}
+
+/** A coding task's spend per phase, from GET /api/tasks/:id/spend. */
+export type TaskSpend = Record<SpendPhase, { spent: number; limits: SpendLimit[] }>
 
 export interface ApiEvent {
   id: number
