@@ -3,6 +3,8 @@ import { TaskQueue } from './core/task-queue.js';
 import { QuotaManager } from './core/quota-tracker.js';
 import { Router } from './routing/router.js';
 import { Orchestrator } from './core/orchestrator.js';
+import { CostTracker } from './core/cost-tracker.js';
+import { Budget } from './core/budget.js';
 import { AgentForgeDB } from './persistence/db.js';
 import { ProviderRegistry, OllamaProvider } from './providers/interface.js';
 import { AnthropicProvider } from './providers/anthropic.js';
@@ -28,6 +30,8 @@ export async function createAgentForge(configPath) {
   // Database, then the task queue it restores and writes through to
   const db = new AgentForgeDB(config.database?.path);
   const taskQueue = new TaskQueue({ store: db });
+  const costTracker = new CostTracker(config, { store: db });
+  const budget = new Budget(config.budget, costTracker);
 
   // Quota manager
   const quotaManager = new QuotaManager();
@@ -84,7 +88,7 @@ export async function createAgentForge(configPath) {
     const babysit = config.babysit ?? BABYSIT_DEFAULTS;
     const host = {
       queue: taskQueue, publish, merge, pushFix, policy: config.autonomy,
-      execute: (t, opts) => runExecutor(t, {
+      execute: (t, opts) => runExecutor(budget.capRun(t, 'build'), {
         ...options, ...opts,
         instance: process.env.AGENTFORGE_INSTANCE,
         recordEvent: (id, event) => db.appendTaskEvent(id, event),
@@ -111,13 +115,11 @@ export async function createAgentForge(configPath) {
     config,
     coding,
     intake,
+    costTracker,
+    budget,
   });
 
-  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.completed', 'task.failed'];
-
-  eventBus.on('cost.recorded', ({ projectId, agentId, model, tokensIn, tokensOut, cost }) => {
-    db.recordCost(projectId, agentId, model, tokensIn, tokensOut, cost);
-  });
+  const TASK_EVENTS = ['task.queued', 'task.executing', 'task.needs_approval', 'task.ci_watch', 'task.fixing', 'task.paused_budget', 'task.completed', 'task.failed'];
 
   // Log all events to DB
   const ALL_LOG_EVENTS = [...TASK_EVENTS, 'cost.recorded', 'quota.exhausted', 'quota.reset', 'budget.exceeded', 'budget.warning'];

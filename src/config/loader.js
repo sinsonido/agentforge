@@ -4,6 +4,7 @@ import yaml from 'js-yaml';
 import { PLAYBOOKS } from '../core/task-model.js';
 import { parseAutonomy } from '../core/autonomy.js';
 import { parseBabysit } from '../execution/babysit.js';
+import { parseBudget } from '../core/budget.js';
 
 const DEFAULT_CONFIG = {
   project: { name: 'AgentForge Project', budget: 100 },
@@ -40,6 +41,7 @@ export function loadConfig(configPath = 'agentforge.yml') {
   validateIntake(config.intake);
   config.autonomy = validateAutonomy(config.autonomy);
   config.babysit = validateBabysit(config.babysit);
+  config.budget = validateBudget(config.budget);
   return config;
 }
 
@@ -62,6 +64,18 @@ export function validateAutonomy(raw) {
 export function validateBabysit(raw) {
   const parsed = parseBabysit(raw);
   if (!parsed.ok) throw new Error(`Invalid babysit configuration: ${parsed.error}`);
+  return parsed.value;
+}
+
+/**
+ * The `budget:` block with every key set: per-task and per-repo limits for build
+ * and verification spend, the repo window, and the least a run may start with.
+ * Throws on a bad value.
+ * @returns {import('../core/budget.js').BudgetPolicy}
+ */
+export function validateBudget(raw) {
+  const parsed = parseBudget(raw);
+  if (!parsed.ok) throw new Error(`Invalid budget configuration: ${parsed.error}`);
   return parsed.value;
 }
 

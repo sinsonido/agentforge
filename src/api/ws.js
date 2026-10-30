@@ -23,6 +23,7 @@ const EVENTS = [
   'task.needs_approval',
   'task.ci_watch',
   'task.fixing',
+  'task.paused_budget',
   'task.completed',
   'task.failed',
   'task.step_changed',

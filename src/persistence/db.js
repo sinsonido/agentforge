@@ -51,6 +51,10 @@ const MIGRATIONS = [
    UPDATE tasks SET handle = CASE WHEN status = 'queued' THEN id || '-' || lower(hex(randomblob(4))) ELSE id END
      WHERE kind = 'coding';`,
   `ALTER TABLE tasks ADD COLUMN babysit TEXT;`,
+  // A cost record names its task, repository and phase, so budgets can sum per task and per repo window.
+  `ALTER TABLE cost_records ADD COLUMN task_id TEXT;
+   ALTER TABLE cost_records ADD COLUMN repo TEXT;
+   ALTER TABLE cost_records ADD COLUMN phase TEXT NOT NULL DEFAULT 'build';`,
 ];
 
 /** A task keeps its newest TASK_EVENTS_CAP agent events; older ones are pruned. */
@@ -177,11 +181,10 @@ export class AgentForgeDB {
       `),
       getTrail: this.db.prepare('SELECT seq, at, kind, summary, evidence FROM task_trail WHERE task_id = ? ORDER BY seq'),
       insertCost: this.db.prepare(`
-        INSERT INTO cost_records (project_id, agent_id, model, tokens_in, tokens_out, cost)
-        VALUES (@project_id, @agent_id, @model, @tokens_in, @tokens_out, @cost)
+        INSERT INTO cost_records (project_id, agent_id, model, tokens_in, tokens_out, cost, task_id, repo, phase, recorded_at)
+        VALUES (@project_id, @agent_id, @model, @tokens_in, @tokens_out, @cost, @task_id, @repo, @phase, @recorded_at)
       `),
-      totalCost: this.db.prepare('SELECT COALESCE(SUM(cost), 0) as total FROM cost_records WHERE project_id = ?'),
-      costByAgent: this.db.prepare('SELECT agent_id, COALESCE(SUM(cost), 0) as total FROM cost_records WHERE project_id = ? GROUP BY agent_id'),
+      costRecords: this.db.prepare('SELECT * FROM cost_records ORDER BY id'),
       insertEvent: this.db.prepare('INSERT INTO events (event, data) VALUES (?, ?)'),
       recentEvents: this.db.prepare('SELECT * FROM events ORDER BY id DESC LIMIT ?'),
       appendTaskEvent: this.db.prepare(`
@@ -302,26 +305,36 @@ export class AgentForgeDB {
 
   // ─── Cost operations ─────────────────────────────────
 
-  /** Record a cost entry */
-  recordCost(projectId, agentId, model, tokensIn, tokensOut, cost) {
+  /** Append one record to the cost ledger. */
+  recordCost({ projectId, agentId, model, tokensIn, tokensOut, cost, taskId, repo, phase, at }) {
     this._stmts.insertCost.run({
-      project_id: projectId,
-      agent_id: agentId,
-      model,
+      project_id: projectId ?? null,
+      agent_id: agentId ?? null,
+      model: model ?? null,
       tokens_in: tokensIn || 0,
       tokens_out: tokensOut || 0,
       cost: cost || 0,
+      task_id: taskId ?? null,
+      repo: repo ?? null,
+      phase: phase ?? 'build',
+      recorded_at: at ?? Date.now(),
     });
   }
 
-  /** Get total spend for a project */
-  getTotalCost(projectId) {
-    return this._stmts.totalCost.get(projectId)?.total || 0;
-  }
-
-  /** Get cost breakdown by agent for a project */
-  getCostByAgent(projectId) {
-    return this._stmts.costByAgent.all(projectId);
+  /** @returns {import('../core/cost-tracker.js').CostRecord[]} the whole ledger, oldest first */
+  costRecords() {
+    return this._stmts.costRecords.all().map((r) => ({
+      projectId: r.project_id,
+      agentId: r.agent_id,
+      model: r.model,
+      tokensIn: r.tokens_in,
+      tokensOut: r.tokens_out,
+      cost: r.cost,
+      taskId: r.task_id,
+      repo: r.repo,
+      phase: r.phase,
+      at: r.recorded_at,
+    }));
   }
 
   // ─── Event log ───────────────────────────────────────
